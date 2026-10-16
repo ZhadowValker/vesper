@@ -4,6 +4,7 @@ import {
 } from '../framework.js';
 import { esc, $, formatDate, ICON } from '../util.js';
 import { go, rerender } from '../nav.js';
+import { stageBar } from './parts.js';
 
 export function slideView(deckId, nStr) {
   const deck = store.deck(deckId);
@@ -21,7 +22,7 @@ export function slideView(deckId, nStr) {
       <a class="back" href="#/d/${deck.id}" aria-label="Back to task">${ICON.back}</a>
       <div class="meta">${esc(deck.title)}${project ? ', ' + esc(project.name) : ''}</div>
     </div>
-    <div class="progress" role="img" aria-label="Slide ${n + 1} of ${SLIDES.length}">${progressSegs(n)}</div>
+    ${stageBar(n)}
     ${body(deck, slide, project)}
     <div class="nav no-print">
       <button class="btn" data-nav="prev" aria-label="Previous slide" ${n === 0 ? 'disabled' : ''}>${ICON.back}</button>
@@ -187,16 +188,6 @@ export function slideView(deckId, nStr) {
   }
 
   return { html, mount };
-}
-
-// Five segments, one per stage, filled as you move through that stage's slides.
-function progressSegs(n) {
-  return STAGES.map((st) => {
-    const from = firstSlideOf(st.id);
-    const to = selahIndex(st.id);
-    const w = Math.max(0, Math.min(1, (n - from + 1) / (to - from + 1)));
-    return `<span class="s-${st.id}"><i style="width:${Math.round(w * 100)}%"></i></span>`;
-  }).join('');
 }
 
 function body(deck, slide, project) {

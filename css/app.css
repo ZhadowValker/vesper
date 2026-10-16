@@ -183,7 +183,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 .lead-gap{margin-bottom:14px}
 .hero-t{font-family:var(--display);font-weight:700;font-size:28px;line-height:1.15;letter-spacing:-.015em;margin-top:2px}
 .hero-s{margin:6px 0 12px}
-.hero-bar{margin-bottom:14px}
+.soft .progress,.now-text .progress{margin:10px 0 14px}
 .item-bar{margin-top:10px}
 .map-note{margin-top:8px}
 .step-q{margin-top:8px}

@@ -3,7 +3,7 @@ import { SLIDES, deckStatus, atSelah } from '../framework.js';
 import { esc, confirmBox, ICON } from '../util.js';
 import { deckMap, mapLegend, drawTree } from '../mindmaps.js';
 import { go } from '../nav.js';
-import { resumeButton } from './parts.js';
+import { resumeButton, stageBar } from './parts.js';
 
 export function deckView(id) {
   const deck = store.deck(id);
@@ -25,7 +25,7 @@ export function deckView(id) {
       <div class="grow"><h1>${esc(deck.title)}</h1><p class="sub">${esc(project ? project.name : '')}${deck.passes > 1 ? `, pass ${deck.passes}` : ''}</p></div>
     </div>
     <div class="card now-card">
-      <div class="now-text"><p class="sub">Now</p><p class="now-t">${esc(now)}</p><p class="sub">Slide ${deck.slide + 1} of ${SLIDES.length}</p></div>
+      <div class="now-text"><p class="sub">Now</p><p class="now-t">${esc(now)}</p><p class="sub">Slide ${deck.slide + 1} of ${SLIDES.length}</p>${stageBar(deck.slide)}</div>
       ${resumeButton(deck, project, 'block')}
     </div>
     <h2 class="section">Mind map</h2>

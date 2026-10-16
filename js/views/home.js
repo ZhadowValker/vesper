@@ -2,7 +2,7 @@ import { store } from '../store.js';
 import { STAGES, SLIDES, deckStatus, atSelah } from '../framework.js';
 import { esc, ask, confirmBox, notice, ICON, $ } from '../util.js';
 import { go, rerender } from '../nav.js';
-import { resumeButton } from './parts.js';
+import { resumeButton, stageBar } from './parts.js';
 import { buildSample } from '../sample.js';
 import { showGuide, guideSeen } from '../guide.js';
 
@@ -22,8 +22,8 @@ export function home() {
     return `<div class="soft s-${st.stageId || ''}">
       <p class="sub">${esc(project ? project.name : '')}</p>
       <p class="hero-t">${esc(last.title)}</p>
-      <p class="sub hero-s">${esc(st.label)}, slide ${last.slide + 1} of ${SLIDES.length}</p>
-      <div class="bar hero-bar"><i style="width:${st.pct}%"></i></div>
+      <p class="sub hero-s">${esc(st.label)}, slide ${last.slide + 1} of ${SLIDES.length}, ${st.pct}% done</p>
+      ${stageBar(last.slide)}
       ${resumeButton(last, project, 'block', 'tree')}
     </div>`;
   })() : '';
