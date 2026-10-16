@@ -42,6 +42,11 @@ export function slideView(deckId, nStr) {
     root.addEventListener('touchend', onTouchEnd, { passive: true });
     document.addEventListener('keydown', onKey);
     if (slide.type === 'sub' && slide.sub.timer) startTicker();
+    // Note boxes grow with their text so long notes are never clipped.
+    const fit = (t) => { t.style.height = 'auto'; t.style.height = `${t.scrollHeight + 2}px`; };
+    const fitAll = () => root.querySelectorAll('textarea').forEach(fit);
+    fitAll();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitAll);
 
     return () => {
       root.removeEventListener('click', onClick);
@@ -91,6 +96,7 @@ export function slideView(deckId, nStr) {
     function onInput(e) {
       const area = e.target.closest('[data-note]');
       if (!area) return;
+      fit(area);
       deck.notes[area.dataset.note] = area.value;
       store.save(deck);
     }

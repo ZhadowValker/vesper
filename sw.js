@@ -1,4 +1,4 @@
-const VERSION = 'vesper-v12';
+const VERSION = 'vesper-v14';
 const ASSETS = [
   './',
   'index.html',
@@ -9,6 +9,7 @@ const ASSETS = [
   'js/app.js',
   'js/framework.js',
   'js/store.js',
+  'js/sample.js',
   'js/util.js',
   'js/nav.js',
   'js/mindmaps.js',

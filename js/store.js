@@ -58,6 +58,15 @@ export const store = {
     write();
     return d;
   },
+  findSample: (key) => state.projects.find((p) => p.sample === key),
+  // Adds a ready-made project and its tasks (see sample.js). Returns the new project.
+  insertSample(built) {
+    const p = { id: uid(), name: built.project.name, created: built.project.created, sample: built.sample };
+    state.projects.push(p);
+    built.decks.forEach((d) => state.decks.push({ ...d, id: uid(), projectId: p.id }));
+    write();
+    return p;
+  },
   removeDeck(id) {
     state.decks = state.decks.filter((d) => d.id !== id);
     write();

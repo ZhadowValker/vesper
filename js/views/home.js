@@ -3,6 +3,7 @@ import { STAGES, SLIDES, deckStatus, atSelah } from '../framework.js';
 import { esc, ask, confirmBox, notice, ICON, $ } from '../util.js';
 import { go, rerender } from '../nav.js';
 import { resumeButton } from './parts.js';
+import { buildSample } from '../sample.js';
 
 export function home() {
   const decks = store.allDecks();
@@ -43,7 +44,7 @@ export function home() {
   const empty = `<div class="card empty">
     <h2>Start your first project</h2>
     <p class="muted lead-gap">A project holds tasks. Each task walks from vision to review, one slide at a time.</p>
-    <button class="btn primary" data-act="new-project">New project</button>
+    <div class="row wrap center-row"><button class="btn primary" data-act="new-project">New project</button><button class="btn" data-act="sample">Try the book sample</button></div>
   </div>`;
 
   const html = `<div class="page stack home">
@@ -73,9 +74,10 @@ export function home() {
         <div class="footer-tools">
           <button class="btn small" data-act="export">Export backup</button>
           <button class="btn small" data-act="import">Import backup</button>
+          <button class="btn small" data-act="sample">Sample</button>
           <input type="file" accept="application/json,.json" id="import-file" hidden>
         </div>
-        <p class="sub">Everything is stored on this device only. Export a backup to move it elsewhere.</p>
+        <p class="sub">Everything is stored on this device only. Export a backup to move it elsewhere. Sample adds a book-writing project you can open, edit or delete.</p>
       </div>
     </div>
   </div>`;
@@ -101,6 +103,9 @@ export function home() {
         a.download = `vesper-backup-${new Date().toISOString().slice(0, 10)}.json`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      } else if (act === 'sample') {
+        const have = store.findSample('book');
+        go(`#/p/${(have || store.insertSample(buildSample())).id}`);
       } else if (act === 'import') {
         $('#import-file', root).click();
       }

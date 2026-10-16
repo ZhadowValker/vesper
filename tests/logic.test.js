@@ -101,6 +101,58 @@ test('first slide of each stage is its first sub-stage', () => {
   for (const st of STAGES) assert.equal(SLIDES[firstSlideOf(st.id)].sub.id, st.subs[0].id);
 });
 
+
+const { buildSample, BOOK_SAMPLE } = await import('../js/sample.js');
+const built = buildSample();
+const [tDefine, tPart1, tEdit, tLaunch] = built.decks;
+
+test('book sample: every note key points at a real slide and step', () => {
+  for (const d of built.decks) {
+    for (const key of Object.keys(d.notes)) {
+      const [base, n] = key.split('#');
+      const slide = SLIDES[fw.slideIndex(base)];
+      assert.ok(slide && slide.type === 'sub', `${d.title}: no slide for ${key}`);
+      if (n !== undefined) assert.ok(Number(n) < slide.sub.steps.length, `${d.title}: ${key} is past the last step`);
+      assert.ok(d.notes[key].trim().length > 0);
+    }
+  }
+});
+
+test('book sample: the finished task has every tick, every step note and every slide note', () => {
+  let steps = 0;
+  for (const st of STAGES) for (const sub of st.subs) {
+    assert.ok((tDefine.notes[`${st.id}.${sub.id}`] || '').length > 0, `slide note missing for ${st.id}.${sub.id}`);
+    sub.steps.forEach((_, i) => {
+      steps++;
+      assert.equal(tDefine.ticks[tickKey(st, sub, i)], true);
+      assert.ok((tDefine.notes[`${st.id}.${sub.id}#${i}`] || '').length > 0, `step note missing for ${st.id}.${sub.id}#${i}`);
+    });
+    assert.equal(tDefine.selah[st.id], true);
+  }
+  assert.equal(steps, 34);
+  assert.equal(deckStatus(tDefine).label, 'Finished');
+  assert.equal(tDefine.loops, 1);
+});
+
+test('book sample: the other tasks sit in different states', () => {
+  assert.equal(deckStatus(tPart1).label, 'Execute');
+  assert.deepEqual(STAGES.map((s) => stageState(tPart1, s)), ['done', 'done', 'done', 'now', 'todo']);
+  assert.equal(atSelah(tEdit), true);
+  assert.equal(fw.stagePending(tEdit, STAGES[2]), 1);
+  assert.equal(deckStatus(tLaunch).label, 'Vision');
+  assert.equal(deckStatus(tLaunch).state, 'now');
+});
+
+test('book sample: inserting adds the project once and its tasks open in the maps', () => {
+  const p = store.insertSample(built);
+  assert.equal(store.findSample('book').id, p.id);
+  assert.equal(store.decksOf(p.id).length, 4);
+  const decks = store.decksOf(p.id);
+  assert.equal((projectMap(p, decks).match(/href="#\/d\//g) || []).length, 4);
+  assert.equal((deckMap(decks[1]).match(/href="#\/d\/\w+\/s\/\d+"/g) || []).length, 30);
+  assert.equal(BOOK_SAMPLE.tasks.length, 4);
+});
+
 test('export then import round-trips', () => {
   const json = store.exportJSON();
   const before = store.allDecks().length;
