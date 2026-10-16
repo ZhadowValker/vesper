@@ -39,7 +39,7 @@ const PAGES = [
   {
     title: 'Ready to begin',
     text: 'Everything is saved on this device only, so use Export backup now and then. Want to see it filled in first? The book-writing sample has four tasks at different points, with every step written out.',
-    art: `<div class="g-art g-ready" aria-hidden="true">${ICON.star}</div>`,
+    art: `<div class="g-art g-ready" aria-hidden="true"><img src="img/selah.webp" alt="" width="120" height="120"></div>`,
   },
 ];
 

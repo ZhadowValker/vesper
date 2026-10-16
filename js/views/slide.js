@@ -208,7 +208,7 @@ function body(deck, slide, project) {
 
 function cover(deck, project) {
   return `<div class="slide center">
-    <div class="orb" aria-hidden="true"><i></i><svg width="30" height="30" viewBox="0 0 24 24" fill="#2a1a4a"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg></div>
+    <div class="orb" aria-hidden="true"><img src="img/selah.webp" alt="" width="168" height="168"></div>
     <h1 class="cover-t">${esc(deck.title)}</h1>
     <p class="lead">${esc(project ? project.name : '')}</p>
     <p class="lead">Five stages, each ending in a Selah pause. ${SLIDES.length} slides.</p>
@@ -256,7 +256,7 @@ function selah(deck, slide) {
   const pending = stagePending(deck, stage);
   const passed = !!deck.selah[stage.id];
   return `<div class="slide center s-${stage.id}">
-    <div class="orb" aria-hidden="true"><i></i><svg width="30" height="30" viewBox="0 0 24 24" fill="#2a1a4a"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg></div>
+    <div class="orb" aria-hidden="true"><img src="img/selah.webp" alt="" width="168" height="168"></div>
     <p class="selah-word">Selah</p>
     <span class="chip s-${stage.id}">${stage.name}, pause and check</span>
     <p class="q">${esc(stage.selah)}</p>

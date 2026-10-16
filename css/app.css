@@ -154,12 +154,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 .recap pre{white-space:pre-wrap;font-family:inherit;font-size:14.5px;margin:0;color:var(--ink);background:rgba(14,11,36,.42);border:1px solid var(--edge);border-radius:12px;padding:10px 12px;text-align:left}
 
 /* Selah: a calm glowing ring */
-.orb{position:relative;width:168px;height:168px;flex:none;display:flex;align-items:center;justify-content:center;margin-bottom:4px}
-.orb::before,.orb::after{content:"";position:absolute;border-radius:50%;border:1px solid rgba(255,214,170,.3)}
-.orb::before{inset:0}
-.orb::after{inset:20px;border-color:rgba(255,214,170,.48)}
-.orb i{position:absolute;inset:44px;border-radius:50%;background:radial-gradient(circle at 35% 30%,rgba(255,236,210,.95),rgba(255,176,103,.6) 55%,rgba(201,139,255,.45));box-shadow:0 0 56px rgba(255,176,103,.6),inset 0 1px 0 rgba(255,255,255,.7)}
-.orb svg{position:relative}
+.orb{position:relative;width:176px;height:176px;flex:none;margin-bottom:4px;border-radius:50%;animation:breathe 6s ease-in-out infinite;box-shadow:0 0 0 1px rgba(255,214,170,.25),0 12px 50px rgba(255,176,103,.35)}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
+.orb img{display:block;width:100%;height:100%;border-radius:50%}
 .selah-word{font-family:var(--display);font-size:20px;font-weight:500;color:var(--warn)}
 
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
@@ -274,7 +271,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 .g-note{margin-left:30px;padding:8px 12px;border-radius:12px;font-size:13.5px;background:rgba(255,255,255,.07);border:1px solid var(--edge)}
 .g-note.faint{color:var(--faint)}
 .g-ready{color:#2a1a4a}
-.g-ready svg{width:64px;height:64px;padding:22px;box-sizing:content-box;border-radius:50%;background:radial-gradient(circle at 35% 30%,rgba(255,236,210,.95),rgba(255,176,103,.65) 55%,rgba(201,139,255,.45));box-shadow:0 0 50px rgba(255,176,103,.55)}
+.g-ready img{display:block;width:120px;height:120px;border-radius:50%;box-shadow:0 0 0 1px rgba(255,214,170,.25),0 10px 40px rgba(255,176,103,.35)}
 .g-dots{display:flex;justify-content:center;gap:6px}
 .g-dots i{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.25)}
 .g-dots i.on{background:var(--ink);width:20px;border-radius:4px}
