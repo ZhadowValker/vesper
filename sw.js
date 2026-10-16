@@ -1,4 +1,4 @@
-const VERSION = 'vesper-v18';
+const VERSION = 'vesper-v19';
 const ASSETS = [
   './',
   'index.html',
@@ -42,16 +42,14 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
+  // Network first so a new version shows up straight away; the cache keeps it working offline.
   event.respondWith(
-    caches.match(req).then((hit) => {
-      if (hit) return hit;
-      return fetch(req).then((res) => {
-        if (res.ok) {
-          const copy = res.clone();
-          caches.open(VERSION).then((cache) => cache.put(req, copy));
-        }
-        return res;
-      }).catch(() => caches.match('index.html'));
-    })
+    fetch(req, { cache: 'no-cache' }).then((res) => {
+      if (res.ok) {
+        const copy = res.clone();
+        caches.open(VERSION).then((cache) => cache.put(req, copy));
+      }
+      return res;
+    }).catch(() => caches.match(req).then((hit) => hit || caches.match('index.html')))
   );
 });
