@@ -33,27 +33,59 @@ export function projectMap(project, decks) {
   return out + '</svg>';
 }
 
-// Deck dashboard: a spine through the five stages; each stage lists its slides by name.
+// Deck dashboard: a tree. The deck on the left, branches to the five stages,
+// and each stage lists its slides by name. Curves are drawn by drawDeckTree() after render.
 export function deckMap(deck) {
   const star = '<svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg>';
-  const stages = STAGES.map((stage) => {
+  const rows = STAGES.map((stage) => {
     const state = stageState(deck, stage);
     const chips = [
       ...stage.subs.map((sub) => ({ idx: slideIndex(`${stage.id}.${sub.id}`), label: esc(sub.name), title: sub.name })),
       { idx: selahIndex(stage.id), label: `${star}Selah`, title: 'Selah' },
     ].map((chip) => {
       const cs = chipState(deck, SLIDES[chip.idx], chip.idx);
-      return `<a class="dm-chip ${cs}" href="#/d/${deck.id}/s/${chip.idx}" title="${esc(stage.name)}: ${esc(chip.title)}">${chip.label}</a>`;
+      return `<a class="dt-chip ${cs}" href="#/d/${deck.id}/s/${chip.idx}" title="${esc(stage.name)}: ${esc(chip.title)}">${chip.label}</a>`;
     }).join('');
     const first = slideIndex(`${stage.id}.${stage.subs[0].id}`);
-    const stateText = { done: 'Done', now: 'In progress', todo: 'Not started' }[state];
-    return `<section class="dm-stage s-${stage.id} ${state}" aria-label="${esc(stage.name)}">
-      <span class="dm-dot" aria-hidden="true"></span>
-      <a class="dm-head" href="#/d/${deck.id}/s/${first}"><span class="dm-name">${esc(stage.name)}</span><span class="dm-state">${stateText}</span></a>
-      <div class="dm-chips">${chips}</div>
-    </section>`;
+    return `<div class="dt-row s-${stage.id} ${state}">
+      <a class="dt-node" data-stage="${stage.id}" href="#/d/${deck.id}/s/${first}"><span>${esc(stage.name)}</span></a>
+      <span class="dt-stub" aria-hidden="true"></span>
+      <div class="dt-chips">${chips}</div>
+    </div>`;
   }).join('');
-  return `<div class="dm" role="group" aria-label="Mind map of ${esc(deck.title)}"><div class="dm-spine" aria-hidden="true"></div>${stages}</div>`;
+  return `<div class="dt" role="group" aria-label="Mind map of ${esc(deck.title)}">
+    <svg class="dt-links" aria-hidden="true"></svg>
+    <div class="dt-root" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg></div>
+    <div class="dt-rows">${rows}</div>
+  </div>`;
+}
+
+// Draw the curved branches from the deck node to each stage node.
+export function drawDeckTree(scope) {
+  const tree = scope.querySelector('.dt');
+  if (!tree) return () => {};
+  const svg = tree.querySelector('.dt-links');
+  const draw = () => {
+    const box = tree.getBoundingClientRect();
+    const r = tree.querySelector('.dt-root').getBoundingClientRect();
+    const x0 = r.right - box.left;
+    const y0 = r.top + r.height / 2 - box.top;
+    svg.setAttribute('width', box.width);
+    svg.setAttribute('height', box.height);
+    svg.innerHTML = [...tree.querySelectorAll('.dt-row')].map((row) => {
+      const n = row.querySelector('.dt-node').getBoundingClientRect();
+      const x1 = n.left - box.left;
+      const y1 = n.top + n.height / 2 - box.top;
+      const mid = (x0 + x1) / 2;
+      return `<path class="${row.classList[1]}" d="M${x0} ${y0} C${mid} ${y0} ${mid} ${y1} ${x1} ${y1}"/>`;
+    }).join('');
+  };
+  draw();
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(draw) : null;
+  if (ro) ro.observe(tree);
+  window.addEventListener('resize', draw);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+  return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', draw); };
 }
 
 export const mapLegend = (doneLabel = 'Done', nowLabel = 'Current', todoLabel = 'Not yet') =>

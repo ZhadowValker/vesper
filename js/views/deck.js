@@ -1,7 +1,7 @@
 import { store } from '../store.js';
 import { SLIDES, deckStatus, atSelah } from '../framework.js';
 import { esc } from '../util.js';
-import { deckMap, mapLegend } from '../mindmaps.js';
+import { deckMap, mapLegend, drawDeckTree } from '../mindmaps.js';
 import { go } from '../nav.js';
 
 export function deckView(id) {
@@ -31,7 +31,8 @@ export function deckView(id) {
 
   function mount(root) {
     root.addEventListener('click', onClick);
-    return () => root.removeEventListener('click', onClick);
+    const stopTree = drawDeckTree(root);
+    return () => { root.removeEventListener('click', onClick); stopTree(); };
     function onClick(e) {
       const btn = e.target.closest('[data-act="delete-deck"]');
       if (!btn) return;

@@ -86,7 +86,7 @@ test('mind maps render svg with links for every deck and slide chip', () => {
   assert.ok(pm.startsWith('<svg'));
   assert.equal((pm.match(/href="#\/d\//g) || []).length, decks.length);
   const dm = deckMap(decks[0]);
-  assert.ok(dm.startsWith('<div class="dm"'));
+  assert.ok(dm.startsWith('<div class="dt"'));
   assert.ok(dm.includes('>Why<') && dm.includes('>Findings<') && dm.includes('Selah'));
   assert.equal((dm.match(/href="#\/d\/\w+\/s\/\d+"/g) || []).length, 5 + 25);
   assert.ok(projectMap(p, []).includes('No decks yet'));
