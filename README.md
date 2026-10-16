@@ -13,7 +13,7 @@ Each task is a deck of 27 slides. Decks live in projects. There are three dashbo
 | Routing | Hash routes (`#/p/…`, `#/d/…/s/12`) | GitHub Pages has no server fallback, so path URLs would 404 on reload |
 | Storage | `localStorage`, one JSON document, behind `js/store.js` | Works offline with no backend. Swap to IndexedDB later by changing one file |
 | Offline and install | `sw.js` plus `manifest.webmanifest` | Makes it an installable PWA |
-| Theming | CSS variables, light and dark follow the device | One stylesheet |
+| Look | Dusk glass: dark translucent panels, one colour per stage, fonts bundled in `fonts/` so it works offline | One stylesheet. Dark only for now |
 
 ## Files
 
@@ -23,6 +23,7 @@ manifest.webmanifest    install details
 sw.js                   offline cache (bump VERSION when you change files)
 css/app.css             all styles
 icons/                  app icons
+fonts/                  Bricolage Grotesque and Figtree (variable, latin)
 js/framework.js         THE FRAMEWORK AS DATA: stages, sub-stages, steps, Selah questions
 js/store.js             data storage, export and import
 js/nav.js, js/app.js    router

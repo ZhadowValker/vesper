@@ -26,7 +26,7 @@ export function projectMap(project, decks) {
     const sub = d.finished ? 'Finished' : st.label === 'Not started' ? 'Not started'
       : atSelah(d) ? `${st.label}, paused at Selah` : `${st.label}, ${st.pct}%`;
     out += `<path class="link" d="M84 ${cy} C98 ${cy} 98 ${c} 112 ${c}"/>`;
-    out += `<a href="#/d/${d.id}"><rect class="${cls(st.state)}" x="112" y="${y}" width="228" height="40" rx="8"/>`;
+    out += `<a href="#/d/${d.id}" class="${st.stageId ? 's-' + st.stageId : ''}"><rect class="${cls(st.state)}" x="112" y="${y}" width="228" height="40" rx="8"/>`;
     out += `<text class="tt ${tcls(st.state)}" x="124" y="${y + 15}" dominant-baseline="central">${esc(trunc(d.title, 26))}</text>`;
     out += `<text class="ts ${tcls(st.state)}" x="124" y="${y + 31}" dominant-baseline="central">${esc(sub)}</text></a>`;
   });
@@ -50,7 +50,7 @@ export function deckMap(deck) {
     const c = y + 17;
     const state = stageState(deck, stage);
     out += `<path class="link" d="M64 ${cy} C76 ${cy} 76 ${c} 88 ${c}"/>`;
-    out += `<a href="#/d/${deck.id}/s/${slideIndex(stage.subs[0] ? `${stage.id}.${stage.subs[0].id}` : '')}">`;
+    out += `<a class="s-${stage.id}" href="#/d/${deck.id}/s/${slideIndex(stage.subs[0] ? `${stage.id}.${stage.subs[0].id}` : '')}">`;
     out += `<rect class="${cls(state)}" x="88" y="${y}" width="82" height="34" rx="8"/>`;
     out += `<text class="tt ${tcls(state)}" style="font-size:12px" x="129" y="${c}" text-anchor="middle" dominant-baseline="central">${esc(stage.name)}</text></a>`;
     out += `<path class="link" d="M170 ${c} L182 ${c}"/>`;
@@ -61,7 +61,7 @@ export function deckMap(deck) {
     chips.forEach((chip, j) => {
       const x = 184 + j * 30;
       const cs = chipState(deck, SLIDES[chip.idx], chip.idx);
-      out += `<a href="#/d/${deck.id}/s/${chip.idx}"><title>${esc(stage.name)}: ${esc(chip.title)}</title>`;
+      out += `<a class="s-${stage.id}" href="#/d/${deck.id}/s/${chip.idx}"><title>${esc(stage.name)}: ${esc(chip.title)}</title>`;
       out += `<rect class="${cls(cs)}" x="${x}" y="${c - 12}" width="26" height="24" rx="6"/>`;
       out += `<text class="ts ${tcls(cs)}" x="${x + 13}" y="${c}" text-anchor="middle" dominant-baseline="central">${chip.label}</text></a>`;
     });

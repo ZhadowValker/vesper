@@ -1,6 +1,6 @@
 import { store } from '../store.js';
 import {
-  CONFIG, STAGES, SLIDES, firstSlideOf, tickKey, stagePending, subDone, slideIndex,
+  CONFIG, STAGES, SLIDES, firstSlideOf, selahIndex, tickKey, stagePending, subDone, slideIndex,
 } from '../framework.js';
 import { esc, $, formatDate } from '../util.js';
 import { go, rerender } from '../nav.js';
@@ -21,7 +21,7 @@ export function slideView(deckId, nStr) {
       <a class="back" href="#/d/${deck.id}" aria-label="Deck dashboard">←</a>
       <div class="meta">${esc(deck.title)}${project ? ' · ' + esc(project.name) : ''}</div>
     </div>
-    <div class="progress"><i style="width:${(n / last) * 100}%"></i></div>
+    <div class="progress" role="img" aria-label="Slide ${n + 1} of ${SLIDES.length}">${progressSegs(n)}</div>
     ${body(deck, slide, project)}
     <div class="nav no-print">
       <button class="btn" data-nav="prev" aria-label="Previous slide" ${n === 0 ? 'disabled' : ''}>←</button>
@@ -183,6 +183,16 @@ export function slideView(deckId, nStr) {
   return { html, mount };
 }
 
+// Five segments, one per stage, filled as you move through that stage's slides.
+function progressSegs(n) {
+  return STAGES.map((st) => {
+    const from = firstSlideOf(st.id);
+    const to = selahIndex(st.id);
+    const w = Math.max(0, Math.min(1, (n - from + 1) / (to - from + 1)));
+    return `<span class="s-${st.id}"><i style="width:${Math.round(w * 100)}%"></i></span>`;
+  }).join('');
+}
+
 function body(deck, slide, project) {
   if (slide.type === 'cover') return cover(deck, project);
   if (slide.type === 'sub') return sub(deck, slide);
@@ -192,8 +202,8 @@ function body(deck, slide, project) {
 
 function cover(deck, project) {
   return `<div class="slide center">
-    <span class="chip think">Deck</span>
-    <h1 style="font-size:30px">${esc(deck.title)}</h1>
+    <div class="orb" aria-hidden="true"><i></i><svg width="30" height="30" viewBox="0 0 24 24" fill="#2a1a4a"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg></div>
+    <h1 style="font-size:34px">${esc(deck.title)}</h1>
     <p class="lead">${esc(project ? project.name : '')}</p>
     <p class="lead">Five stages, each ending in a Selah pause. ${SLIDES.length} slides.</p>
     <div class="btns"><button class="btn primary" data-nav="next">Begin</button></div>
@@ -224,8 +234,8 @@ function sub(deck, slide) {
     </div>`;
   }
 
-  return `<div class="slide">
-    <div><span class="chip ${stage.tone}">${stage.name} ${slide.n} of ${stage.subs.length}</span></div>
+  return `<div class="slide s-${stage.id}">
+    <div><span class="chip s-${stage.id}">${stage.name} ${slide.n} of ${stage.subs.length}</span></div>
     <div><h1>${esc(s.name)}</h1><p class="lead">${esc(s.what)}</p></div>
     <ul class="steps">${steps}</ul>
     ${extra}
@@ -237,9 +247,10 @@ function selah(deck, slide) {
   const { stage } = slide;
   const pending = stagePending(deck, stage);
   const passed = !!deck.selah[stage.id];
-  return `<div class="slide center">
-    <span class="chip ${stage.tone}">${stage.name}</span>
-    <p class="lead">Selah. Pause and check.</p>
+  return `<div class="slide center s-${stage.id}">
+    <div class="orb" aria-hidden="true"><i></i><svg width="30" height="30" viewBox="0 0 24 24" fill="#2a1a4a"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg></div>
+    <p class="selah-word">Selah</p>
+    <span class="chip s-${stage.id}">${stage.name}, pause and check</span>
     <p class="q">${esc(stage.selah)}</p>
     ${pending > 0 ? `<p class="hint">${pending} step${pending === 1 ? '' : 's'} not ticked yet.</p>` : ''}
     <p class="hint" id="selah-msg" hidden></p>
@@ -257,7 +268,7 @@ function recap(deck, project) {
       const v = (deck.notes[`${st.id}.${s.id}`] || '').trim();
       return v ? `<h3>${esc(s.name)}</h3><pre>${esc(v)}</pre>` : '';
     }).join('');
-    return parts ? `<div><span class="chip ${st.tone}">${st.name}</span>${parts}</div>` : '';
+    return parts ? `<div><span class="chip s-${st.id}">${st.name}</span>${parts}</div>` : '';
   }).join('');
 
   return `<div class="slide recap">

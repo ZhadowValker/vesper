@@ -16,17 +16,17 @@ export function home() {
   const cont = last ? (() => {
     const st = deckStatus(last);
     const project = store.project(last.projectId);
-    return `<div class="soft">
-      <p class="sub">Continue</p>
-      <p style="font-weight:500">${esc(last.title)}</p>
-      <p class="sub" style="margin-bottom:8px">${esc(project ? project.name : '')} · ${esc(st.label)}, slide ${last.slide + 1} of ${SLIDES.length}</p>
-      <div class="bar" style="margin-bottom:10px"><i style="width:${st.pct}%"></i></div>
+    return `<div class="soft s-${st.stageId || ''}">
+      <p class="sub">${esc(project ? project.name : '')}</p>
+      <p style="font-family:var(--display);font-weight:700;font-size:28px;line-height:1.15;letter-spacing:-.015em">${esc(last.title)}</p>
+      <p class="sub" style="margin:6px 0 12px">${esc(st.label)}, slide ${last.slide + 1} of ${SLIDES.length}</p>
+      <div class="bar" style="margin-bottom:14px"><i style="width:${st.pct}%"></i></div>
       <a class="btn block" href="#/d/${last.id}/s/${last.slide}">Resume</a>
     </div>`;
   })() : '';
 
   const banner = selahCount
-    ? `<div class="banner"><span aria-hidden="true">⏸</span><div><strong style="font-weight:500">${selahCount} deck${selahCount === 1 ? '' : 's'} paused at Selah</strong><br><span style="font-size:13px">Answer to move ${selahCount === 1 ? 'it' : 'them'} on</span></div></div>`
+    ? `<div class="banner"><span aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="#ffd6aa"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg></span><div><strong style="font-weight:500">${selahCount} deck${selahCount === 1 ? '' : 's'} paused at Selah</strong><br><span style="font-size:13px">Answer to move ${selahCount === 1 ? 'it' : 'them'} on</span></div></div>`
     : '';
 
   const projectCards = projects.map((p) => {
@@ -60,7 +60,7 @@ export function home() {
       <div class="metric"><div class="l">Loops so far</div><div class="n">${loops}</div></div>
     </div>
     <p class="section">Where decks are now</p>
-    <div class="stack" style="gap:6px">${spread.map(({ s, n }) => `<div class="spread"><span class="lab">${s.name}</span><div class="bar ${s.tone === 'do' ? 'do' : ''}"><i style="width:${Math.round((n / max) * 100)}%"></i></div><span class="num">${n}</span></div>`).join('')}</div>
+    <div class="stack" style="gap:6px">${spread.map(({ s, n }) => `<div class="spread"><span class="lab">${s.name}</span><div class="bar s-${s.id}"><i style="width:${Math.round((n / max) * 100)}%"></i></div><span class="num">${n}</span></div>`).join('')}</div>
     <p class="section">Your projects</p>
     <div class="list">${projectCards}</div>` : ''}
     <p class="section">Backup</p>

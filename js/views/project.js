@@ -14,8 +14,8 @@ export function projectView(id) {
   const list = decks.map((d) => {
     const st = deckStatus(d);
     return `<a class="item" href="#/d/${d.id}">
-      <div class="row between"><span class="t">${esc(d.title)}</span><span class="chip ${st.tone}">${esc(st.label)}</span></div>
-      <div class="bar ${st.tone === 'do' ? 'do' : ''}" style="margin-top:8px"><i style="width:${st.pct}%"></i></div>
+      <div class="row between"><span class="t">${esc(d.title)}</span><span class="chip ${st.stageId ? 's-' + st.stageId : st.tone}">${esc(st.label)}</span></div>
+      <div class="bar ${st.stageId ? 's-' + st.stageId : 'do'}" style="margin-top:8px"><i style="width:${st.pct}%"></i></div>
     </a>`;
   }).join('');
 

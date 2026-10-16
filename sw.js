@@ -1,9 +1,11 @@
-const VERSION = 'vesper-v1';
+const VERSION = 'vesper-v2';
 const ASSETS = [
   './',
   'index.html',
   'manifest.webmanifest',
   'css/app.css',
+  'fonts/bricolage.woff2',
+  'fonts/figtree.woff2',
   'js/app.js',
   'js/framework.js',
   'js/store.js',
