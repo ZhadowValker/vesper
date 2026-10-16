@@ -214,7 +214,9 @@ function sub(deck, slide) {
   const { stage, sub: s } = slide;
   const steps = s.steps.map((text, i) => {
     const k = tickKey(stage, s, i);
-    return `<li><label><input type="checkbox" data-tick="${k}" ${deck.ticks[k] ? 'checked' : ''}><span>${esc(text)}</span></label></li>`;
+    const nk = `${slide.key}#${i}`;
+    return `<li><label><input type="checkbox" data-tick="${k}" ${deck.ticks[k] ? 'checked' : ''}><span>${esc(text)}</span></label>
+      <textarea class="step-note" rows="2" data-note="${nk}" aria-label="Note for: ${esc(text)}" placeholder="Add a note">${esc(deck.notes[nk] || '')}</textarea></li>`;
   }).join('');
 
   let extra = '';
@@ -239,7 +241,7 @@ function sub(deck, slide) {
     <div><h1>${esc(s.name)}</h1><p class="lead">${esc(s.what)}</p></div>
     <ul class="steps">${steps}</ul>
     ${extra}
-    <label class="notes">Notes<textarea data-note="${slide.key}" placeholder="Write here">${esc(deck.notes[slide.key] || '')}</textarea></label>
+    <label class="notes">Notes for this slide<textarea data-note="${slide.key}" placeholder="Write here">${esc(deck.notes[slide.key] || '')}</textarea></label>
   </div>`;
 }
 
@@ -265,8 +267,13 @@ function selah(deck, slide) {
 function recap(deck, project) {
   const sections = STAGES.map((st) => {
     const parts = st.subs.map((s) => {
-      const v = (deck.notes[`${st.id}.${s.id}`] || '').trim();
-      return v ? `<h3>${esc(s.name)}</h3><pre>${esc(v)}</pre>` : '';
+      const key = `${st.id}.${s.id}`;
+      const v = (deck.notes[key] || '').trim();
+      const stepNotes = s.steps.map((text, i) => {
+        const sv = (deck.notes[`${key}#${i}`] || '').trim();
+        return sv ? `<p class="sub" style="margin-top:6px">${esc(text)}</p><pre>${esc(sv)}</pre>` : '';
+      }).join('');
+      return v || stepNotes ? `<h3>${esc(s.name)}</h3>${stepNotes}${v ? `<pre>${esc(v)}</pre>` : ''}` : '';
     }).join('');
     return parts ? `<div><span class="chip s-${st.id}">${st.name}</span>${parts}</div>` : '';
   }).join('');

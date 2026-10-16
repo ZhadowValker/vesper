@@ -129,6 +129,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 .steps li label{display:flex;align-items:center;gap:14px;min-height:48px;padding:4px 0;cursor:pointer;font-size:17px}
 .steps input[type=checkbox]{width:24px;height:24px;margin:0;accent-color:var(--st,var(--acc));flex:none}
 .notes{display:flex;flex-direction:column;gap:8px;font-size:13.5px;color:var(--muted)}
+.steps li{display:flex;flex-direction:column;gap:2px;padding-bottom:6px}
+.step-note{width:100%;min-height:64px;resize:vertical;margin:0 0 4px;padding:10px 12px;border-radius:14px;border:1px solid var(--edge);background:rgba(14,11,36,.34);color:var(--ink);font-size:14.5px;line-height:1.45;-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
+.step-note::placeholder{color:var(--faint)}
+.step-note:focus{border-color:var(--st,var(--acc))}
 .notes textarea{width:100%;min-height:104px;resize:vertical;padding:12px 14px;border-radius:16px;border:1px solid var(--edge-strong);background:rgba(14,11,36,.42);color:var(--ink);font-size:15.5px;line-height:1.45}
 .notes textarea::placeholder{color:var(--faint)}
 .hint{font-size:14px;color:var(--warn);background:rgba(255,176,103,.16);border:1px solid rgba(255,176,103,.4);border-radius:14px;padding:8px 14px}
