@@ -245,3 +245,38 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 .crumb-sep{flex:none}
 .now-card{flex-direction:column;align-items:stretch}
 .now-card .btn{min-width:0}
+
+/* welcome guide */
+.icon-btn{flex:none;width:44px;height:44px;border-radius:50%;border:1px solid var(--edge-strong);background:var(--glass);color:var(--ink);font-family:var(--display);font-weight:700;font-size:18px;cursor:pointer;-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
+.icon-btn:hover{background:linear-gradient(145deg,rgba(255,255,255,.2),rgba(255,255,255,.08))}
+.modal.guide{max-width:440px;padding:20px 22px 22px}
+.g-body{display:flex;flex-direction:column;gap:14px;min-height:500px}
+.g-actions{margin-top:auto}
+.g-stages .chip{padding:2px 7px;font-size:11.5px}
+.g-top{display:flex;align-items:center;justify-content:space-between;min-height:30px}
+.g-count{font-size:13px;color:var(--muted)}
+.g-skip{background:none;border:0;color:var(--muted);font-size:14px;cursor:pointer;padding:6px 8px;border-radius:10px}
+.g-skip:hover{color:var(--ink)}
+.g-text{font-size:15.5px;line-height:1.55;margin:0}
+.g-art{display:flex;align-items:center;justify-content:center;min-height:132px;padding:14px;border-radius:20px;background:rgba(14,11,36,.38);border:1px solid var(--edge)}
+.g-stages{flex-wrap:wrap;gap:8px}
+.g-selah{display:inline-flex;align-items:center;gap:6px;padding:2px 12px;border-radius:999px;font-size:12.5px;line-height:1.55;color:var(--warn);background:rgba(255,176,103,.16);border:1px solid rgba(255,176,103,.45)}
+.g-levels{gap:6px;color:var(--faint)}
+.g-level{display:flex;flex-direction:column;gap:2px;padding:10px 12px;min-width:0;flex:1;border-radius:14px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);text-align:center}
+.g-level b{font-family:var(--display);font-size:15px;color:var(--ink)}
+.g-level span{font-size:12px;color:var(--muted)}
+.g-mock{flex-direction:column;align-items:stretch;gap:8px}
+.g-row{display:flex;align-items:center;gap:10px;font-size:14.5px}
+.g-tick{flex:none;width:20px;height:20px;border-radius:7px;background:var(--research);position:relative}
+.g-tick::after{content:"";position:absolute;left:5px;top:4px;width:9px;height:5px;border-left:2px solid #1b1540;border-bottom:2px solid #1b1540;transform:rotate(-45deg)}
+.g-tick.off{background:rgba(255,255,255,.07);border:1.5px solid rgba(255,255,255,.4)}
+.g-tick.off::after{display:none}
+.g-note{margin-left:30px;padding:8px 12px;border-radius:12px;font-size:13.5px;background:rgba(255,255,255,.07);border:1px solid var(--edge)}
+.g-note.faint{color:var(--faint)}
+.g-ready{color:#2a1a4a}
+.g-ready svg{width:64px;height:64px;padding:22px;box-sizing:content-box;border-radius:50%;background:radial-gradient(circle at 35% 30%,rgba(255,236,210,.95),rgba(255,176,103,.65) 55%,rgba(201,139,255,.45));box-shadow:0 0 50px rgba(255,176,103,.55)}
+.g-dots{display:flex;justify-content:center;gap:6px}
+.g-dots i{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.25)}
+.g-dots i.on{background:var(--ink);width:20px;border-radius:4px}
+.g-actions{flex-wrap:wrap}
+.g-actions .btn{flex:1 1 140px;white-space:nowrap}
