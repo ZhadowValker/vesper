@@ -33,40 +33,27 @@ export function projectMap(project, decks) {
   return out + '</svg>';
 }
 
-// Deck dashboard: the deck on the left, five stages, each with chips for its slides.
+// Deck dashboard: a spine through the five stages; each stage lists its slides by name.
 export function deckMap(deck) {
-  const rowPitch = 46;
-  const H = STAGES.length * rowPitch + 12;
-  const cy = H / 2;
-  const lines = twoLines(deck.title, 9);
-  let out = `<svg class="mm" viewBox="0 0 340 ${H}" role="img" aria-label="Mind map of ${esc(deck.title)} with five stages">`;
-  out += `<rect class="n-todo" x="0" y="${cy - 25}" width="64" height="50" rx="8"/>`;
-  lines.forEach((line, i) => {
-    const y = lines.length === 1 ? cy : cy - 9 + i * 18;
-    out += `<text class="tt t-root" style="font-size:12px" x="32" y="${y}" text-anchor="middle" dominant-baseline="central">${esc(line)}</text>`;
-  });
-  STAGES.forEach((stage, i) => {
-    const y = 10 + i * rowPitch;
-    const c = y + 17;
+  const star = '<svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg>';
+  const stages = STAGES.map((stage) => {
     const state = stageState(deck, stage);
-    out += `<path class="link" d="M64 ${cy} C76 ${cy} 76 ${c} 88 ${c}"/>`;
-    out += `<a class="s-${stage.id}" href="#/d/${deck.id}/s/${slideIndex(stage.subs[0] ? `${stage.id}.${stage.subs[0].id}` : '')}">`;
-    out += `<rect class="${cls(state)}" x="88" y="${y}" width="82" height="34" rx="8"/>`;
-    out += `<text class="tt ${tcls(state)}" style="font-size:12px" x="129" y="${c}" text-anchor="middle" dominant-baseline="central">${esc(stage.name)}</text></a>`;
-    out += `<path class="link" d="M170 ${c} L182 ${c}"/>`;
     const chips = [
-      ...stage.subs.map((sub, j) => ({ idx: slideIndex(`${stage.id}.${sub.id}`), label: String(j + 1), title: sub.name })),
-      { idx: selahIndex(stage.id), label: 'S', title: 'Selah' },
-    ];
-    chips.forEach((chip, j) => {
-      const x = 184 + j * 30;
+      ...stage.subs.map((sub) => ({ idx: slideIndex(`${stage.id}.${sub.id}`), label: esc(sub.name), title: sub.name })),
+      { idx: selahIndex(stage.id), label: `${star}Selah`, title: 'Selah' },
+    ].map((chip) => {
       const cs = chipState(deck, SLIDES[chip.idx], chip.idx);
-      out += `<a class="s-${stage.id}" href="#/d/${deck.id}/s/${chip.idx}"><title>${esc(stage.name)}: ${esc(chip.title)}</title>`;
-      out += `<rect class="${cls(cs)}" x="${x}" y="${c - 12}" width="26" height="24" rx="6"/>`;
-      out += `<text class="ts ${tcls(cs)}" x="${x + 13}" y="${c}" text-anchor="middle" dominant-baseline="central">${chip.label}</text></a>`;
-    });
-  });
-  return out + '</svg>';
+      return `<a class="dm-chip ${cs}" href="#/d/${deck.id}/s/${chip.idx}" title="${esc(stage.name)}: ${esc(chip.title)}">${chip.label}</a>`;
+    }).join('');
+    const first = slideIndex(`${stage.id}.${stage.subs[0].id}`);
+    const stateText = { done: 'Done', now: 'In progress', todo: 'Not started' }[state];
+    return `<section class="dm-stage s-${stage.id} ${state}" aria-label="${esc(stage.name)}">
+      <span class="dm-dot" aria-hidden="true"></span>
+      <a class="dm-head" href="#/d/${deck.id}/s/${first}"><span class="dm-name">${esc(stage.name)}</span><span class="dm-state">${stateText}</span></a>
+      <div class="dm-chips">${chips}</div>
+    </section>`;
+  }).join('');
+  return `<div class="dm" role="group" aria-label="Mind map of ${esc(deck.title)}"><div class="dm-spine" aria-hidden="true"></div>${stages}</div>`;
 }
 
 export const mapLegend = (doneLabel = 'Done', nowLabel = 'Current', todoLabel = 'Not yet') =>

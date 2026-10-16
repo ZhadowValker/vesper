@@ -24,7 +24,7 @@ export function deckView(id) {
       <div class="grow"><h1>${esc(deck.title)}</h1><p class="sub">${esc(project ? project.name : '')}${deck.passes > 1 ? ` · pass ${deck.passes}` : ''}</p></div>
     </div>
     <div class="card"><p style="font-size:15px">Now: ${esc(now)} <span class="muted">(slide ${deck.slide + 1} of ${SLIDES.length})</span></p></div>
-    <div class="card">${deckMap(deck)}${mapLegend('Done', 'Current', 'Not yet')}<p class="sub" style="margin-top:6px">S marks the Selah pause. Tap any chip to jump to that slide.</p></div>
+    <div class="card">${deckMap(deck)}${mapLegend('Done', 'Current', 'Not yet')}<p class="sub" style="margin-top:6px">Tap any name to jump to that slide. Selah is the pause at the end of each stage.</p></div>
     <a class="btn primary block" href="#/d/${deck.id}/s/${deck.slide}">${deck.reached === 0 && !deck.finished ? 'Begin' : deck.finished ? 'Open recap' : `Resume at slide ${deck.slide + 1}`}</a>
     <div class="footer-tools"><button class="btn small danger" data-act="delete-deck">Delete deck</button></div>
   </div>`;
