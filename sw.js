@@ -1,4 +1,4 @@
-const VERSION = 'vesper-v8';
+const VERSION = 'vesper-v10';
 const ASSETS = [
   './',
   'index.html',
@@ -16,6 +16,7 @@ const ASSETS = [
   'js/views/project.js',
   'js/views/deck.js',
   'js/views/slide.js',
+  'js/views/parts.js',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png'

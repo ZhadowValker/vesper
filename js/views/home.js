@@ -2,6 +2,7 @@ import { store } from '../store.js';
 import { STAGES, SLIDES, deckStatus, atSelah } from '../framework.js';
 import { esc, ask, confirmBox, notice, ICON, $ } from '../util.js';
 import { go, rerender } from '../nav.js';
+import { resumeButton } from './parts.js';
 
 export function home() {
   const decks = store.allDecks();
@@ -21,7 +22,7 @@ export function home() {
       <p class="hero-t">${esc(last.title)}</p>
       <p class="sub hero-s">${esc(st.label)}, slide ${last.slide + 1} of ${SLIDES.length}</p>
       <div class="bar hero-bar"><i style="width:${st.pct}%"></i></div>
-      <a class="btn block" href="#/d/${last.id}/s/${last.slide}">Resume</a>
+      ${resumeButton(last, project, 'block')}
     </div>`;
   })() : '';
 

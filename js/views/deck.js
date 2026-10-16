@@ -3,6 +3,7 @@ import { SLIDES, deckStatus, atSelah } from '../framework.js';
 import { esc, confirmBox, ICON } from '../util.js';
 import { deckMap, mapLegend, drawTree } from '../mindmaps.js';
 import { go } from '../nav.js';
+import { resumeButton } from './parts.js';
 
 export function deckView(id) {
   const deck = store.deck(id);
@@ -18,7 +19,6 @@ export function deckView(id) {
   else if (slide.type === 'selah') now = `${slide.stage.name}, Selah${atSelah(deck) ? ' (waiting)' : ''}`;
   else now = `${slide.stage.name}, ${slide.sub.name}`;
 
-  const cta = deck.finished ? 'Open recap' : deck.reached === 0 ? 'Begin' : 'Resume';
   const html = `<div class="page stack">
     <div class="top">
       <a class="back" href="#/p/${deck.projectId}" aria-label="Back to project">${ICON.back}</a>
@@ -26,7 +26,7 @@ export function deckView(id) {
     </div>
     <div class="card now-card">
       <div class="now-text"><p class="sub">Now</p><p class="now-t">${esc(now)}</p><p class="sub">Slide ${deck.slide + 1} of ${SLIDES.length}</p></div>
-      <a class="btn primary" href="#/d/${deck.id}/s/${deck.slide}">${cta}</a>
+      ${resumeButton(deck, project, 'block')}
     </div>
     <h2 class="section">Mind map</h2>
     <div class="card">${deckMap(deck)}${mapLegend('Done', 'Current', 'Not yet')}<p class="sub map-note">Tap any name to jump to that slide. Selah is the pause at the end of each stage.</p></div>

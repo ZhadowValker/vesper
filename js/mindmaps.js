@@ -16,7 +16,7 @@ export function projectMap(project, decks) {
   }).join('');
   return `<div class="dt" role="group" aria-label="Mind map of ${esc(project.name)} with ${decks.length} deck${decks.length === 1 ? '' : 's'}">
     <svg class="dt-links" aria-hidden="true"></svg>
-    <div class="dt-root" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg></div>
+    <div class="dt-root"><span>${esc(project.name)}</span></div>
     <div class="dt-rows">${rows}</div>
   </div>`;
 }
@@ -43,7 +43,7 @@ export function deckMap(deck) {
   }).join('');
   return `<div class="dt" role="group" aria-label="Mind map of ${esc(deck.title)}">
     <svg class="dt-links" aria-hidden="true"></svg>
-    <div class="dt-root" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg></div>
+    <div class="dt-root"><span>${esc(deck.title)}</span></div>
     <div class="dt-rows">${rows}</div>
   </div>`;
 }
