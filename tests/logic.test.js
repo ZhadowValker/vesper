@@ -89,7 +89,7 @@ test('mind maps render svg with links for every deck and slide chip', () => {
   assert.ok(dm.startsWith('<div class="dt"'));
   assert.ok(dm.includes('>Why<') && dm.includes('>Findings<') && dm.includes('Selah'));
   assert.equal((dm.match(/href="#\/d\/\w+\/s\/\d+"/g) || []).length, 5 + 25);
-  assert.ok(projectMap(p, []).includes('No decks yet'));
+  assert.ok(projectMap(p, []).includes('No tasks yet'));
 });
 
 test('mind map escapes html in titles', () => {

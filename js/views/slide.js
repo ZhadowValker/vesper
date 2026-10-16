@@ -18,7 +18,7 @@ export function slideView(deckId, nStr) {
 
   const html = `<div class="player">
     <div class="head">
-      <a class="back" href="#/d/${deck.id}" aria-label="Deck dashboard">${ICON.back}</a>
+      <a class="back" href="#/d/${deck.id}" aria-label="Back to task">${ICON.back}</a>
       <div class="meta">${esc(deck.title)}${project ? ', ' + esc(project.name) : ''}</div>
     </div>
     <div class="progress" role="img" aria-label="Slide ${n + 1} of ${SLIDES.length}">${progressSegs(n)}</div>
@@ -292,5 +292,5 @@ function recap(deck, project) {
 }
 
 function notFound() {
-  return `<div class="page"><div class="card empty"><h2>Deck not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/">Back to dashboard</a></div></div>`;
+  return `<div class="page"><div class="card empty"><h2>Task not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/">Back to dashboard</a></div></div>`;
 }

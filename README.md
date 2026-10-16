@@ -1,7 +1,7 @@
 # Vesper
 
 Vision, Research, Plan, Execute, Review, with a **Selah** pause at the end of each stage.
-Each task is a deck of 27 slides. Decks live in projects. There are three dashboards: main, project and deck.
+Words used in the app: a **Project** holds **Tasks**. Each task is played as a **deck** of 27 **slides**. There are three dashboards: main, project and task.
 
 ## Technology decision
 
@@ -31,7 +31,7 @@ js/util.js              helpers, icons and the in-app dialogs (ask, confirmBox, 
 js/mindmaps.js          project and deck mind maps (SVG)
 js/views/home.js        main dashboard
 js/views/project.js     project dashboard
-js/views/deck.js        deck dashboard
+js/views/deck.js        task dashboard (the tree)
 js/views/slide.js       slide player (cover, sub-stage, Selah, recap)
 tests/logic.test.js     tests for framework, store and mind maps
 ```

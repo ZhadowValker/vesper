@@ -4,7 +4,7 @@ import { esc } from './util.js';
 // Project dashboard: the same tree as the deck map. The project on the left, a branch to each deck.
 export function projectMap(project, decks) {
   if (!decks.length) {
-    return '<div class="soft muted empty-map">No decks yet. Add the first one.</div>';
+    return '<div class="soft muted empty-map">No tasks yet. Add the first one.</div>';
   }
   const rows = decks.map((d) => {
     const st = deckStatus(d);
@@ -14,7 +14,7 @@ export function projectMap(project, decks) {
       <a class="dt-node" href="#/d/${d.id}"><span class="dt-title">${esc(d.title)}</span><span class="dt-sub">${esc(sub)}</span></a>
     </div>`;
   }).join('');
-  return `<div class="dt" role="group" aria-label="Mind map of ${esc(project.name)} with ${decks.length} deck${decks.length === 1 ? '' : 's'}">
+  return `<div class="dt" role="group" aria-label="Mind map of ${esc(project.name)} with ${decks.length} task${decks.length === 1 ? '' : 's'}">
     <svg class="dt-links" aria-hidden="true"></svg>
     <div class="dt-root"><span>${esc(project.name)}</span></div>
     <div class="dt-rows">${rows}</div>

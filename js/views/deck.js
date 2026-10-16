@@ -30,7 +30,7 @@ export function deckView(id) {
     </div>
     <h2 class="section">Mind map</h2>
     <div class="card">${deckMap(deck)}${mapLegend('Done', 'Current', 'Not yet')}<p class="sub map-note">Tap any name to jump to that slide. Selah is the pause at the end of each stage.</p></div>
-    <div class="footer-tools"><button class="btn small danger" data-act="delete-deck">Delete deck</button></div>
+    <div class="footer-tools"><button class="btn small danger" data-act="delete-deck">Delete task</button></div>
   </div>`;
 
   function mount(root) {
@@ -50,5 +50,5 @@ export function deckView(id) {
 }
 
 function notFound() {
-  return `<div class="page"><div class="card empty"><h2>Deck not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/">Back to dashboard</a></div></div>`;
+  return `<div class="page"><div class="card empty"><h2>Task not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/">Back to dashboard</a></div></div>`;
 }

@@ -23,15 +23,15 @@ export function projectView(id) {
     <div class="top">
       <a class="back" href="#/" aria-label="Back to dashboard">${ICON.back}</a>
       <div class="grow"><h1>${esc(project.name)}</h1><p class="sub">Project</p></div>
-      <button class="btn small" data-act="new-deck">${ICON.plus}Deck</button>
+      <button class="btn small" data-act="new-deck">${ICON.plus}Task</button>
     </div>
     <div class="row wrap">
-      <span class="chip">${decks.length} deck${decks.length === 1 ? '' : 's'}</span>
+      <span class="chip">${decks.length} task${decks.length === 1 ? '' : 's'}</span>
       ${finished ? `<span class="chip do">${finished} finished</span>` : ''}
       ${selah ? `<span class="chip think">${selah} at Selah</span>` : ''}
     </div>
     <div class="card">${projectMap(project, decks)}${decks.length ? mapLegend('Finished', 'In progress', 'Not started') : ''}</div>
-    ${decks.length ? `<h2 class="section">Decks</h2><div class="list">${list}</div>` : ''}
+    ${decks.length ? `<h2 class="section">Tasks</h2><div class="list">${list}</div>` : ''}
     <div class="footer-tools"><button class="btn small danger" data-act="delete-project">Delete project</button></div>
   </div>`;
 
@@ -43,10 +43,10 @@ export function projectView(id) {
       const btn = e.target.closest('[data-act]');
       if (!btn) return;
       if (btn.dataset.act === 'new-deck') {
-        const title = await ask('Name this deck (one task)', { ok: 'Create deck', placeholder: 'Plan the move' });
+        const title = await ask('Name this task', { ok: 'Create task', placeholder: 'Plan the move' });
         if (title) go(`#/d/${store.addDeck(id, title).id}`);
       } else if (btn.dataset.act === 'delete-project') {
-        const yes = await confirmBox(`Delete "${project.name}"?`, `This also deletes its ${decks.length} deck${decks.length === 1 ? '' : 's'}. You can't undo it.`);
+        const yes = await confirmBox(`Delete "${project.name}"?`, `This also deletes its ${decks.length} task${decks.length === 1 ? '' : 's'}. You can't undo it.`);
         if (yes) { store.removeProject(id); go('#/'); }
       }
     }

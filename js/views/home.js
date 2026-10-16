@@ -27,7 +27,7 @@ export function home() {
   })() : '';
 
   const banner = selahCount
-    ? `<div class="banner"><span aria-hidden="true">${ICON.star}</span><div><strong style="font-weight:500">${selahCount} deck${selahCount === 1 ? '' : 's'} paused at Selah</strong><br><span style="font-size:13px">Answer to move ${selahCount === 1 ? 'it' : 'them'} on</span></div></div>`
+    ? `<div class="banner"><span aria-hidden="true">${ICON.star}</span><div><strong style="font-weight:500">${selahCount} task${selahCount === 1 ? '' : 's'} paused at Selah</strong><br><span style="font-size:13px">Answer to move ${selahCount === 1 ? 'it' : 'them'} on</span></div></div>`
     : '';
 
   const projectCards = projects.map((p) => {
@@ -35,14 +35,14 @@ export function home() {
     const fin = ds.filter((d) => d.finished).length;
     const pct = ds.length ? Math.round(ds.reduce((n, d) => n + deckStatus(d).pct, 0) / ds.length) : 0;
     return `<a class="item" href="#/p/${p.id}">
-      <div class="row between"><span class="t">${esc(p.name)}</span><span class="sub">${ds.length} deck${ds.length === 1 ? '' : 's'}${fin ? `, ${fin} finished` : ''}</span></div>
+      <div class="row between"><span class="t">${esc(p.name)}</span><span class="sub">${ds.length} task${ds.length === 1 ? '' : 's'}${fin ? `, ${fin} finished` : ''}</span></div>
       <div class="bar item-bar"><i style="width:${pct}%"></i></div>
     </a>`;
   }).join('');
 
   const empty = `<div class="card empty">
     <h2>Start your first project</h2>
-    <p class="muted lead-gap">A project holds decks. Each deck walks one task from vision to review.</p>
+    <p class="muted lead-gap">A project holds tasks. Each task walks from vision to review, one slide at a time.</p>
     <button class="btn primary" data-act="new-project">New project</button>
   </div>`;
 
@@ -59,13 +59,13 @@ export function home() {
     </div>
     <div class="col">
       ${projects.length ? `<div class="o3 grid2">
-        <div class="metric"><div class="l">Active decks</div><div class="n">${active.length}</div></div>
+        <div class="metric"><div class="l">Active tasks</div><div class="n">${active.length}</div></div>
         <div class="metric"><div class="l">At Selah</div><div class="n">${selahCount}</div></div>
         <div class="metric"><div class="l">Finished</div><div class="n">${decks.length - active.length}</div></div>
         <div class="metric"><div class="l">Loops so far</div><div class="n">${loops}</div></div>
       </div>
       <div class="o4 card stack tight">
-        <h2>Where decks are now</h2>
+        <h2>Where tasks are now</h2>
         ${spread.map(({ s, n }) => `<div class="spread"><span class="lab">${s.name}</span><div class="bar s-${s.id}"><i style="width:${Math.round((n / max) * 100)}%"></i></div><span class="num">${n}</span></div>`).join('')}
       </div>` : ''}
       <div class="o6 stack tight">
@@ -110,7 +110,7 @@ export function home() {
       const f = e.target.files && e.target.files[0];
       if (!f) return;
       f.text().then(async (text) => {
-        const yes = await confirmBox('Replace everything on this device?', 'Importing a backup replaces all projects and decks stored here.', { ok: 'Import backup', danger: false });
+        const yes = await confirmBox('Replace everything on this device?', 'Importing a backup replaces all projects and tasks stored here.', { ok: 'Import backup', danger: false });
         if (!yes) return;
         try { store.importJSON(text); rerender(); } catch (err) { notice('That file could not be imported', err.message); }
       });
