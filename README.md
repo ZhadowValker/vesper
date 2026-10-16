@@ -27,6 +27,7 @@ fonts/                  Bricolage Grotesque and Figtree (variable, latin)
 js/framework.js         THE FRAMEWORK AS DATA: stages, sub-stages, steps, Selah questions
 js/store.js             data storage, export and import
 js/nav.js, js/app.js    router
+js/util.js              helpers, icons and the in-app dialogs (ask, confirmBox, notice)
 js/mindmaps.js          project and deck mind maps (SVG)
 js/views/home.js        main dashboard
 js/views/project.js     project dashboard
@@ -67,6 +68,5 @@ Edit `js/framework.js` only. Stage names, sub-stages, steps and Selah questions 
 
 ## Known limits of this first version
 
-- Names for projects and decks are typed into the browser's simple prompt box. A proper form comes later.
 - Data is stored per browser on one device. Use Export backup and Import backup to move it.
 - The quick mode and a slide sorter are not built yet.

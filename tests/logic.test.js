@@ -83,7 +83,7 @@ test('mind maps render svg with links for every deck and slide chip', () => {
   const p = store.projects()[0];
   const decks = store.decksOf(p.id);
   const pm = projectMap(p, decks);
-  assert.ok(pm.startsWith('<svg'));
+  assert.ok(pm.startsWith('<div class="dt"'));
   assert.equal((pm.match(/href="#\/d\//g) || []).length, decks.length);
   const dm = deckMap(decks[0]);
   assert.ok(dm.startsWith('<div class="dt"'));

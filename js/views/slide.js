@@ -2,7 +2,7 @@ import { store } from '../store.js';
 import {
   CONFIG, STAGES, SLIDES, firstSlideOf, selahIndex, tickKey, stagePending, subDone, slideIndex,
 } from '../framework.js';
-import { esc, $, formatDate } from '../util.js';
+import { esc, $, formatDate, ICON } from '../util.js';
 import { go, rerender } from '../nav.js';
 
 export function slideView(deckId, nStr) {
@@ -18,15 +18,15 @@ export function slideView(deckId, nStr) {
 
   const html = `<div class="player">
     <div class="head">
-      <a class="back" href="#/d/${deck.id}" aria-label="Deck dashboard">←</a>
-      <div class="meta">${esc(deck.title)}${project ? ' · ' + esc(project.name) : ''}</div>
+      <a class="back" href="#/d/${deck.id}" aria-label="Deck dashboard">${ICON.back}</a>
+      <div class="meta">${esc(deck.title)}${project ? ', ' + esc(project.name) : ''}</div>
     </div>
     <div class="progress" role="img" aria-label="Slide ${n + 1} of ${SLIDES.length}">${progressSegs(n)}</div>
     ${body(deck, slide, project)}
     <div class="nav no-print">
-      <button class="btn" data-nav="prev" aria-label="Previous slide" ${n === 0 ? 'disabled' : ''}>←</button>
+      <button class="btn" data-nav="prev" aria-label="Previous slide" ${n === 0 ? 'disabled' : ''}>${ICON.back}</button>
       <span class="count">${n + 1} of ${SLIDES.length}</span>
-      <button class="btn" data-nav="next" aria-label="Next slide" ${n === last ? 'disabled' : ''}>→</button>
+      <button class="btn" data-nav="next" aria-label="Next slide" ${n === last ? 'disabled' : ''}>${ICON.next}</button>
     </div>
   </div>`;
 
@@ -203,7 +203,7 @@ function body(deck, slide, project) {
 function cover(deck, project) {
   return `<div class="slide center">
     <div class="orb" aria-hidden="true"><i></i><svg width="30" height="30" viewBox="0 0 24 24" fill="#2a1a4a"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg></div>
-    <h1 style="font-size:34px">${esc(deck.title)}</h1>
+    <h1 class="cover-t">${esc(deck.title)}</h1>
     <p class="lead">${esc(project ? project.name : '')}</p>
     <p class="lead">Five stages, each ending in a Selah pause. ${SLIDES.length} slides.</p>
     <div class="btns"><button class="btn primary" data-nav="next">Begin</button></div>
@@ -271,7 +271,7 @@ function recap(deck, project) {
       const v = (deck.notes[key] || '').trim();
       const stepNotes = s.steps.map((text, i) => {
         const sv = (deck.notes[`${key}#${i}`] || '').trim();
-        return sv ? `<p class="sub" style="margin-top:6px">${esc(text)}</p><pre>${esc(sv)}</pre>` : '';
+        return sv ? `<p class="sub step-q">${esc(text)}</p><pre>${esc(sv)}</pre>` : '';
       }).join('');
       return v || stepNotes ? `<h3>${esc(s.name)}</h3>${stepNotes}${v ? `<pre>${esc(v)}</pre>` : ''}` : '';
     }).join('');
@@ -280,10 +280,10 @@ function recap(deck, project) {
 
   return `<div class="slide recap">
     <div><span class="chip do">Recap</span></div>
-    <div><h1>${esc(deck.title)}</h1><p class="lead">${esc(project ? project.name : '')} · started ${esc(formatDate(deck.created))}${deck.finished ? ` · finished ${esc(formatDate(deck.finished))}` : ''}</p></div>
+    <div><h1>${esc(deck.title)}</h1><p class="lead">${esc(project ? project.name : '')}, started ${esc(formatDate(deck.created))}${deck.finished ? `, finished ${esc(formatDate(deck.finished))}` : ''}</p></div>
     <p class="lead">${deck.passes} pass${deck.passes === 1 ? '' : 'es'}, ${deck.loops} loop${deck.loops === 1 ? '' : 's'} back.</p>
     ${sections || '<p class="muted">No notes written yet. Notes you add on each slide appear here.</p>'}
-    <div class="row no-print" style="flex-wrap:wrap;margin-top:6px">
+    <div class="row wrap no-print">
       ${deck.finished ? '<button class="btn" data-act="reopen">Reopen</button>' : '<button class="btn primary" data-act="finish">Mark finished</button>'}
       <button class="btn" data-act="print">Print summary</button>
       <a class="btn" href="#/p/${deck.projectId}">Back to project</a>
@@ -292,5 +292,5 @@ function recap(deck, project) {
 }
 
 function notFound() {
-  return `<div class="page"><div class="card empty"><h2>Deck not found</h2><p class="muted" style="margin-bottom:14px">It may have been deleted.</p><a class="btn" href="#/">Back to dashboard</a></div></div>`;
+  return `<div class="page"><div class="card empty"><h2>Deck not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/">Back to dashboard</a></div></div>`;
 }

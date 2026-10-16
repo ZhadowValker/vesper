@@ -1,6 +1,6 @@
 import { store } from '../store.js';
 import { STAGES, SLIDES, deckStatus, atSelah } from '../framework.js';
-import { esc, ask, $, formatDate } from '../util.js';
+import { esc, ask, confirmBox, notice, ICON, $ } from '../util.js';
 import { go, rerender } from '../nav.js';
 
 export function home() {
@@ -18,15 +18,15 @@ export function home() {
     const project = store.project(last.projectId);
     return `<div class="soft s-${st.stageId || ''}">
       <p class="sub">${esc(project ? project.name : '')}</p>
-      <p style="font-family:var(--display);font-weight:700;font-size:28px;line-height:1.15;letter-spacing:-.015em">${esc(last.title)}</p>
-      <p class="sub" style="margin:6px 0 12px">${esc(st.label)}, slide ${last.slide + 1} of ${SLIDES.length}</p>
-      <div class="bar" style="margin-bottom:14px"><i style="width:${st.pct}%"></i></div>
+      <p class="hero-t">${esc(last.title)}</p>
+      <p class="sub hero-s">${esc(st.label)}, slide ${last.slide + 1} of ${SLIDES.length}</p>
+      <div class="bar hero-bar"><i style="width:${st.pct}%"></i></div>
       <a class="btn block" href="#/d/${last.id}/s/${last.slide}">Resume</a>
     </div>`;
   })() : '';
 
   const banner = selahCount
-    ? `<div class="banner"><span aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="#ffd6aa"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg></span><div><strong style="font-weight:500">${selahCount} deck${selahCount === 1 ? '' : 's'} paused at Selah</strong><br><span style="font-size:13px">Answer to move ${selahCount === 1 ? 'it' : 'them'} on</span></div></div>`
+    ? `<div class="banner"><span aria-hidden="true">${ICON.star}</span><div><strong style="font-weight:500">${selahCount} deck${selahCount === 1 ? '' : 's'} paused at Selah</strong><br><span style="font-size:13px">Answer to move ${selahCount === 1 ? 'it' : 'them'} on</span></div></div>`
     : '';
 
   const projectCards = projects.map((p) => {
@@ -35,41 +35,48 @@ export function home() {
     const pct = ds.length ? Math.round(ds.reduce((n, d) => n + deckStatus(d).pct, 0) / ds.length) : 0;
     return `<a class="item" href="#/p/${p.id}">
       <div class="row between"><span class="t">${esc(p.name)}</span><span class="sub">${ds.length} deck${ds.length === 1 ? '' : 's'}${fin ? `, ${fin} finished` : ''}</span></div>
-      <div class="bar" style="margin-top:8px"><i style="width:${pct}%"></i></div>
+      <div class="bar item-bar"><i style="width:${pct}%"></i></div>
     </a>`;
   }).join('');
 
   const empty = `<div class="card empty">
     <h2>Start your first project</h2>
-    <p class="muted" style="margin-bottom:14px">A project holds decks. Each deck walks one task from vision to review.</p>
+    <p class="muted lead-gap">A project holds decks. Each deck walks one task from vision to review.</p>
     <button class="btn primary" data-act="new-project">New project</button>
   </div>`;
 
-  const html = `<div class="page stack">
-    <div class="top" style="margin-bottom:0">
+  const html = `<div class="page stack home">
+    <div class="top">
       <div class="grow"><h1>Vesper</h1><p class="sub">Vision, Research, Plan, Execute, Review</p></div>
-      <button class="btn small" data-act="new-project">+ Project</button>
+      <button class="btn small" data-act="new-project">${ICON.plus}Project</button>
     </div>
-    ${projects.length ? '' : empty}
-    ${cont}
-    ${banner}
-    ${projects.length ? `<div class="grid2">
-      <div class="metric"><div class="l">Active decks</div><div class="n">${active.length}</div></div>
-      <div class="metric"><div class="l">At Selah</div><div class="n">${selahCount}</div></div>
-      <div class="metric"><div class="l">Finished</div><div class="n">${decks.length - active.length}</div></div>
-      <div class="metric"><div class="l">Loops so far</div><div class="n">${loops}</div></div>
+    <div class="col">
+      ${projects.length ? '' : `<div class="o1">${empty}</div>`}
+      ${cont ? `<div class="o1">${cont}</div>` : ''}
+      ${banner ? `<div class="o2">${banner}</div>` : ''}
+      ${projects.length ? `<div class="o5 stack"><h2 class="section">Your projects</h2><div class="list">${projectCards}</div></div>` : ''}
     </div>
-    <p class="section">Where decks are now</p>
-    <div class="stack" style="gap:6px">${spread.map(({ s, n }) => `<div class="spread"><span class="lab">${s.name}</span><div class="bar s-${s.id}"><i style="width:${Math.round((n / max) * 100)}%"></i></div><span class="num">${n}</span></div>`).join('')}</div>
-    <p class="section">Your projects</p>
-    <div class="list">${projectCards}</div>` : ''}
-    <p class="section">Backup</p>
-    <div class="footer-tools">
-      <button class="btn small" data-act="export">Export backup</button>
-      <button class="btn small" data-act="import">Import backup</button>
-      <input type="file" accept="application/json,.json" id="import-file" hidden>
+    <div class="col">
+      ${projects.length ? `<div class="o3 grid2">
+        <div class="metric"><div class="l">Active decks</div><div class="n">${active.length}</div></div>
+        <div class="metric"><div class="l">At Selah</div><div class="n">${selahCount}</div></div>
+        <div class="metric"><div class="l">Finished</div><div class="n">${decks.length - active.length}</div></div>
+        <div class="metric"><div class="l">Loops so far</div><div class="n">${loops}</div></div>
+      </div>
+      <div class="o4 card stack tight">
+        <h2>Where decks are now</h2>
+        ${spread.map(({ s, n }) => `<div class="spread"><span class="lab">${s.name}</span><div class="bar s-${s.id}"><i style="width:${Math.round((n / max) * 100)}%"></i></div><span class="num">${n}</span></div>`).join('')}
+      </div>` : ''}
+      <div class="o6 stack tight">
+        <h2 class="section">Backup</h2>
+        <div class="footer-tools">
+          <button class="btn small" data-act="export">Export backup</button>
+          <button class="btn small" data-act="import">Import backup</button>
+          <input type="file" accept="application/json,.json" id="import-file" hidden>
+        </div>
+        <p class="sub">Everything is stored on this device only. Export a backup to move it elsewhere.</p>
+      </div>
     </div>
-    <p class="sub">Everything is stored on this device only. Export a backup to move it elsewhere.</p>
   </div>`;
 
   function mount(root) {
@@ -83,8 +90,9 @@ export function home() {
       if (!btn) return;
       const act = btn.dataset.act;
       if (act === 'new-project') {
-        const name = ask('Project name');
-        if (name) go(`#/p/${store.addProject(name).id}`);
+        ask('Name your project', { ok: 'Create project', placeholder: 'Office relocation' }).then((name) => {
+          if (name) go(`#/p/${store.addProject(name).id}`);
+        });
       } else if (act === 'export') {
         const blob = new Blob([store.exportJSON()], { type: 'application/json' });
         const a = document.createElement('a');
@@ -100,9 +108,10 @@ export function home() {
     function onFile(e) {
       const f = e.target.files && e.target.files[0];
       if (!f) return;
-      f.text().then((text) => {
-        if (!window.confirm('Importing replaces everything on this device. Continue?')) return;
-        try { store.importJSON(text); rerender(); } catch (err) { window.alert(err.message); }
+      f.text().then(async (text) => {
+        const yes = await confirmBox('Replace everything on this device?', 'Importing a backup replaces all projects and decks stored here.', { ok: 'Import backup', danger: false });
+        if (!yes) return;
+        try { store.importJSON(text); rerender(); } catch (err) { notice('That file could not be imported', err.message); }
       });
     }
   }

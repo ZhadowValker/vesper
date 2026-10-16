@@ -1,36 +1,24 @@
 import { STAGES, SLIDES, slideIndex, selahIndex, chipState, stageState, deckStatus, atSelah } from './framework.js';
-import { esc, trunc, twoLines } from './util.js';
+import { esc } from './util.js';
 
-const cls = (state) => ({ done: 'n-done', now: 'n-now', todo: 'n-todo' }[state]);
-const tcls = (state) => ({ done: 't-done', now: 't-now', todo: 't-todo' }[state]);
-
-// Project dashboard: the project in the middle-left, each deck branching to the right.
+// Project dashboard: the same tree as the deck map. The project on the left, a branch to each deck.
 export function projectMap(project, decks) {
   if (!decks.length) {
-    return '<div class="soft muted" style="text-align:center">No decks yet. Add the first one.</div>';
+    return '<div class="soft muted empty-map">No decks yet. Add the first one.</div>';
   }
-  const pitch = 48;
-  const H = decks.length * pitch + 10;
-  const cy = H / 2;
-  const lines = twoLines(project.name);
-  let out = `<svg class="mm" viewBox="0 0 340 ${H}" role="img" aria-label="Mind map of ${esc(project.name)} with ${decks.length} decks">`;
-  out += `<rect class="n-todo" x="0" y="${cy - 30}" width="84" height="60" rx="8"/>`;
-  lines.forEach((line, i) => {
-    const y = lines.length === 1 ? cy : cy - 9 + i * 18;
-    out += `<text class="tt t-root" x="42" y="${y}" text-anchor="middle" dominant-baseline="central">${esc(line)}</text>`;
-  });
-  decks.forEach((d, i) => {
-    const y = 8 + i * pitch;
-    const c = y + 20;
+  const rows = decks.map((d) => {
     const st = deckStatus(d);
     const sub = d.finished ? 'Finished' : st.label === 'Not started' ? 'Not started'
       : atSelah(d) ? `${st.label}, paused at Selah` : `${st.label}, ${st.pct}%`;
-    out += `<path class="link" d="M84 ${cy} C98 ${cy} 98 ${c} 112 ${c}"/>`;
-    out += `<a href="#/d/${d.id}" class="${st.stageId ? 's-' + st.stageId : ''}"><rect class="${cls(st.state)}" x="112" y="${y}" width="228" height="40" rx="8"/>`;
-    out += `<text class="tt ${tcls(st.state)}" x="124" y="${y + 15}" dominant-baseline="central">${esc(trunc(d.title, 26))}</text>`;
-    out += `<text class="ts ${tcls(st.state)}" x="124" y="${y + 31}" dominant-baseline="central">${esc(sub)}</text></a>`;
-  });
-  return out + '</svg>';
+    return `<div class="dt-row deck ${st.stageId ? 's-' + st.stageId : ''} ${st.state}">
+      <a class="dt-node" href="#/d/${d.id}"><span class="dt-title">${esc(d.title)}</span><span class="dt-sub">${esc(sub)}</span></a>
+    </div>`;
+  }).join('');
+  return `<div class="dt" role="group" aria-label="Mind map of ${esc(project.name)} with ${decks.length} deck${decks.length === 1 ? '' : 's'}">
+    <svg class="dt-links" aria-hidden="true"></svg>
+    <div class="dt-root" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z"/></svg></div>
+    <div class="dt-rows">${rows}</div>
+  </div>`;
 }
 
 // Deck dashboard: a tree. The deck on the left, branches to the five stages,
@@ -60,8 +48,8 @@ export function deckMap(deck) {
   </div>`;
 }
 
-// Draw the curved branches from the deck node to each stage node.
-export function drawDeckTree(scope) {
+// Draw the curved branches from the root node to each row node (used by both maps).
+export function drawTree(scope) {
   const tree = scope.querySelector('.dt');
   if (!tree) return () => {};
   const svg = tree.querySelector('.dt-links');
@@ -77,7 +65,7 @@ export function drawDeckTree(scope) {
       const x1 = n.left - box.left;
       const y1 = n.top + n.height / 2 - box.top;
       const mid = (x0 + x1) / 2;
-      return `<path class="${row.classList[1]}" d="M${x0} ${y0} C${mid} ${y0} ${mid} ${y1} ${x1} ${y1}"/>`;
+      return `<path class="${[...row.classList].filter((c) => c.startsWith('s-')).join(' ')}" d="M${x0} ${y0} C${mid} ${y0} ${mid} ${y1} ${x1} ${y1}"/>`;
     }).join('');
   };
   draw();
