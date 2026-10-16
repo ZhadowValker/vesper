@@ -12,8 +12,9 @@ export function slideName(slide) {
 }
 
 // "Resume" button with the full path underneath: project, deck, chip.
-export function resumeButton(deck, project, extraClass = '') {
+// target 'tree' opens the deck's mind map; 'slide' opens the slide you were on.
+export function resumeButton(deck, project, extraClass = '', target = 'slide') {
   const verb = deck.finished ? 'Open recap' : deck.reached === 0 ? 'Begin' : 'Resume';
   const path = [project ? project.name : '', deck.title, slideName(SLIDES[deck.slide])].filter(Boolean).map(esc).join(CHEVRON);
-  return `<a class="btn primary resume ${extraClass}" href="#/d/${deck.id}/s/${deck.slide}"><span class="resume-v">${verb}</span><span class="resume-p">${path}</span></a>`;
+  return `<a class="btn primary resume ${extraClass}" href="${target === 'tree' ? `#/d/${deck.id}` : `#/d/${deck.id}/s/${deck.slide}`}"><span class="resume-v">${verb}</span><span class="resume-p">${path}</span></a>`;
 }

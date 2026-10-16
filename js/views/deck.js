@@ -36,6 +36,8 @@ export function deckView(id) {
   function mount(root) {
     root.addEventListener('click', onClick);
     const stopTree = drawTree(root);
+    const here = root.querySelector('.dt-chip.now');
+    if (here && here.scrollIntoView) here.scrollIntoView({ block: 'center', behavior: 'auto' });
     return () => { root.removeEventListener('click', onClick); stopTree(); };
     async function onClick(e) {
       const btn = e.target.closest('[data-act="delete-deck"]');

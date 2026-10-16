@@ -22,7 +22,7 @@ export function home() {
       <p class="hero-t">${esc(last.title)}</p>
       <p class="sub hero-s">${esc(st.label)}, slide ${last.slide + 1} of ${SLIDES.length}</p>
       <div class="bar hero-bar"><i style="width:${st.pct}%"></i></div>
-      ${resumeButton(last, project, 'block')}
+      ${resumeButton(last, project, 'block', 'tree')}
     </div>`;
   })() : '';
 
