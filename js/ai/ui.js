@@ -37,7 +37,7 @@ export function aiSettingsDialog() {
     <h2>AI settings</h2>
     <p class="muted ai-note">Optional. Stored on this device only. It is not in Export backup. Your notes for a slide are sent to the address below when you use an AI button.</p>
     ${field('url', 'Address', s.url)}
-    <label class="ai-f"><span>Key</span><input id="ai-key" type="password" value="${esc(s.key)}" autocomplete="off" placeholder="Paste your key"></label>
+    <label class="ai-f"><span>Key (or your Worker token)</span><input id="ai-key" type="password" value="${esc(s.key)}" autocomplete="off" placeholder="Paste your key"></label>
     ${field('draft', 'Draft model', s.draft)}
     ${field('review', 'Review model (empty: same as Draft)', s.review)}
     ${field('backup', 'Backup model (used if the first fails)', s.backup)}
