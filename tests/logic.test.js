@@ -163,4 +163,39 @@ test('export then import round-trips', () => {
   assert.throws(() => store.importJSON('{"nope":1}'));
 });
 
+
+const { extractJSON, cleanReply } = await import('../js/ai/client.js');
+const { contextBefore, draftMessages, reviewMessages, validDraft, validReview } = await import('../js/ai/prompts.js');
+
+test('AI: JSON is pulled out of fences, text and reasoning tags', () => {
+  assert.deepEqual(extractJSON('```json\n{"a":1}\n```'), { a: 1 });
+  assert.deepEqual(extractJSON('<think>hmm {x}</think>Sure: {"steps":["a","b"]} done'), { steps: ['a', 'b'] });
+  assert.throws(() => extractJSON('no json here'));
+  assert.equal(cleanReply('<think>x</think> hi'), 'hi');
+});
+
+test('AI: prompts carry earlier answers and exact step counts', () => {
+  store.reset && store.reset();
+  const p = store.addProject('AI test');
+  const d = store.addDeck(p.id, 'Write intro');
+  const why = SLIDES.find((s) => s.key === 'vision.why');
+  d.notes['vision.why#1'] = 'Because readers need a hook';
+  const goal = SLIDES.find((s) => s.key === 'vision.goal');
+  const msgs = draftMessages(d, p, goal);
+  assert.match(msgs[1].content, /Because readers need a hook/);
+  assert.match(msgs[1].content, /exactly 2 strings/);
+  assert.equal(contextBefore(d, 0), '(nothing written yet)');
+  const rv = reviewMessages(d, p, STAGES[0]);
+  assert.match(rv[1].content, /Can I say it in two sentences\?/);
+  assert.match(rv[1].content, /\(empty\)/);
+});
+
+test('AI: replies are validated before they are shown', () => {
+  assert.ok(validDraft({ steps: ['a', 'b'] }, 2));
+  assert.ok(!validDraft({ steps: ['a'] }, 2));
+  assert.ok(!validDraft({ steps: ['a', 3] }, 2));
+  assert.ok(validReview({ verdict: 'almost', summary: 'x', gaps: [] }));
+  assert.ok(!validReview({ verdict: 'great', summary: 'x', gaps: [] }));
+});
+
 console.log(`\n${passed} tests passed`);

@@ -5,6 +5,8 @@ import {
 import { esc, $, formatDate, ICON } from '../util.js';
 import { go, rerender } from '../nav.js';
 import { stageBar } from './parts.js';
+import { aiReady } from '../ai/settings.js';
+import { draftDialog, reviewDialog } from '../ai/ui.js';
 
 export function slideView(deckId, nStr) {
   const deck = store.deck(deckId);
@@ -119,6 +121,10 @@ export function slideView(deckId, nStr) {
         deck.finished = null;
         store.save(deck);
         rerender();
+      } else if (el.dataset.act === 'ai-draft') {
+        draftDialog(deck, slide);
+      } else if (el.dataset.act === 'ai-review') {
+        reviewDialog(deck, slide.stage);
       } else if (el.dataset.act === 'print') {
         window.print();
       } else if (el.dataset.act === 'timer-start') {
@@ -237,6 +243,7 @@ function sub(deck, slide) {
     <div><span class="chip s-${stage.id}">${stage.name} ${slide.n} of ${stage.subs.length}</span></div>
     <div><h1>${esc(s.name)}</h1><p class="lead">${esc(s.what)}</p></div>
     <ul class="steps">${steps}</ul>
+    ${aiReady() ? '<div class="no-print"><button class="btn small ai-btn" data-act="ai-draft">Help me with this</button></div>' : ''}
     ${extra}
     <label class="notes">Notes for this slide<textarea data-note="${slide.key}" placeholder="Write here">${esc(deck.notes[slide.key] || '')}</textarea></label>
   </div>`;
@@ -258,6 +265,7 @@ function selah(deck, slide) {
       <button class="btn" data-selah="not">Not yet</button>
       <button class="btn primary" data-selah="ok">Continue</button>
     </div>
+    ${aiReady() ? '<div class="no-print"><button class="btn small ai-btn" data-act="ai-review">Review this stage</button></div>' : ''}
   </div>`;
 }
 

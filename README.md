@@ -71,3 +71,12 @@ Edit `js/framework.js` only. Stage names, sub-stages, steps and Selah questions 
 
 - Data is stored per browser on one device. Use Export backup and Import backup to move it.
 - The quick mode and a slide sorter are not built yet.
+
+## Optional AI helpers
+
+Off until you open **AI** on the home screen and add an address, a key and a model. Settings stay in this browser only (`vesper.ai`) and are not part of Export backup.
+
+- **Help me with this** (every step slide): drafts text for the step notes. Nothing is saved until you press Use.
+- **Review this stage** (Selah slides): points out gaps. It never moves a task on.
+- Works with any OpenAI-style chat endpoint (`<address>/chat/completions`). If the browser blocks the call, point the address at a small proxy or OpenRouter.
+- Code: `js/ai/` (`settings.js`, `client.js` network only, `prompts.js` pure, `ui.js` dialogs).
