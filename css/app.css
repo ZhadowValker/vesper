@@ -348,3 +348,14 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 .chat-clear{border:0;background:transparent;color:var(--faint);font-size:12.5px;cursor:pointer;text-decoration:underline}
 @media (prefers-reduced-motion:reduce){.typing i{animation:none}}
 .ai-panel form.composer{flex-direction:row;gap:8px;align-items:flex-end}
+
+/* Clickable metric tiles and the task list they open */
+button.metric{display:block;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer;transition:transform .15s,border-color .15s}
+button.metric:hover{border-color:var(--edge-strong)}
+button.metric:active{transform:scale(.98)}
+.modal.tasklist{max-width:460px;max-height:calc(100dvh - 32px);display:none;flex-direction:column;gap:12px}
+.tasklist[open]{display:flex}
+.tl-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.tl-body{overflow-y:auto;min-height:0;-webkit-overflow-scrolling:touch}
+.tl-body .item{text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:2px}
+.tl-body .sub{font-size:13px}

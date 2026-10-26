@@ -64,10 +64,10 @@ export function home() {
     </div>
     <div class="col">
       ${projects.length ? `<div class="o3 grid2">
-        <div class="metric"><div class="l">Active tasks</div><div class="n">${active.length}</div></div>
-        <div class="metric"><div class="l">At Selah</div><div class="n">${selahCount}</div></div>
-        <div class="metric"><div class="l">Finished</div><div class="n">${decks.length - active.length}</div></div>
-        <div class="metric"><div class="l">Loops so far</div><div class="n">${loops}</div></div>
+        <button type="button" class="metric" data-metric="active"><div class="l">Active tasks</div><div class="n">${active.length}</div></button>
+        <button type="button" class="metric" data-metric="selah"><div class="l">At Selah</div><div class="n">${selahCount}</div></button>
+        <button type="button" class="metric" data-metric="finished"><div class="l">Finished</div><div class="n">${decks.length - active.length}</div></button>
+        <button type="button" class="metric" data-metric="loops"><div class="l">Loops so far</div><div class="n">${loops}</div></button>
       </div>
       <div class="o4 card stack tight">
         <h2>Where tasks are now</h2>
@@ -93,12 +93,45 @@ export function home() {
     if (file) file.addEventListener('change', onFile);
     return () => root.removeEventListener('click', onClick);
 
+    // Tap a number to see the tasks behind it.
+    function showList(kind) {
+      const all = store.allDecks();
+      const sets = {
+        active: ['Active tasks', all.filter((d) => !d.finished), 'No active tasks.'],
+        selah: ['At Selah', all.filter(atSelah), 'Nothing is waiting at a Selah.'],
+        finished: ['Finished', all.filter((d) => d.finished), 'No finished tasks yet.'],
+        loops: ['Loops so far', all.filter((d) => d.loops > 0), 'No task has looped back yet.'],
+      };
+      const [title, list, none] = sets[kind];
+      const sorted = [...list].sort((a, b) => b.updated - a.updated);
+      const rows = sorted.map((d) => {
+        const p = store.project(d.projectId);
+        const st = deckStatus(d);
+        const sub = d.finished ? 'Finished' : atSelah(d) ? `${st.label}, paused at Selah` : st.label === 'Not started' ? 'Not started' : `${st.label}, ${st.pct}%`;
+        const extra = kind === 'loops' ? ` · ${d.loops} loop${d.loops === 1 ? '' : 's'}` : '';
+        return `<a class="item s-${st.stageId || ''}" href="#/d/${d.id}" data-close>
+          <span class="t">${esc(d.title)}</span><span class="sub">${esc(p ? p.name : '')} · ${esc(sub)}${extra}</span></a>`;
+      }).join('');
+      const dlg = document.createElement('dialog');
+      dlg.className = 'modal tasklist';
+      dlg.innerHTML = `<div class="tl-head"><h2>${esc(title)}</h2><span class="sub">${list.length}</span></div>
+        <div class="tl-body">${rows ? `<div class="list">${rows}</div>` : `<p class="muted">${esc(none)}</p>`}</div>
+        <div class="modal-actions"><button type="button" class="btn" data-close>Close</button></div>`;
+      document.body.appendChild(dlg);
+      const done = () => { dlg.close(); dlg.remove(); };
+      dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(); });
+      dlg.addEventListener('click', (e) => { if (e.target === dlg || e.target.closest('[data-close]')) done(); });
+      dlg.showModal();
+    }
+
     function openSample() {
       const have = store.findSample('book');
       go(`#/p/${(have || store.insertSample(buildSample())).id}`);
     }
 
     function onClick(e) {
+      const tile = e.target.closest('[data-metric]');
+      if (tile) { showList(tile.dataset.metric); return; }
       const btn = e.target.closest('[data-act]');
       if (!btn) return;
       const act = btn.dataset.act;
