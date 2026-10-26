@@ -6,6 +6,8 @@ import { resumeButton, stageBar } from './parts.js';
 import { buildSample } from '../sample.js';
 import { showGuide, guideSeen } from '../guide.js';
 import { openChatPanel } from '../ai/panel.js';
+import { syncDialog } from '../connect-ui.js';
+import { syncReady } from '../sync.js';
 
 export function home() {
   const decks = store.allDecks();
@@ -79,9 +81,10 @@ export function home() {
           <button class="btn small" data-act="export">Export backup</button>
           <button class="btn small" data-act="import">Import backup</button>
           <button class="btn small" data-act="sample">Sample</button>
+          <button class="btn small" data-act="sync">${syncReady() ? 'Sync: on' : 'Sync and Claude'}</button>
           <input type="file" accept="application/json,.json" id="import-file" hidden>
         </div>
-        <p class="sub">Everything is stored on this device only. Export a backup to move it elsewhere. Sample adds a book-writing project you can open, edit or delete.</p>
+        <p class="sub">Everything is stored on this device unless you turn on Sync. Export a backup to move it elsewhere. Sample adds a book-writing project you can open, edit or delete.</p>
       </div>
     </div>
   </div>`;
@@ -146,6 +149,8 @@ export function home() {
         a.download = `vesper-backup-${new Date().toISOString().slice(0, 10)}.json`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      } else if (act === 'sync') {
+        syncDialog({ onChange: rerender });
       } else if (act === 'sample') {
         openSample();
       } else if (act === 'ai') {

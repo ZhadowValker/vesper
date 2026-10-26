@@ -5,6 +5,7 @@ import { deckMap, mapLegend, drawTree } from '../mindmaps.js';
 import { go } from '../nav.js';
 import { resumeButton, stageBar } from './parts.js';
 import { openChatPanel } from '../ai/panel.js';
+import { exportDialog, calendarDialog } from '../connect-ui.js';
 
 export function deckView(id) {
   const deck = store.deck(id);
@@ -32,7 +33,7 @@ export function deckView(id) {
     </div>
     <h2 class="section">Mind map</h2>
     <div class="card">${deckMap(deck)}${mapLegend('Done', 'Current', 'Not yet')}<p class="sub map-note">Tap any name to jump to that slide. Selah is the pause at the end of each stage.</p></div>
-    <div class="footer-tools"><button class="btn small danger" data-act="delete-deck">Delete task</button></div>
+    <div class="footer-tools"><button class="btn small" data-act="calendar">Add to calendar</button><button class="btn small" data-act="export">Send elsewhere</button><button class="btn small danger" data-act="delete-deck">Delete task</button></div>
   </div>`;
 
   function mount(root) {
@@ -44,6 +45,8 @@ export function deckView(id) {
     async function onClick(e) {
       const chatBtn = e.target.closest('[data-act="ai-chat"]');
       if (chatBtn) { openChatPanel({ focusId: id }); return; }
+      const other = e.target.closest('[data-act="calendar"],[data-act="export"]');
+      if (other) { if (other.dataset.act === 'calendar') calendarDialog(deck); else exportDialog({ deck, project }); return; }
       const btn = e.target.closest('[data-act="delete-deck"]');
       if (!btn) return;
       const yes = await confirmBox(`Delete "${deck.title}"?`, 'Its notes and progress are deleted too. You can\'t undo it.');

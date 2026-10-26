@@ -2,33 +2,11 @@
 // The AI only turns each answer into clean notes. Everything here is plain logic with no
 // screen code, so it can be tested. If the AI fails, the person's own words are saved.
 import { STAGES, SLIDES, slideIndex, selahIndex } from '../framework.js';
-import { QUESTIONS } from './questions.js';
 import { contextBefore } from './prompts.js';
 import { applyActions } from './agent.js';
 
-export const stepKey = (slide, i) => `${slide.key}#${i}`;
-const filled = (deck, key) => !!(deck.notes[key] || '').trim();
-
-// Every step of the task in framework order, with its question.
-export function allSteps() {
-  const out = [];
-  for (const slide of SLIDES) {
-    if (slide.type !== 'sub') continue;
-    slide.sub.steps.forEach((text, i) => out.push({ key: stepKey(slide, i), slide, step: i, text, question: QUESTIONS[stepKey(slide, i)] }));
-  }
-  return out;
-}
-
-// Steps still to ask, in order. `skipped` is a list of step keys the person passed on.
-export function emptySteps(deck, skipped = []) {
-  return allSteps().filter((s) => !filled(deck, s.key) && !skipped.includes(s.key));
-}
-
-export function progress(deck) {
-  const steps = allSteps();
-  return { filled: steps.filter((s) => filled(deck, s.key)).length, total: steps.length };
-}
-
+import { stepKey, allSteps, emptySteps, progress, filled } from './steps.js';
+export { stepKey, allSteps, emptySteps, progress };
 const label = (s) => `${s.slide.stage.name} › ${s.slide.sub.name}`;
 
 // The text of the next question, with a heading when the slide or stage changes and a

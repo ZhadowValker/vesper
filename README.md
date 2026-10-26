@@ -88,3 +88,12 @@ The dashboard stays the home screen. The **AI** button (home, task and slide pag
 ### Interview mode
 
 The **Interview** tab in the AI panel asks the questions and fills the notes. Pick a project and task (or make new ones); the app asks one plain question per empty step in framework order (`js/ai/questions.js`, all 34). The AI only turns each answer into clean notes (`js/ai/interview.js`) and may fill other empty steps when an answer clearly covers them; if it fails, the person's own words are saved. "Skip" and "stop" work without the AI. At the end of each stage it reminds you of the Selah question and links to it, but never passes it.
+
+## Hub: sync, Claude connector, export, calendar (optional)
+
+A free Cloudflare Worker (`worker/vesper-hub.js`, setup in `worker/README.md`) adds:
+
+- **Sync** between devices (Overview → Sync and Claude).
+- **Claude connector**: Claude chats read your tasks, run the interview and fill steps. Selah is never passed by Claude.
+- **Send elsewhere**: copy, download or share any task or project as Markdown (Notion, Docs, GitHub, email).
+- **Add to calendar**: from a task, open Google Calendar with the entry filled in, or download an .ics file.

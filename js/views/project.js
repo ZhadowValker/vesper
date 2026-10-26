@@ -3,6 +3,7 @@ import { deckStatus, atSelah } from '../framework.js';
 import { esc, ask, confirmBox, ICON } from '../util.js';
 import { projectMap, mapLegend, drawTree } from '../mindmaps.js';
 import { go } from '../nav.js';
+import { exportDialog } from '../connect-ui.js';
 
 export function projectView(id) {
   const project = store.project(id);
@@ -32,7 +33,7 @@ export function projectView(id) {
     </div>
     <div class="card">${projectMap(project, decks)}${decks.length ? mapLegend('Finished', 'In progress', 'Not started') : ''}</div>
     ${decks.length ? `<h2 class="section">Tasks</h2><div class="list">${list}</div>` : ''}
-    <div class="footer-tools"><button class="btn small danger" data-act="delete-project">Delete project</button></div>
+    <div class="footer-tools"><button class="btn small" data-act="export">Send elsewhere</button><button class="btn small danger" data-act="delete-project">Delete project</button></div>
   </div>`;
 
   function mount(root) {
@@ -45,6 +46,8 @@ export function projectView(id) {
       if (btn.dataset.act === 'new-deck') {
         const title = await ask('Name this task', { ok: 'Create task', placeholder: 'Plan the move' });
         if (title) go(`#/d/${store.addDeck(id, title).id}`);
+      } else if (btn.dataset.act === 'export') {
+        exportDialog({ project, decks });
       } else if (btn.dataset.act === 'delete-project') {
         const yes = await confirmBox(`Delete "${project.name}"?`, `This also deletes its ${decks.length} task${decks.length === 1 ? '' : 's'}. You can't undo it.`);
         if (yes) { store.removeProject(id); go('#/'); }

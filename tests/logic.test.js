@@ -350,4 +350,31 @@ test('Interview: skip and stop are understood without the AI; everything fills t
   assert.equal(iv.nextQuestion(d, [], prev).target, null);
 });
 
+
+// ---- merge and sync ----
+import { mergeStates, sameState, emptyState } from '../js/merge.js';
+test('merge: newest wins, deletions stick, orphans dropped', () => {
+  const p = { id: 'p', name: 'P', created: 1, updated: 1 };
+  const d = (t, u) => ({ id: 'd', projectId: 'p', title: t, updated: u, created: 1, notes: {}, ticks: {}, selah: {} });
+  const a = { ...emptyState(), projects: [p], decks: [d('new', 9)] };
+  const b = { ...emptyState(), projects: [p], decks: [d('old', 3)] };
+  assert.equal(mergeStates(a, b).decks[0].title, 'new');
+  assert.equal(mergeStates(b, a).decks[0].title, 'new');
+  const gone = { ...emptyState(), projects: [p], decks: [], deleted: { d: 20 } };
+  assert.equal(mergeStates(a, gone).decks.length, 0);
+  const noProject = { ...emptyState(), projects: [], decks: [d('x', 5)], deleted: {} };
+  assert.equal(mergeStates(noProject, emptyState()).decks.length, 0);
+  assert.ok(sameState(mergeStates(a, b), mergeStates(b, a)));
+});
+
+import { taskMarkdown, googleCalendarLink, icsFile } from '../js/export.js';
+test('export: markdown keeps notes and ticks; calendar formats', () => {
+  const deck = { title: 'T', notes: { 'vision.why#0': 'Because' }, ticks: { 'vision.why:0': true }, selah: { vision: 1 } };
+  const md = taskMarkdown(deck, 'P');
+  assert.match(md, /- \[x\] Ask: why this task\?\n {2}Because/);
+  assert.match(md, /Selah: Can I say it in two sentences\?\* \(passed\)/);
+  const start = new Date(2026, 9, 27, 9, 0);
+  assert.match(googleCalendarLink({ title: 'a b', start }), /dates=20261027T090000%2F20261027T093000/);
+  assert.match(icsFile({ title: 'a,b', start }), /SUMMARY:a\\,b\r\nDESCRIPTION:/);
+});
 console.log(`\n${passed} tests passed`);

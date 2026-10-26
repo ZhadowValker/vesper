@@ -3,6 +3,7 @@ import { home } from './views/home.js';
 import { projectView } from './views/project.js';
 import { deckView } from './views/deck.js';
 import { slideView } from './views/slide.js';
+import { startSync } from './sync.js';
 
 const routes = [
   [/^#\/(overview)?$/, home],
@@ -32,6 +33,15 @@ function render() {
 setRenderer(render);
 window.addEventListener('hashchange', render);
 render();
+
+// Optional sync: when newer data arrives from another device, redraw in place (never on a slide, never under a dialog).
+document.addEventListener('vesper:synced', () => {
+  if (/\/s\/\d+$/.test(location.hash) || document.querySelector('dialog[open]')) return;
+  const y = window.scrollY;
+  render();
+  window.scrollTo(0, y);
+});
+startSync();
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
   window.addEventListener('load', () => {
