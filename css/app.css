@@ -44,8 +44,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 .muted{color:var(--muted)}
 
 /* glass surfaces */
-.card,.soft,.item,.metric,.banner,.back,.btn,.slide,.notes textarea,.timer input{
-  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
 .card{background:var(--glass);border:1px solid var(--edge);border-radius:26px;padding:16px;box-shadow:var(--shadow)}
 .soft{background:var(--glass);border:1px solid var(--edge-strong);border-radius:28px;padding:20px;box-shadow:var(--shadow)}
 .soft .btn.block{margin-top:2px}
@@ -135,7 +133,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 .steps input[type=checkbox]{width:24px;height:24px;margin:0;accent-color:var(--st,var(--acc));flex:none}
 .notes{display:flex;flex-direction:column;gap:8px;font-size:13.5px;color:var(--muted)}
 .steps li{display:flex;flex-direction:column;gap:2px;padding-bottom:6px}
-.step-note{width:100%;min-height:64px;resize:none;overflow:hidden;margin:0 0 4px;padding:10px 12px;border-radius:14px;border:1px solid var(--edge);background:rgba(14,11,36,.34);color:var(--ink);font-size:14.5px;line-height:1.45;-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
+.step-note{width:100%;min-height:64px;resize:none;overflow:hidden;margin:0 0 4px;padding:10px 12px;border-radius:14px;border:1px solid var(--edge);background:rgba(14,11,36,.34);color:var(--ink);font-size:14.5px;line-height:1.45}
 .step-note::placeholder{color:var(--faint)}
 .step-note:focus{border-color:var(--st,var(--acc))}
 .notes textarea{width:100%;min-height:104px;resize:none;overflow:hidden;padding:12px 14px;border-radius:16px;border:1px solid var(--edge-strong);background:rgba(14,11,36,.42);color:var(--ink);font-size:15.5px;line-height:1.45}
@@ -225,7 +223,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 
 /* dialogs */
 .modal{border:1px solid var(--edge-strong);border-radius:28px;padding:22px;width:calc(100vw - 32px);max-width:400px;color:var(--ink);background:linear-gradient(150deg,rgba(66,54,130,.92),rgba(24,18,62,.96));box-shadow:0 24px 80px rgba(6,4,24,.7),inset 0 1px 0 rgba(255,255,255,.22);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
-.modal::backdrop{background:rgba(6,4,24,.6);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.modal::backdrop{background:rgba(6,4,24,.74)}
 .modal form{display:flex;flex-direction:column;gap:14px}
 .modal h2{font-size:21px;font-weight:700;letter-spacing:-.01em}
 .modal input{height:50px;padding:0 16px;border-radius:16px;border:1px solid var(--edge-strong);background:rgba(14,11,36,.5);color:var(--ink);font-size:16px}
@@ -244,7 +242,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 .now-card .btn{min-width:0}
 
 /* welcome guide */
-.icon-btn{flex:none;width:44px;height:44px;border-radius:50%;border:1px solid var(--edge-strong);background:var(--glass);color:var(--ink);font-family:var(--display);font-weight:700;font-size:18px;cursor:pointer;-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
+.icon-btn{flex:none;width:44px;height:44px;border-radius:50%;border:1px solid var(--edge-strong);background:var(--glass);color:var(--ink);font-family:var(--display);font-weight:700;font-size:18px;cursor:pointer}
 .icon-btn:hover{background:linear-gradient(145deg,rgba(255,255,255,.2),rgba(255,255,255,.08))}
 .modal.guide{max-width:440px;padding:20px 22px 22px}
 .g-body{display:flex;flex-direction:column;gap:14px;min-height:500px}
