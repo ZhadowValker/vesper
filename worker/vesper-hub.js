@@ -8,6 +8,7 @@
 //   KV namespace binding   VESPER                (stores your data)
 //   Secret                 APP_TOKEN             (a long random text; the app and Claude use it)
 //   Secret (optional)      NVIDIA_API_KEY        (only for the AI proxy)
+//   Variable (optional)    ORIGINS               (extra website addresses allowed to call /sync, comma-separated)
 //   Variable (optional)    MODELS                (comma-separated model names the AI proxy allows)
 //
 // GENERATED FILE: edit worker/hub.src.js and the app modules, then run: node worker/build.js
@@ -629,7 +630,8 @@ export default {
 
     // The app: only from allowed origins, with the token.
     const origin = request.headers.get('Origin') || '';
-    if (!ALLOWED_ORIGINS.includes(origin)) return json(403, { error: 'origin not allowed' });
+    const extra = String(env.ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (!ALLOWED_ORIGINS.includes(origin) && !extra.includes(origin)) return json(403, { error: 'origin not allowed' });
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(origin) });
     if (!hasToken(env, bearer(request))) return json(401, { error: 'bad token' }, origin);
 

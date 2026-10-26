@@ -29,3 +29,20 @@ One Cloudflare Worker that gives Vesper three extras. The app works fine without
 - `worker/vesper-hub.js` is generated from the app's own code. After changing app logic run `node worker/build.js`, then paste the new file.
 - Sync merges by newest edit per task, and deletions are remembered. Edits made on two devices at the same moment to the same task keep the newest one.
 - Run `node tests/worker.test.js` to test the hub locally.
+
+## Run it on your own Node.js hosting (Hostinger) instead of Cloudflare
+
+`server.mjs` in the repo root serves the app and the same hub, so one address does everything (for example `https://vesper.soundmind.org.in`). No Cloudflare account needed.
+
+1. In hPanel add the subdomain `vesper.soundmind.org.in` and make sure its free SSL is on.
+2. **Websites → Add website → Node.js Apps**. Import the GitHub repo `ZhadowValker/vesper` (or upload the repo files as a zip). Pick Node 20 or newer, startup file `server.mjs`, and use `npm start` if it asks for a start command. Attach it to the subdomain.
+3. In the app's **Environment variables** add:
+   - `APP_TOKEN`: a long random text (30+ characters). You type this yourself and keep it private.
+   - `ORIGINS`: `https://vesper.soundmind.org.in`
+   - `DATA_DIR`: a folder outside the web files if the panel allows, otherwise leave it out (data then lives in `data/`, which the server never serves).
+   - `NVIDIA_API_KEY` and `MODELS`: only if you want the AI proxy.
+4. Deploy, then open the subdomain. Vesper loads from there.
+5. In Vesper: Overview → Sync and Claude. Hub address is the same subdomain (`https://vesper.soundmind.org.in`), token is your `APP_TOKEN`.
+6. Claude connector address: `https://vesper.soundmind.org.in/mcp/<APP_TOKEN>`.
+
+Back up the `data` folder now and then. After you update the code in GitHub, redeploy the app in hPanel.

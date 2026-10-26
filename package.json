@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Vesper: Vision, Research, Plan, Execute, Review. Static PWA for GitHub Pages, no build step.",
   "scripts": {
+    "start": "node server.mjs",
     "test": "node tests/logic.test.js",
     "serve": "python3 -m http.server 8080"
   }
