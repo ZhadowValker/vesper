@@ -198,4 +198,83 @@ test('AI: replies are validated before they are shown', () => {
   assert.ok(!validReview({ verdict: 'great', summary: 'x', gaps: [] }));
 });
 
+
+const { applyActions, parseTurn, buildMessages, stateText } = await import('../js/ai/agent.js');
+
+test('Bot: reads JSON replies, and falls back to plain text', () => {
+  const a = parseTurn('<think>x</think>```json\n{"reply":"Hi","actions":[{"type":"focus","task":"t"}]}\n```');
+  assert.equal(a.reply, 'Hi'); assert.equal(a.actions.length, 1);
+  const b = parseTurn('Just some words, no JSON.');
+  assert.equal(b.reply, 'Just some words, no JSON.'); assert.deepEqual(b.actions, []);
+});
+
+test('Bot: creates a project and task, fills and ticks steps, moves the task forward', () => {
+  store.reset();
+  const out = applyActions([
+    { type: 'create_project', name: 'Garden' },
+    { type: 'create_task', project: 'Garden', title: 'Build raised beds' },
+    { type: 'set_note', task: 'Build raised beds', slide: 'vision.why', step: 1, text: 'I want fresh vegetables' },
+    { type: 'set_note', task: 'Build raised beds', slide: 'vision.goal', step: 0, text: 'Two beds full of plants', tick: false },
+    { type: 'set_note', task: 'Build raised beds', slide: 'vision.limits', text: 'No irrigation system' },
+  ]);
+  const d = store.allDecks()[0];
+  assert.equal(store.projects().length, 1);
+  assert.equal(d.title, 'Build raised beds');
+  assert.equal(d.notes['vision.why#1'], 'I want fresh vegetables');
+  assert.equal(d.ticks['vision.why:1'], true);
+  assert.ok(!d.ticks['vision.goal:0']);
+  assert.equal(d.notes['vision.limits'], 'No irrigation system');
+  assert.equal(d.slide, fw.slideIndex('vision.limits'));
+  assert.equal(out.focus, d.id);
+  assert.equal(out.changes.length, 5);
+  assert.equal(out.skipped.length, 0);
+});
+
+test('Bot: never passes a Selah, never moves past an unpassed one', () => {
+  const d = store.allDecks()[0];
+  applyActions([{ type: 'set_note', task: d.id, slide: 'plan.map', step: 0, text: 'Buy wood' }]);
+  assert.equal(d.notes['plan.map#0'], 'Buy wood');
+  assert.equal(d.slide, fw.selahIndex('vision'));   // held at the first unpassed Selah
+  assert.ok(!d.selah.vision);
+  const r = applyActions([{ type: 'selah', task: d.id, stage: 'vision' }, { type: 'delete_task', task: d.id }]);
+  assert.equal(r.skipped.length, 2);
+  assert.equal(store.allDecks().length, 1);
+});
+
+test('Bot: keeps what the person wrote, validates slides and steps', () => {
+  const d = store.allDecks()[0];
+  applyActions([{ type: 'set_note', task: d.id, slide: 'vision.why', step: 1, text: 'And it saves money' }]);
+  assert.equal(d.notes['vision.why#1'], 'I want fresh vegetables\nAnd it saves money');
+  applyActions([{ type: 'set_note', task: d.id, slide: 'vision.why', step: 1, text: 'And it saves money' }]);
+  assert.equal(d.notes['vision.why#1'], 'I want fresh vegetables\nAnd it saves money');
+  applyActions([{ type: 'set_note', task: d.id, slide: 'vision.why', step: 1, text: 'Only this', mode: 'replace' }]);
+  assert.equal(d.notes['vision.why#1'], 'Only this');
+  const r = applyActions([
+    { type: 'set_note', task: d.id, slide: 'vision.nope', step: 0, text: 'x' },
+    { type: 'set_note', task: d.id, slide: 'vision.why', step: 9, text: 'x' },
+    { type: 'set_note', task: d.id, slide: 'vision.selah', text: 'x' },
+    { type: 'set_note', task: 'ghost', slide: 'vision.why', step: 0, text: 'x' },
+    { type: 'set_note', task: d.id, slide: 'vision.why', step: 0, text: '   ' },
+  ]);
+  assert.equal(r.skipped.length, 5); assert.equal(r.changes.length, 0);
+});
+
+test('Bot: the prompt knows the framework and the current task', () => {
+  const d = store.allDecks()[0];
+  const m = buildMessages([{ r: 'u', t: 'hi' }, { r: 'b', t: 'Hello' }], 'next?', d.id);
+  assert.equal(m[0].role, 'system'); assert.match(m[0].content, /vision\.why/); assert.match(m[0].content, /Build raised beds/);
+  assert.equal(m.length, 4); assert.equal(m[3].content, 'next?');
+  assert.match(stateText(d.id), /vision\.why: \[0\]/);
+});
+
+test('Bot: undo works by restoring the saved state', () => {
+  store.reset();
+  const before = store.exportJSON();
+  applyActions([{ type: 'create_project', name: 'X' }]);
+  const after = store.exportJSON();
+  assert.notEqual(before, after);
+  store.importJSON(before);
+  assert.equal(store.projects().length, 0);
+});
+
 console.log(`\n${passed} tests passed`);

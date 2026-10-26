@@ -52,6 +52,7 @@ export function home() {
   const html = `<div class="page stack home">
     <div class="top">
       <div class="grow"><h1>Vesper</h1><p class="sub">Vision, Research, Plan, Execute, Review</p></div>
+      <a class="btn small" href="#/">Chat</a>
       <button class="icon-btn ai-set" data-act="ai" aria-label="AI settings">AI</button>
       <button class="icon-btn" data-act="guide" aria-label="How to use Vesper">?</button>
       <button class="btn small" data-act="new-project">${ICON.plus}Project</button>
@@ -88,7 +89,6 @@ export function home() {
 
   function mount(root) {
     root.addEventListener('click', onClick);
-    if (!guideSeen()) showGuide().then((r) => { if (r === 'sample') openSample(); });
     const file = $('#import-file', root);
     if (file) file.addEventListener('change', onFile);
     return () => root.removeEventListener('click', onClick);

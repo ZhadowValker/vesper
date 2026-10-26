@@ -1,4 +1,4 @@
-const VERSION = 'vesper-v21';
+const VERSION = 'vesper-v22';
 const ASSETS = [
   './',
   'index.html',
@@ -16,6 +16,8 @@ const ASSETS = [
   'js/ai/client.js',
   'js/ai/prompts.js',
   'js/ai/ui.js',
+  'js/ai/agent.js',
+  'js/ai/chatstate.js',
   'js/util.js',
   'js/nav.js',
   'js/mindmaps.js',
@@ -24,6 +26,7 @@ const ASSETS = [
   'js/views/deck.js',
   'js/views/slide.js',
   'js/views/parts.js',
+  'js/views/chat.js',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png'

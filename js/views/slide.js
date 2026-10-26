@@ -297,5 +297,5 @@ function recap(deck, project) {
 }
 
 function notFound() {
-  return `<div class="page"><div class="card empty"><h2>Task not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/">Back to dashboard</a></div></div>`;
+  return `<div class="page"><div class="card empty"><h2>Task not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/overview">Back to overview</a></div></div>`;
 }

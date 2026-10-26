@@ -21,7 +21,7 @@ export function projectView(id) {
 
   const html = `<div class="page stack">
     <div class="top">
-      <a class="back" href="#/" aria-label="Back to dashboard">${ICON.back}</a>
+      <a class="back" href="#/overview" aria-label="Back to overview">${ICON.back}</a>
       <div class="grow"><h1>${esc(project.name)}</h1><p class="sub">Project</p></div>
       <button class="btn small" data-act="new-deck">${ICON.plus}Task</button>
     </div>
@@ -47,7 +47,7 @@ export function projectView(id) {
         if (title) go(`#/d/${store.addDeck(id, title).id}`);
       } else if (btn.dataset.act === 'delete-project') {
         const yes = await confirmBox(`Delete "${project.name}"?`, `This also deletes its ${decks.length} task${decks.length === 1 ? '' : 's'}. You can't undo it.`);
-        if (yes) { store.removeProject(id); go('#/'); }
+        if (yes) { store.removeProject(id); go('#/overview'); }
       }
     }
   }
@@ -55,5 +55,5 @@ export function projectView(id) {
 }
 
 function notFound() {
-  return `<div class="page"><div class="card empty"><h2>Project not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/">Back to dashboard</a></div></div>`;
+  return `<div class="page"><div class="card empty"><h2>Project not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/overview">Back to overview</a></div></div>`;
 }

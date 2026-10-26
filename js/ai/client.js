@@ -71,3 +71,20 @@ export async function askJSON(messages, slot = 'draft', { signal } = {}) {
   }
   throw lastErr;
 }
+
+// Plain chat turn: try the Draft model, then the backup. Returns the reply text.
+export async function askChat(messages, { signal, maxTokens = 3000 } = {}) {
+  const s = getAI();
+  const models = [s.draft];
+  if (s.backup && s.backup !== s.draft) models.push(s.backup);
+  let lastErr;
+  for (const model of models) {
+    try {
+      return await chatOnce(messages, model, { signal, maxTokens });
+    } catch (e) {
+      lastErr = e;
+      if (e.kind === 'auth' || e.kind === 'network' || (signal && signal.aborted)) break;
+    }
+  }
+  throw lastErr;
+}
