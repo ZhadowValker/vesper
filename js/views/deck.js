@@ -4,6 +4,7 @@ import { esc, confirmBox, ICON } from '../util.js';
 import { deckMap, mapLegend, drawTree } from '../mindmaps.js';
 import { go } from '../nav.js';
 import { resumeButton, stageBar } from './parts.js';
+import { openChatPanel } from '../ai/panel.js';
 
 export function deckView(id) {
   const deck = store.deck(id);
@@ -23,6 +24,7 @@ export function deckView(id) {
     <div class="top">
       <a class="back" href="#/p/${deck.projectId}" aria-label="Back to project">${ICON.back}</a>
       <div class="grow"><h1>${esc(deck.title)}</h1><p class="sub">${esc(project ? project.name : '')}${deck.passes > 1 ? `, pass ${deck.passes}` : ''}</p></div>
+      <button class="icon-btn ai-set" data-act="ai-chat" aria-label="Open the AI assistant">AI</button>
     </div>
     <div class="card now-card">
       <div class="now-text"><p class="sub">Now</p><p class="now-t">${esc(now)}</p><p class="sub">Slide ${deck.slide + 1} of ${SLIDES.length}</p>${stageBar(deck.slide)}</div>
@@ -40,6 +42,8 @@ export function deckView(id) {
     if (here && here.scrollIntoView) here.scrollIntoView({ block: 'center', behavior: 'auto' });
     return () => { root.removeEventListener('click', onClick); stopTree(); };
     async function onClick(e) {
+      const chatBtn = e.target.closest('[data-act="ai-chat"]');
+      if (chatBtn) { openChatPanel({ focusId: id }); return; }
       const btn = e.target.closest('[data-act="delete-deck"]');
       if (!btn) return;
       const yes = await confirmBox(`Delete "${deck.title}"?`, 'Its notes and progress are deleted too. You can\'t undo it.');
@@ -50,5 +54,5 @@ export function deckView(id) {
 }
 
 function notFound() {
-  return `<div class="page"><div class="card empty"><h2>Task not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/overview">Back to overview</a></div></div>`;
+  return `<div class="page"><div class="card empty"><h2>Task not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/">Back to dashboard</a></div></div>`;
 }

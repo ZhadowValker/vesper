@@ -29,7 +29,7 @@ const msgOf = (e) => (e instanceof AIError ? e.message : 'Something went wrong. 
 
 // ---- Settings -------------------------------------------------------------------------
 
-export function aiSettingsDialog() {
+export function aiSettingsDialog({ onSaved } = {}) {
   const s = getAI();
   const field = (id, label, val, extra = '') =>
     `<label class="ai-f"><span>${label}</span><input id="ai-${id}" value="${esc(val)}" autocomplete="off" autocapitalize="off" spellcheck="false" ${extra}></label>`;
@@ -57,7 +57,7 @@ export function aiSettingsDialog() {
     e.preventDefault();
     saveAI(read());
     ctl.close();
-    rerender();
+    if (onSaved) onSaved(); else rerender();
   });
   ctl.dlg.querySelector('[data-x=test]').addEventListener('click', async () => {
     saveAI(read());

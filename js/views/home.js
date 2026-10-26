@@ -5,7 +5,7 @@ import { go, rerender } from '../nav.js';
 import { resumeButton, stageBar } from './parts.js';
 import { buildSample } from '../sample.js';
 import { showGuide, guideSeen } from '../guide.js';
-import { aiSettingsDialog } from '../ai/ui.js';
+import { openChatPanel } from '../ai/panel.js';
 
 export function home() {
   const decks = store.allDecks();
@@ -52,8 +52,7 @@ export function home() {
   const html = `<div class="page stack home">
     <div class="top">
       <div class="grow"><h1>Vesper</h1><p class="sub">Vision, Research, Plan, Execute, Review</p></div>
-      <a class="btn small" href="#/">Chat</a>
-      <button class="icon-btn ai-set" data-act="ai" aria-label="AI settings">AI</button>
+      <button class="icon-btn ai-set" data-act="ai" aria-label="Open the AI assistant">AI</button>
       <button class="icon-btn" data-act="guide" aria-label="How to use Vesper">?</button>
       <button class="btn small" data-act="new-project">${ICON.plus}Project</button>
     </div>
@@ -89,6 +88,7 @@ export function home() {
 
   function mount(root) {
     root.addEventListener('click', onClick);
+    if (!guideSeen()) showGuide().then((r) => { if (r === 'sample') openSample(); });
     const file = $('#import-file', root);
     if (file) file.addEventListener('change', onFile);
     return () => root.removeEventListener('click', onClick);
@@ -116,7 +116,7 @@ export function home() {
       } else if (act === 'sample') {
         openSample();
       } else if (act === 'ai') {
-        aiSettingsDialog();
+        openChatPanel();
       } else if (act === 'guide') {
         showGuide().then((r) => { if (r === 'sample') openSample(); });
       } else if (act === 'import') {

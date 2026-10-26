@@ -7,6 +7,7 @@ import { go, rerender } from '../nav.js';
 import { stageBar } from './parts.js';
 import { aiReady } from '../ai/settings.js';
 import { draftDialog, reviewDialog } from '../ai/ui.js';
+import { openChatPanel } from '../ai/panel.js';
 
 export function slideView(deckId, nStr) {
   const deck = store.deck(deckId);
@@ -23,6 +24,7 @@ export function slideView(deckId, nStr) {
     <div class="head">
       <a class="back" href="#/d/${deck.id}" aria-label="Back to task">${ICON.back}</a>
       <div class="meta">${esc(deck.title)}${project ? ', ' + esc(project.name) : ''}</div>
+      <button class="icon-btn ai-set no-print" data-act="ai-chat" aria-label="Open the AI assistant">AI</button>
     </div>
     ${stageBar(n)}
     ${body(deck, slide, project)}
@@ -121,6 +123,8 @@ export function slideView(deckId, nStr) {
         deck.finished = null;
         store.save(deck);
         rerender();
+      } else if (el.dataset.act === 'ai-chat') {
+        openChatPanel({ focusId: deck.id });
       } else if (el.dataset.act === 'ai-draft') {
         draftDialog(deck, slide);
       } else if (el.dataset.act === 'ai-review') {
@@ -297,5 +301,5 @@ function recap(deck, project) {
 }
 
 function notFound() {
-  return `<div class="page"><div class="card empty"><h2>Task not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/overview">Back to overview</a></div></div>`;
+  return `<div class="page"><div class="card empty"><h2>Task not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/">Back to dashboard</a></div></div>`;
 }

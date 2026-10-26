@@ -1,13 +1,11 @@
 import { setRenderer } from './nav.js';
 import { home } from './views/home.js';
-import { chatView } from './views/chat.js';
 import { projectView } from './views/project.js';
 import { deckView } from './views/deck.js';
 import { slideView } from './views/slide.js';
 
 const routes = [
-  [/^#\/?$/, chatView],
-  [/^#\/overview$/, home],
+  [/^#\/(overview)?$/, home],
   [/^#\/p\/(\w+)$/, projectView],
   [/^#\/d\/(\w+)$/, deckView],
   [/^#\/d\/(\w+)\/s\/(\d+)$/, slideView],

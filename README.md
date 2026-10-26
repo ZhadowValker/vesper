@@ -81,6 +81,6 @@ Off until you open **AI** on the home screen and add an address, a key and a mod
 - Works with any OpenAI-style chat endpoint (`<address>/chat/completions`). If the browser blocks the call, point the address at a small proxy or OpenRouter.
 - Code: `js/ai/` (`settings.js`, `client.js` network only, `prompts.js` pure, `ui.js` dialogs).
 
-## Chat is the home screen
+## AI assistant (optional)
 
-`#/` is a chat (`js/views/chat.js`). The old dashboard is at `#/overview`. With AI set up, you talk in plain words and the assistant (`js/ai/agent.js`) creates projects and tasks, fills step notes, ticks steps and moves a task forward. It cannot pass a Selah, delete anything or finish a task. Every turn that changes something has an Undo (only while nothing else has changed). Chat history is in `vesper.chat`, separate from task data.
+The dashboard stays the home screen. The **AI** button (home, task and slide pages) opens a chat panel (`js/ai/panel.js`). The settings icon inside the panel opens the address, key and model form. With AI set up you talk in plain words and the assistant (`js/ai/agent.js`) creates projects and tasks, fills step notes, ticks steps and moves a task forward. It cannot pass a Selah, delete anything or finish a task. Each turn that changes something has an Undo (only while nothing else has changed). Chat history is in `vesper.chat`, separate from task data.
