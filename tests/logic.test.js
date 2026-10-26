@@ -277,4 +277,77 @@ test('Bot: undo works by restoring the saved state', () => {
   assert.equal(store.projects().length, 0);
 });
 
+
+const iv = await import('../js/ai/interview.js');
+const { QUESTIONS } = await import('../js/ai/questions.js');
+
+test('Interview: every one of the 34 steps has a question, in framework order', () => {
+  const steps = iv.allSteps();
+  assert.equal(steps.length, 34);
+  assert.ok(steps.every((s) => typeof s.question === 'string' && s.question.length > 10));
+  assert.equal(Object.keys(QUESTIONS).length, 34);
+  assert.equal(steps[0].key, 'vision.why#0');
+  assert.equal(steps[33].key, 'review.done#0');
+});
+
+test('Interview: asks the first empty step, skips filled and skipped ones', () => {
+  store.reset();
+  const p = store.addProject('Trip'); const d = store.addDeck(p.id, 'Plan Goa trip');
+  assert.equal(iv.emptySteps(d)[0].key, 'vision.why#0');
+  d.notes['vision.why#0'] = 'Need a break';
+  assert.equal(iv.emptySteps(d)[0].key, 'vision.why#1');
+  assert.equal(iv.emptySteps(d, ['vision.why#1'])[0].key, 'vision.goal#0');
+  assert.deepEqual(iv.progress(d), { filled: 1, total: 34 });
+  const q = iv.nextQuestion(d, [], null);
+  assert.equal(q.target.key, 'vision.why#1'); assert.match(q.text, /Vision › Why/);
+});
+
+test('Interview: AI notes fill the asked step and extra empty steps, nothing else', () => {
+  const d = store.allDecks()[0];
+  const target = iv.emptySteps(d)[0];                      // vision.why#1
+  const reply = { ack: 'Got it.', notes: [
+    { slide: 'vision.why', step: 1, text: 'I am burnt out and need rest.' },
+    { slide: 'vision.goal', step: 0, text: 'Me on a beach, phone off.' },
+    { slide: 'vision.why', step: 0, text: 'OVERWRITE ATTEMPT' },      // already filled: ignored
+    { slide: 'plan.map', step: 0, text: 'x' },                          // empty but allowed? yes it is empty
+  ] };
+  const r = iv.saveAnswer(d, target, 'burnt out', reply);
+  assert.equal(d.notes['vision.why#1'], 'I am burnt out and need rest.');
+  assert.equal(d.notes['vision.goal#0'], 'Me on a beach, phone off.');
+  assert.equal(d.notes['vision.why#0'], 'Need a break');
+  assert.equal(r.fallback, false); assert.equal(r.ack, 'Got it.');
+});
+
+test('Interview: if the AI gives nothing, the person\'s own words are saved', () => {
+  const d = store.allDecks()[0];
+  const target = iv.emptySteps(d)[0];                      // vision.goal#1
+  const r = iv.saveAnswer(d, target, 'A relaxed week by the sea', null);
+  assert.equal(d.notes[target.key], 'A relaxed week by the sea');
+  assert.equal(r.fallback, true);
+  const r2 = iv.saveAnswer(d, iv.emptySteps(d)[0], 'my words', { ack: '', notes: [{ slide: 'nope', step: 0, text: 'bad' }] });
+  assert.equal(r2.fallback, true);
+});
+
+test('Interview: finishing a stage reminds about Selah but never passes it', () => {
+  const d = store.allDecks()[0];
+  const stepsV = iv.allSteps().filter((s) => s.slide.stage.id === 'vision');
+  stepsV.forEach((s) => { d.notes[s.key] = d.notes[s.key] || 'x'; });
+  const prev = stepsV[stepsV.length - 1];
+  const q = iv.nextQuestion(d, [], prev);
+  assert.match(q.text, /Vision\*\* is filled in/); assert.match(q.text, /Can I say it in two sentences/);
+  assert.equal(q.links[0].href, `#/d/${d.id}/s/${fw.selahIndex('vision')}`);
+  assert.ok(!d.selah.vision);
+  assert.equal(q.target.slide.stage.id, 'research');
+});
+
+test('Interview: skip and stop are understood without the AI; everything fills to the end', () => {
+  assert.equal(iv.intentOf('Skip.'), 'skip'); assert.equal(iv.intentOf("don't know"), 'skip');
+  assert.equal(iv.intentOf('stop'), 'stop'); assert.equal(iv.intentOf('my skip plan'), null);
+  const d = store.allDecks()[0];
+  let n = 0, prev = null;
+  while (n++ < 40) { const q = iv.nextQuestion(d, [], prev); if (!q.target) break; iv.saveAnswer(d, q.target, `a${n}`, null); prev = q.target; }
+  assert.deepEqual(iv.progress(d), { filled: 34, total: 34 });
+  assert.equal(iv.nextQuestion(d, [], prev).target, null);
+});
+
 console.log(`\n${passed} tests passed`);

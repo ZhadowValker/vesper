@@ -84,3 +84,7 @@ Off until you open **AI** on the home screen and add an address, a key and a mod
 ## AI assistant (optional)
 
 The dashboard stays the home screen. The **AI** button (home, task and slide pages) opens a chat panel (`js/ai/panel.js`). The settings icon inside the panel opens the address, key and model form. With AI set up you talk in plain words and the assistant (`js/ai/agent.js`) creates projects and tasks, fills step notes, ticks steps and moves a task forward. It cannot pass a Selah, delete anything or finish a task. Each turn that changes something has an Undo (only while nothing else has changed). Chat history is in `vesper.chat`, separate from task data.
+
+### Interview mode
+
+The **Interview** tab in the AI panel asks the questions and fills the notes. Pick a project and task (or make new ones); the app asks one plain question per empty step in framework order (`js/ai/questions.js`, all 34). The AI only turns each answer into clean notes (`js/ai/interview.js`) and may fill other empty steps when an answer clearly covers them; if it fails, the person's own words are saved. "Skip" and "stop" work without the AI. At the end of each stage it reminds you of the Selah question and links to it, but never passes it.

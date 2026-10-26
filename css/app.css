@@ -357,3 +357,18 @@ button.metric:active{transform:scale(.98)}
 .tl-body{overflow-y:auto;min-height:0;-webkit-overflow-scrolling:touch}
 .tl-body .item{text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:2px}
 .tl-body .sub{font-size:13px}
+
+/* Interview tab */
+.pn-tabs{flex:none;display:flex;gap:4px;margin:0 16px 6px;padding:4px;border-radius:999px;border:1px solid var(--edge);background:rgba(14,11,36,.4)}
+.pn-tabs button{flex:1;height:36px;border:0;border-radius:999px;background:transparent;color:var(--muted);font-weight:600;font-size:14px;cursor:pointer}
+.pn-tabs button[aria-selected=true]{background:#f3efff;color:#1d1440}
+.iv-setup{display:flex;flex-direction:column;gap:12px;padding:6px 2px}
+.iv-setup h2{font-size:24px;font-weight:700;letter-spacing:-.02em}
+.iv-setup select,.iv-in{height:46px;padding:0 14px;border-radius:16px;border:1px solid var(--edge-strong);background:rgba(14,11,36,.5);color:var(--ink);font-size:15px;width:100%}
+.iv-setup select option{color:#111}
+.iv-in[hidden]{display:none}
+.iv-chips{flex:none;display:flex;gap:8px;flex-wrap:wrap;padding:4px 16px 8px}
+.iv-chips[hidden]{display:none}
+.iv-links{display:flex;flex-wrap:wrap;gap:8px}
+.iv-links .btn{text-decoration:none}
+.ai-panel form.composer[hidden]{display:none}

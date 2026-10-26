@@ -1,4 +1,4 @@
-const VERSION = 'vesper-v26';
+const VERSION = 'vesper-v27';
 const ASSETS = [
   './',
   'index.html',
@@ -17,6 +17,8 @@ const ASSETS = [
   'js/ai/prompts.js',
   'js/ai/ui.js',
   'js/ai/agent.js',
+  'js/ai/questions.js',
+  'js/ai/interview.js',
   'js/ai/chatstate.js',
   'js/ai/panel.js',
   'js/util.js',
