@@ -70,7 +70,7 @@ Add these two permissions under Data Access in Google Cloud before reconnecting:
 Anyone can sign in with Google. Each person gets their own private space on your hub, and a copy of their data is kept in a hidden app folder in their own Google Drive. Your own token and Claude connector keep working exactly as before. People who sign in cannot use your Claude connector or your shared AI key (they can enter their own AI key in AI settings).
 
 Set up (uses the same Google Cloud project as the calendar):
-1. **Google Auth Platform → Data Access**: add the scope `https://www.googleapis.com/auth/drive.appdata`. (`openid`, `email` and `profile` are already included.)
+1. **Google Auth Platform → Data Access**: add the scopes `drive.appdata`, `calendar.events`, `calendar.app.created` and `calendar.calendarlist.readonly`. One sign-in now asks for all of them together. (`openid`, `email` and `profile` are already included.)
 2. **Branding**: set the **Application home page** to `https://vesper.soundmind.org.in` and **Privacy policy link** to `https://vesper.soundmind.org.in/privacy.html`. Save.
 3. **Audience**: press **Publish app**. While it says "Testing", only the test users you listed can sign in.
 4. In Hostinger add these variables and redeploy:

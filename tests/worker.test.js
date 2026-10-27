@@ -251,7 +251,7 @@ await test('login: start needs a known website, asks for sign-in and Drive-only 
   const none = await call('/auth/google/start', { method: 'POST' });
   assert.equal(none.status, 403);
   const { start } = await signIn('ann@x.com', 'sub-ann');
-  assert.deepEqual(start.searchParams.get('scope').split(' '), ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/drive.appdata']);
+  assert.deepEqual(start.searchParams.get('scope').split(' '), ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/drive.appdata', 'https://www.googleapis.com/auth/calendar.events', 'https://www.googleapis.com/auth/calendar.app.created', 'https://www.googleapis.com/auth/calendar.calendarlist.readonly']);
   assert.equal(start.searchParams.get('redirect_uri'), 'https://vesper.test/google/callback');
 });
 
@@ -276,6 +276,8 @@ await test('login: a person gets a session and a private space', async () => {
   assert.deepEqual(annAgain.state.projects.map((x) => x.name), ['Ann project']);
   const owner = await (await call('/sync', { headers: app })).json();
   assert.ok(!owner.state.projects.some((x) => x.name === 'Ann project'));
+  const gs = await (await call('/google/status', { headers: as(ann.token) })).json();
+  assert.equal(gs.connected, true);   // one sign-in also connected her calendar
 });
 
 await test('connector: Ann\'s personal link shows only Ann\'s projects, and Bob can turn his off', async () => {
@@ -312,7 +314,9 @@ await test('login: calendar connect works per person', async () => {
   const state = new URL(start.url).searchParams.get('state');
   assert.match(await (await call(`/google/callback?code=goodcode&state=${state}`)).text(), /connected/);
   assert.equal((await (await call('/google/status', { headers: as(ann.token) })).json()).connected, true);
-  assert.equal((await (await call('/google/status', { headers: as(bob.token) })).json()).connected, false);
+  await call('/google/disconnect', { method: 'POST', headers: as(bob.token) });
+  assert.equal((await (await call('/google/status', { headers: as(bob.token) })).json()).connected, false);   // Bob disconnecting does not touch Ann
+  assert.equal((await (await call('/google/status', { headers: as(ann.token) })).json()).connected, true);
   const own = await (await call('/google/calendars', { headers: as(ann.token) })).json();
   assert.equal(own.calendars.length, 2);
   assert.ok(gcalls.some((c) => c.url.includes('showHidden=true')));

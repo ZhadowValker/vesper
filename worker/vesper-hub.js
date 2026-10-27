@@ -544,7 +544,8 @@ async function gCallback(request, env) {
 }
 
 // ---- Sign in with Google ----------------------------------------------------------------
-const G_LOGIN_SCOPE = 'openid email profile https://www.googleapis.com/auth/drive.appdata';
+// One sign-in asks for everything Vesper uses: who you are, the hidden Drive copy, and your calendar.
+const G_LOGIN_SCOPE = 'openid email profile https://www.googleapis.com/auth/drive.appdata ' + G_SCOPE;
 const SESSION_DAYS = 90;
 const emails = (v) => String(v || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
 
@@ -574,7 +575,11 @@ async function loginDone(env, ok, tok) {
     await env.VESPER.put('user:' + sub, JSON.stringify({ email, at: Date.now() }));
   }
   const space = owner ? ownerEnv(env) : userEnv(env, sub);
-  if (tok.refresh_token) await space.VESPER.put('drive', JSON.stringify({ ...((await space.VESPER.get('drive', 'json')) || {}), refresh: tok.refresh_token }));
+  // Google lets people untick parts of the request, so keep only what was actually allowed.
+  const granted = String(tok.scope || '');
+  const has = (part) => !granted || granted.includes(part);
+  if (tok.refresh_token && has('drive.appdata')) await space.VESPER.put('drive', JSON.stringify({ ...((await space.VESPER.get('drive', 'json')) || {}), refresh: tok.refresh_token }));
+  if (tok.refresh_token && has('calendar.events')) await space.VESPER.put('google', JSON.stringify({ refresh: tok.refresh_token, scope: granted, at: Date.now() }));
   const token = gRand() + gRand();
   await env.VESPER.put('sess:' + (await sha(token)), JSON.stringify({ sub, email, owner, exp: Date.now() + SESSION_DAYS * 86400000 }));
   const once = gRand();

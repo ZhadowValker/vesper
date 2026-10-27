@@ -41,7 +41,7 @@ export function loginDialog() {
   return new Promise((resolve) => {
     const { dlg, close } = open(`<form>
       <h2>Welcome to Vesper</h2>
-      <p class="ai-note">Sign in with Google to keep your projects on every device, with a copy in your own Google Drive. Or carry on without an account; everything then stays on this device.</p>
+      <p class="ai-note">Sign in with Google once to keep your projects on every device, with a copy in your own Google Drive, and to add tasks to your Google Calendar. Google shows one permission screen; you can untick anything you don't want. Or carry on without an account; everything then stays on this device.</p>
       <p class="ai-status" role="status"></p>
       <div class="modal-actions ai-actions">
         <button type="button" class="btn" data-act="google">Continue with Google</button>
