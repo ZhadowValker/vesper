@@ -120,7 +120,11 @@ export function syncDialog({ onChange } = {}) {
     }).catch(() => { cell('drive').textContent = cell('mcp').textContent = 'Could not check'; });
     hubCall('/google/status').then((r) => {
       const g = r && r.ok ? r.data : null;
-      cell('cal').textContent = !g ? 'Could not check' : !g.configured ? 'Not set up on this hub' : g.connected ? 'Connected. Calendar: ' + (g.calendar || 'primary') : 'Not connected. Open Add to calendar on a task to connect.';
+      const calBtn = (t) => `<button type="button" class="btn ghost small" data-act="calconnect">${t}</button>`;
+      if (!g) cell('cal').textContent = 'Could not check';
+      else if (!g.configured) cell('cal').textContent = 'Not set up on this hub';
+      else if (g.connected) cell('cal').innerHTML = 'Connected. Calendar: ' + esc(g.calendar || 'primary') + ' ' + calBtn('Reconnect') + '<br><span class="muted">Pick or create the calendar from Add to calendar on a task.</span>';
+      else cell('cal').innerHTML = calBtn('Connect Google Calendar');
     }).catch(() => { cell('cal').textContent = 'Could not check'; });
   }
 
@@ -141,6 +145,11 @@ export function syncDialog({ onChange } = {}) {
       say('Opening Google...');
       try { await googleSignIn((form.url.value || '').trim() || location.origin); }
       catch (err) { say(err.message.includes('Failed to fetch') ? 'Could not reach the hub. Open Vesper from your own hub address, or fill in the address under advanced.' : err.message, true); }
+    } else if (act === 'calconnect') {
+      say('Opening Google...');
+      const r = await hubCall('/google/start', { method: 'POST' }).catch(() => null);
+      if (r && r.ok && r.data.url) location.assign(r.data.url);
+      else say((r && r.data && r.data.error) || 'Could not start the Google sign-in.', true);
     } else if (act === 'mcpnew') {
       const r = await hubCall('/me/mcp-link', { method: 'POST', body: {} }).catch(() => null);
       if (!r || !r.ok) { say('Could not create the link.', true); return; }
