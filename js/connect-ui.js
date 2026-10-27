@@ -104,6 +104,7 @@ export function calendarDialog(deck) {
     <label class="ai-f">What<input name="title" value="${esc(sug.title)}"></label>
     <label class="ai-f">When<input name="when" type="datetime-local" value="${localValue(next)}"></label>
     <label class="ai-f">Minutes<input name="mins" type="number" min="5" max="480" step="5" value="30"></label>
+    <label class="ai-f" data-cal hidden>Calendar<select name="cal"></select></label>
     <p class="ai-status" role="status">${hub ? 'Checking Google Calendar...' : 'Turn on Sync to let Vesper add events for you. Until then use the buttons below.'}</p>
     <div class="modal-actions ai-actions">
       <button type="button" class="btn ghost" data-close>Close</button>
@@ -123,9 +124,28 @@ export function calendarDialog(deck) {
     hubCall('/google/status').then(({ ok, data }) => {
       if (!ok) { say('Could not check Google Calendar. The buttons below still work.', true); return; }
       if (!data.configured) { say('Your hub has no Google setup yet (see worker/README.md). The buttons below still work.'); return; }
-      if (data.connected) { say('Google Calendar is connected. Adding again moves the same event.'); btn('auto').hidden = false; }
+      if (data.connected) { say('Google Calendar is connected. Adding again moves the same event.'); btn('auto').hidden = false; loadCalendars(); }
       else { say('Connect Google once and Vesper can add events for you.'); btn('connect').hidden = false; }
     }).catch(() => say('Could not reach the hub. The buttons below still work.', true));
+  }
+
+  async function loadCalendars() {
+    const sel = form.cal;
+    const r = await hubCall('/google/calendars').catch(() => null);
+    if (!r || !r.ok) { if (r && r.data && r.data.error) say(r.data.error, true); return; }
+    const { calendars, selected } = r.data;
+    sel.innerHTML = calendars.map((c) => `<option value="${esc(c.id)}"${c.id === selected ? ' selected' : ''}>${esc(c.name)}${c.primary ? ' (main)' : ''}</option>`).join('') +
+      '<option value="__new__">+ Create new: Vesper Tasks</option>';
+    dlg.querySelector('[data-cal]').hidden = false;
+    sel.onchange = async () => {
+      say('Saving...');
+      const body = sel.value === '__new__' ? { create: 'Vesper Tasks' } : { id: sel.value };
+      const res = await hubCall('/google/calendar', { method: 'POST', body }).catch(() => null);
+      if (res && res.ok) {
+        say(`Events will go to "${res.data.name || 'that calendar'}".`);
+        if (sel.value === '__new__') loadCalendars();
+      } else say((res && res.data && res.data.error) || 'Could not change the calendar.', true);
+    };
   }
 
   dlg.addEventListener('click', async (e) => {

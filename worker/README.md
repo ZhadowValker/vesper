@@ -59,10 +59,8 @@ With this on, Vesper's "Add to calendar" creates and moves events in your Google
 6. In Hostinger's environment variables add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `PUBLIC_URL` = `https://vesper.soundmind.org.in`, and optionally `GOOGLE_TZ` (default `Asia/Kolkata`). Redeploy.
 7. In Vesper open a task, **Add to calendar**, press **Connect Google**, approve, and you land back in Vesper. After that, **Add to Google Calendar** adds or moves the event. Scheduling the same task and kind again moves the same event instead of adding a copy.
 
-### Put events in their own calendar
+### Choose the calendar
 
-By default events go to your main Google calendar. To use a separate one (for example `vesper-tasks`):
-1. In Google Calendar (calendar.google.com, on a computer) press **+** next to "Other calendars" → **Create new calendar**, name it `vesper-tasks`.
-2. Open its **Settings** (hover the calendar → three dots → Settings and sharing) and scroll to **Integrate calendar**. Copy the **Calendar ID** (it looks like `abc123@group.calendar.google.com`).
-3. In Hostinger add the variable `GOOGLE_CALENDAR_ID` with that value and redeploy.
-New events then go there. Events already added to the main calendar stay where they are; delete them by hand.
+In Vesper: open a task, **Add to calendar**, and use the **Calendar** dropdown. It lists your calendars, plus **+ Create new: Vesper Tasks**, which makes that calendar for you. If the dropdown is missing, press **Connect Google** again once, to give Vesper permission to list and create calendars. Events already added to another calendar stay there; delete them by hand. Advanced: `GOOGLE_CALENDAR_ID` sets a default calendar by its ID.
+
+Add these two permissions under Data Access in Google Cloud before reconnecting: `.../auth/calendar.app.created` and `.../auth/calendar.calendarlist.readonly`.

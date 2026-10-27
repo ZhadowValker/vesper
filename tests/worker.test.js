@@ -104,20 +104,22 @@ globalThis.fetch = async (url, init = {}) => {
     return p.get('refresh_token') === 'ref1' ? ok({ access_token: 'acc2', expires_in: 3600 }) : ok({ error: 'invalid_grant' }, 400);
   }
   if (url.startsWith('https://oauth2.googleapis.com/revoke')) return ok({});
-  if (url === 'https://www.googleapis.com/calendar/v3/calendars/primary/events') return ok({ id: 'ev' + gcalls.length, htmlLink: 'https://calendar.google.com/event?eid=x' });
-  if (url.startsWith('https://www.googleapis.com/calendar/v3/calendars/primary/events/')) return init.method === 'PATCH' ? ok({ id: decodeURIComponent(url.split('/').pop()), htmlLink: 'https://calendar.google.com/event?eid=y' }) : ok({}, 405);
+  if (url.startsWith('https://www.googleapis.com/calendar/v3/users/me/calendarList')) return ok({ items: [{ id: 'me@x.com', summary: 'Diet Schedule', primary: true }, { id: 'abc123@group.calendar.google.com', summary: 'Team' }] });
+  if (url === 'https://www.googleapis.com/calendar/v3/calendars') return ok({ id: 'newcal@group.calendar.google.com', summary: JSON.parse(init.body).summary });
+  if (/^https:\/\/www\.googleapis\.com\/calendar\/v3\/calendars\/[^/]+\/events$/.test(url)) return ok({ id: 'ev' + gcalls.length, htmlLink: 'https://calendar.google.com/event?eid=x' });
+  if (/^https:\/\/www\.googleapis\.com\/calendar\/v3\/calendars\/[^/]+\/events\//.test(url)) return init.method === 'PATCH' ? ok({ id: decodeURIComponent(url.split('/').pop()), htmlLink: 'https://calendar.google.com/event?eid=y' }) : ok({}, 405);
   return realFetch(url, init);
 };
 
 await test('google: status, start, callback state check', async () => {
   let r = await (await call('/google/status', { headers: app })).json();
-  assert.deepEqual(r, { configured: true, connected: false });
+  assert.deepEqual(r, { configured: true, connected: false, calendar: '' });
   assert.equal((await call('/google/start', { method: 'POST', headers: { Origin: ORIGIN } })).status, 401);
   r = await (await call('/google/start', { method: 'POST', headers: app })).json();
   const u = new URL(r.url);
   assert.equal(u.searchParams.get('client_id'), 'cid');
   assert.equal(u.searchParams.get('redirect_uri'), 'https://vesper.test/google/callback');
-  assert.equal(u.searchParams.get('scope'), 'https://www.googleapis.com/auth/calendar.events');
+  assert.deepEqual(u.searchParams.get('scope').split(' '), ['https://www.googleapis.com/auth/calendar.events', 'https://www.googleapis.com/auth/calendar.app.created', 'https://www.googleapis.com/auth/calendar.calendarlist.readonly']);
   assert.equal(u.searchParams.get('access_type'), 'offline');
   const state = u.searchParams.get('state');
   let page = await (await call('/google/callback?code=goodcode&state=wrong')).text();
@@ -155,6 +157,26 @@ await test('google: events go to the chosen calendar', async () => {
   gcalls.length = 0;
   await call('/calendar/event', { method: 'POST', headers: app, body: { deck: 'dz', kind: 'work', title: 'x', start: '2026-11-01T10:00' } });
   assert.ok(gcalls.some((c) => c.url === 'https://www.googleapis.com/calendar/v3/calendars/abc123%40group.calendar.google.com/events'));
+  env.GOOGLE_CALENDAR_ID = '';
+});
+
+await test('google: pick or create a calendar in the app', async () => {
+  env.GOOGLE_CALENDAR_ID = 'abc123@group.calendar.google.com';
+  const st = new URL((await (await call('/google/start', { method: 'POST', headers: app })).json()).url).searchParams.get('state');
+  await call(`/google/callback?code=goodcode&state=${st}`);
+  let r = await (await call('/google/calendars', { headers: app })).json();
+  assert.equal(r.calendars.length, 2);
+  assert.equal(r.selected, 'abc123@group.calendar.google.com');   // from GOOGLE_CALENDAR_ID until one is picked
+  let bad = await call('/google/calendar', { method: 'POST', headers: app, body: { id: 'not-mine@x.com' } });
+  assert.equal(bad.status, 400);
+  r = await (await call('/google/calendar', { method: 'POST', headers: app, body: { create: 'Vesper Tasks' } })).json();
+  assert.equal(r.selected, 'newcal@group.calendar.google.com');
+  gcalls.length = 0;
+  await call('/calendar/event', { method: 'POST', headers: app, body: { deck: 'dq', kind: 'work', title: 'x', start: '2026-11-02T10:00' } });
+  assert.ok(gcalls.some((c) => c.url === 'https://www.googleapis.com/calendar/v3/calendars/newcal%40group.calendar.google.com/events'));
+  assert.equal((await (await call('/google/status', { headers: app })).json()).calendar, 'Vesper Tasks');
+  r = await (await call('/google/calendar', { method: 'POST', headers: app, body: { id: 'me@x.com' } })).json();
+  assert.equal(r.selected, 'me@x.com');
   env.GOOGLE_CALENDAR_ID = '';
 });
 

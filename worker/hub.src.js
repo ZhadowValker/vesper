@@ -91,8 +91,14 @@ function makeDb(state) {
 const G_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 const G_TOKEN = 'https://oauth2.googleapis.com/token';
 const G_REVOKE = 'https://oauth2.googleapis.com/revoke';
-const gApi = (env) => `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(env.GOOGLE_CALENDAR_ID || 'primary')}/events`;
-const G_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+// The calendar that gets events: the one picked in the app, else GOOGLE_CALENDAR_ID, else your main calendar.
+async function gCal(env) {
+  const saved = await env.VESPER.get('gcal', 'json');
+  return { id: (saved && saved.id) || env.GOOGLE_CALENDAR_ID || 'primary', name: (saved && saved.name) || '' };
+}
+const gApi = (id) => `${G_CAL}/calendars/${encodeURIComponent(id)}/events`;
+const G_SCOPE = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.app.created https://www.googleapis.com/auth/calendar.calendarlist.readonly';
+const G_CAL = 'https://www.googleapis.com/calendar/v3';
 let gAccess = { token: '', exp: 0 };
 
 const gConfigured = (env) => !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.PUBLIC_URL && env.VESPER);
@@ -126,7 +132,8 @@ async function gCallback(request, env) {
   const res = await fetch(G_TOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: gForm({ code, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, redirect_uri: gBase(env) + '/google/callback', grant_type: 'authorization_code' }) });
   const tok = await res.json().catch(() => ({}));
   if (!res.ok || !tok.refresh_token) return gPage('Google sign-in failed', 'Google did not give a long-lasting permission. Remove Vesper from myaccount.google.com/permissions and try again.', env);
-  await env.VESPER.put('google', JSON.stringify({ refresh: tok.refresh_token, at: Date.now() }));
+  await env.VESPER.put('google', JSON.stringify({ refresh: tok.refresh_token, scope: tok.scope || '', at: Date.now() }));
+  await env.VESPER.delete('gcal');   // a new sign-in starts with the default calendar
   gAccess = { token: tok.access_token || '', exp: Date.now() + Math.max(0, (tok.expires_in || 0) - 60) * 1000 };
   return gPage('Google Calendar is connected', 'You can close this tab and go back to Vesper.', env);
 }
@@ -169,14 +176,16 @@ async function gEvent(env, { key, title, details, start, minutes }) {
   const body = JSON.stringify({ summary: String(title || 'Vesper').slice(0, 200), description: String(details || '').slice(0, 4000), start: { dateTime: startAt, timeZone: tz }, end: { dateTime: gAddMinutes(startAt, mins), timeZone: tz } });
   const access = await gAccessToken(env);
   const head = { Authorization: 'Bearer ' + access, 'Content-Type': 'application/json' };
+  const cal = await gCal(env);
+  key = `${cal.id}|${key}`;   // switching calendars never touches events in the old one
   const map = (await env.VESPER.get('gevents', 'json')) || {};
   let res = null;
   let moved = false;
   if (map[key]) {
-    res = await fetch(`${gApi(env)}/${encodeURIComponent(map[key])}`, { method: 'PATCH', headers: head, body });
+    res = await fetch(`${gApi(cal.id)}/${encodeURIComponent(map[key])}`, { method: 'PATCH', headers: head, body });
     if (res.status === 404 || res.status === 410) res = null; else moved = true;
   }
-  if (!res) res = await fetch(gApi(env), { method: 'POST', headers: head, body });
+  if (!res) res = await fetch(gApi(cal.id), { method: 'POST', headers: head, body });
   const ev = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? 'Google refused the calendar change. Connect Google Calendar again.' : 'Google Calendar could not save the event.');
   map[key] = ev.id;
@@ -185,9 +194,39 @@ async function gEvent(env, { key, title, details, start, minutes }) {
 }
 
 async function googleRoutes(request, env, origin, path) {
-  const status = async () => ({ configured: gConfigured(env), connected: gConfigured(env) && !!((await env.VESPER.get('google', 'json')) || {}).refresh });
+  const status = async () => { const on = gConfigured(env) && !!((await env.VESPER.get('google', 'json')) || {}).refresh; return { configured: gConfigured(env), connected: on, calendar: on ? (await gCal(env)).name : '' }; };
   if (path === '/google/status' && request.method === 'GET') return json(200, await status(), origin);
   if (!gConfigured(env)) return json(400, { error: 'Google is not set up on the hub yet (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and PUBLIC_URL).', configured: false }, origin);
+  if (path === '/google/calendars' && request.method === 'GET') {
+    try {
+      const res = await fetch(`${G_CAL}/users/me/calendarList?minAccessRole=writer`, { headers: { Authorization: 'Bearer ' + (await gAccessToken(env)) } });
+      if (!res.ok) return json(400, { error: 'Google would not list your calendars. Press Connect Google again to allow it.' }, origin);
+      const data = await res.json();
+      const cur = await gCal(env);
+      return json(200, { selected: cur.id, calendars: (data.items || []).map((c) => ({ id: c.id, name: c.summaryOverride || c.summary || c.id, primary: !!c.primary })) }, origin);
+    } catch (e) { return json(400, { error: e.message }, origin); }
+  }
+  if (path === '/google/calendar' && request.method === 'POST') {
+    let b;
+    try { b = JSON.parse(await request.text()); } catch (e) { return json(400, { error: 'invalid JSON' }, origin); }
+    try {
+      const head = { Authorization: 'Bearer ' + (await gAccessToken(env)), 'Content-Type': 'application/json' };
+      if (b.create) {
+        const name = String(b.create).trim().slice(0, 80) || 'Vesper Tasks';
+        const res = await fetch(`${G_CAL}/calendars`, { method: 'POST', headers: head, body: JSON.stringify({ summary: name, timeZone: gTz(env) }) });
+        const cal = await res.json().catch(() => ({}));
+        if (!res.ok || !cal.id) return json(400, { error: 'Google would not create the calendar. Press Connect Google again to allow it.' }, origin);
+        await env.VESPER.put('gcal', JSON.stringify({ id: cal.id, name }));
+        return json(200, { selected: cal.id, name }, origin);
+      }
+      const list = await fetch(`${G_CAL}/users/me/calendarList?minAccessRole=writer`, { headers: head });
+      const data = list.ok ? await list.json() : { items: [] };
+      const hit = (data.items || []).find((c) => c.id === b.id);
+      if (!hit) return json(400, { error: 'That calendar is not one you can add events to.' }, origin);
+      await env.VESPER.put('gcal', JSON.stringify({ id: hit.id, name: hit.summaryOverride || hit.summary || hit.id }));
+      return json(200, { selected: hit.id, name: hit.summary }, origin);
+    } catch (e) { return json(400, { error: e.message }, origin); }
+  }
   if (path === '/google/start' && request.method === 'POST') return json(200, { url: await gStart(env) }, origin);
   if (path === '/google/disconnect' && request.method === 'POST') { await gDisconnect(env); return json(200, { connected: false }, origin); }
   if (path === '/calendar/event' && request.method === 'POST') {
