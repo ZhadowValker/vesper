@@ -5,7 +5,7 @@
 //   ORIGINS         the address of your site, e.g. https://vesper.soundmind.org.in (default below)
 //   DATA_DIR        where the data file lives (default ./data). Keep it outside the public web folder if you can.
 //   NVIDIA_API_KEY  optional, only for the AI proxy
-//   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, PUBLIC_URL, GOOGLE_TZ  optional, for the Google Calendar link (see worker/README.md)
+//   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, PUBLIC_URL, GOOGLE_TZ, GOOGLE_CALENDAR_ID  optional, for the Google Calendar link (see worker/README.md)
 //   MODELS          optional, comma-separated model names the proxy allows
 //   PORT            set by the host
 import http from 'node:http';
@@ -58,6 +58,7 @@ const env = {
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
   GOOGLE_TZ: process.env.GOOGLE_TZ || 'Asia/Kolkata',
+  GOOGLE_CALENDAR_ID: process.env.GOOGLE_CALENDAR_ID || '',
   VESPER: store,
 };
 

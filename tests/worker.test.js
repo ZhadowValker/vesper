@@ -147,6 +147,17 @@ await test('google: create then move the same event', async () => {
   assert.equal(bad.status, 400);
 });
 
+await test('google: events go to the chosen calendar', async () => {
+  env.GOOGLE_CALENDAR_ID = 'abc123@group.calendar.google.com';
+  await call('/google/disconnect', { method: 'POST', headers: app });
+  const st = new URL((await (await call('/google/start', { method: 'POST', headers: app })).json()).url).searchParams.get('state');
+  await call(`/google/callback?code=goodcode&state=${st}`);
+  gcalls.length = 0;
+  await call('/calendar/event', { method: 'POST', headers: app, body: { deck: 'dz', kind: 'work', title: 'x', start: '2026-11-01T10:00' } });
+  assert.ok(gcalls.some((c) => c.url === 'https://www.googleapis.com/calendar/v3/calendars/abc123%40group.calendar.google.com/events'));
+  env.GOOGLE_CALENDAR_ID = '';
+});
+
 await test('google: Claude can schedule a task, Selah is only an event', async () => {
   const l = await rpc('tools/list');
   assert.ok(l.result.tools.some((t) => t.name === 'vesper_schedule'));

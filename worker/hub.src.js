@@ -10,7 +10,8 @@
 //   Secret (optional)      NVIDIA_API_KEY        (only for the AI proxy)
 //   Variable (optional)    ORIGINS               (extra website addresses allowed to call /sync, comma-separated)
 //   Google Calendar (optional): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (secret), PUBLIC_URL (this site's address,
-//                          for example https://vesper.soundmind.org.in), GOOGLE_TZ (default Asia/Kolkata)
+//                          for example https://vesper.soundmind.org.in), GOOGLE_TZ (default Asia/Kolkata),
+//                          GOOGLE_CALENDAR_ID (which calendar gets the events; default your main one)
 //   Variable (optional)    MODELS                (comma-separated model names the AI proxy allows)
 //
 // GENERATED FILE: edit worker/hub.src.js and the app modules, then run: node worker/build.js
@@ -90,7 +91,7 @@ function makeDb(state) {
 const G_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 const G_TOKEN = 'https://oauth2.googleapis.com/token';
 const G_REVOKE = 'https://oauth2.googleapis.com/revoke';
-const G_API = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+const gApi = (env) => `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(env.GOOGLE_CALENDAR_ID || 'primary')}/events`;
 const G_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 let gAccess = { token: '', exp: 0 };
 
@@ -172,10 +173,10 @@ async function gEvent(env, { key, title, details, start, minutes }) {
   let res = null;
   let moved = false;
   if (map[key]) {
-    res = await fetch(`${G_API}/${encodeURIComponent(map[key])}`, { method: 'PATCH', headers: head, body });
+    res = await fetch(`${gApi(env)}/${encodeURIComponent(map[key])}`, { method: 'PATCH', headers: head, body });
     if (res.status === 404 || res.status === 410) res = null; else moved = true;
   }
-  if (!res) res = await fetch(G_API, { method: 'POST', headers: head, body });
+  if (!res) res = await fetch(gApi(env), { method: 'POST', headers: head, body });
   const ev = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? 'Google refused the calendar change. Connect Google Calendar again.' : 'Google Calendar could not save the event.');
   map[key] = ev.id;
