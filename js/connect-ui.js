@@ -2,7 +2,7 @@
 import { store } from './store.js';
 import { esc } from './util.js';
 import { rerender } from './nav.js';
-import { getSync, saveSync, syncReady, syncNow, syncStatus } from './sync.js';
+import { getSync, saveSync, syncReady, syncNow, syncStatus, hubCall } from './sync.js';
 import { taskMarkdown, projectMarkdown, googleCalendarLink, icsFile, calendarSuggestion } from './export.js';
 
 function open(html) {
@@ -93,25 +93,56 @@ export function exportDialog({ deck, project, decks }) {
 
 const localValue = (d) => { const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
 
+const localStamp = (d) => { const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
+
 export function calendarDialog(deck) {
   const sug = calendarSuggestion(deck);
   const next = new Date(); next.setDate(next.getDate() + 1); next.setHours(9, 0, 0, 0);
+  const hub = syncReady();
   const { dlg } = open(`<form>
     <h2>Add to calendar</h2>
     <label class="ai-f">What<input name="title" value="${esc(sug.title)}"></label>
     <label class="ai-f">When<input name="when" type="datetime-local" value="${localValue(next)}"></label>
     <label class="ai-f">Minutes<input name="mins" type="number" min="5" max="480" step="5" value="30"></label>
+    <p class="ai-status" role="status">${hub ? 'Checking Google Calendar...' : 'Turn on Sync to let Vesper add events for you. Until then use the buttons below.'}</p>
     <div class="modal-actions ai-actions">
       <button type="button" class="btn ghost" data-close>Close</button>
       <button type="button" class="btn ghost" data-act="ics">Download .ics</button>
-      <button type="button" class="btn" data-act="google">Google Calendar</button>
+      <button type="button" class="btn ghost" data-act="google">Open in Google</button>
+      <button type="button" class="btn" data-act="auto" hidden>Add to Google Calendar</button>
+      <button type="button" class="btn" data-act="connect" hidden>Connect Google</button>
     </div>
   </form>`);
   const form = dlg.querySelector('form');
+  const status = dlg.querySelector('.ai-status');
+  const btn = (a) => dlg.querySelector(`[data-act="${a}"]`);
   const read = () => ({ title: form.title.value.trim() || sug.title, details: sug.details, start: new Date(form.when.value || next), minutes: Math.max(5, parseInt(form.mins.value, 10) || 30) });
-  dlg.addEventListener('click', (e) => {
+  const say = (text, bad) => { status.dataset.kind = bad ? 'bad' : ''; status.textContent = text; };
+
+  if (hub) {
+    hubCall('/google/status').then(({ ok, data }) => {
+      if (!ok) { say('Could not check Google Calendar. The buttons below still work.', true); return; }
+      if (!data.configured) { say('Your hub has no Google setup yet (see worker/README.md). The buttons below still work.'); return; }
+      if (data.connected) { say('Google Calendar is connected. Adding again moves the same event.'); btn('auto').hidden = false; }
+      else { say('Connect Google once and Vesper can add events for you.'); btn('connect').hidden = false; }
+    }).catch(() => say('Could not reach the hub. The buttons below still work.', true));
+  }
+
+  dlg.addEventListener('click', async (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'google') window.open(googleCalendarLink(read()), '_blank', 'noopener');
     else if (act === 'ics') download('vesper.ics', icsFile(read()), 'text/calendar');
+    else if (act === 'connect') {
+      say('Opening Google...');
+      const r = await hubCall('/google/start', { method: 'POST' }).catch(() => null);
+      if (r && r.ok && r.data.url) location.assign(r.data.url);
+      else say((r && r.data && r.data.error) || 'Could not start the Google sign-in.', true);
+    } else if (act === 'auto') {
+      const v = read();
+      say('Adding...');
+      const r = await hubCall('/calendar/event', { method: 'POST', body: { deck: deck.id, kind: /^Selah/.test(v.title) ? 'selah' : 'work', title: v.title, details: v.details, start: localStamp(v.start), minutes: v.minutes } }).catch(() => null);
+      if (r && r.ok) say(r.data.moved ? 'Moved the existing event.' : 'Added to your Google Calendar.');
+      else say((r && r.data && r.data.error) || 'Could not add the event.', true);
+    }
   });
 }

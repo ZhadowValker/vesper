@@ -9,6 +9,8 @@
 //   Secret                 APP_TOKEN             (a long random text; the app and Claude use it)
 //   Secret (optional)      NVIDIA_API_KEY        (only for the AI proxy)
 //   Variable (optional)    ORIGINS               (extra website addresses allowed to call /sync, comma-separated)
+//   Google Calendar (optional): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (secret), PUBLIC_URL (this site's address,
+//                          for example https://vesper.soundmind.org.in), GOOGLE_TZ (default Asia/Kolkata)
 //   Variable (optional)    MODELS                (comma-separated model names the AI proxy allows)
 //
 // GENERATED FILE: edit worker/hub.src.js and the app modules, then run: node worker/build.js
@@ -448,6 +450,122 @@ function makeDb(state) {
   };
 }
 
+
+// ---- Google Calendar --------------------------------------------------------------------
+// One-time sign-in, then the hub creates and updates events for you. Only the "calendar.events" permission is asked for.
+const G_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
+const G_TOKEN = 'https://oauth2.googleapis.com/token';
+const G_REVOKE = 'https://oauth2.googleapis.com/revoke';
+const G_API = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+const G_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+let gAccess = { token: '', exp: 0 };
+
+const gConfigured = (env) => !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.PUBLIC_URL && env.VESPER);
+const gBase = (env) => String(env.PUBLIC_URL || '').replace(/\/+$/, '');
+const gTz = (env) => env.GOOGLE_TZ || 'Asia/Kolkata';
+const gRand = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+const gForm = (o) => new URLSearchParams(o).toString();
+const gPage = (title, text, env) => new Response(
+  `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>` +
+  `<body style="font-family:system-ui;background:#0e0b24;color:#eee;padding:32px;max-width:520px;margin:auto"><h2>${title}</h2><p>${text}</p>` +
+  `<p><a style="color:#9d8cff" href="${gBase(env) || '/'}/#/">Back to Vesper</a></p></body>`,
+  { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+
+async function gStart(env) {
+  const state = gRand();
+  await env.VESPER.put('gauth', JSON.stringify({ state, exp: Date.now() + 10 * 60000 }));
+  const q = gForm({ client_id: env.GOOGLE_CLIENT_ID, redirect_uri: gBase(env) + '/google/callback', response_type: 'code', scope: G_SCOPE, access_type: 'offline', prompt: 'consent', state });
+  return `${G_AUTH}?${q}`;
+}
+
+async function gCallback(request, env) {
+  if (!gConfigured(env)) return gPage('Google is not set up', 'The hub has no Google settings yet.', env);
+  const u = new URL(request.url);
+  if (u.searchParams.get('error')) return gPage('Google sign-in was cancelled', 'Nothing was connected.', env);
+  const saved = await env.VESPER.get('gauth', 'json');
+  const state = u.searchParams.get('state') || '';
+  if (!saved || !saved.state || saved.exp < Date.now() || !same(state, saved.state)) return gPage('That sign-in link expired', 'Start again from Vesper (Add to calendar, then Connect Google).', env);
+  await env.VESPER.delete('gauth');   // a sign-in link works once
+  const code = u.searchParams.get('code');
+  if (!code) return gPage('Google sign-in failed', 'No code came back.', env);
+  const res = await fetch(G_TOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: gForm({ code, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, redirect_uri: gBase(env) + '/google/callback', grant_type: 'authorization_code' }) });
+  const tok = await res.json().catch(() => ({}));
+  if (!res.ok || !tok.refresh_token) return gPage('Google sign-in failed', 'Google did not give a long-lasting permission. Remove Vesper from myaccount.google.com/permissions and try again.', env);
+  await env.VESPER.put('google', JSON.stringify({ refresh: tok.refresh_token, at: Date.now() }));
+  gAccess = { token: tok.access_token || '', exp: Date.now() + Math.max(0, (tok.expires_in || 0) - 60) * 1000 };
+  return gPage('Google Calendar is connected', 'You can close this tab and go back to Vesper.', env);
+}
+
+async function gAccessToken(env) {
+  if (gAccess.token && gAccess.exp > Date.now()) return gAccess.token;
+  const saved = await env.VESPER.get('google', 'json');
+  if (!saved || !saved.refresh) throw new Error('Google Calendar is not connected. Connect it from Vesper (Add to calendar).');
+  const res = await fetch(G_TOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: gForm({ client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, refresh_token: saved.refresh, grant_type: 'refresh_token' }) });
+  const tok = await res.json().catch(() => ({}));
+  if (!res.ok || !tok.access_token) {
+    if (tok.error === 'invalid_grant') { await env.VESPER.delete('google'); throw new Error('The Google sign-in expired. Connect Google Calendar again.'); }
+    throw new Error('Google would not give access right now. Try again in a minute.');
+  }
+  gAccess = { token: tok.access_token, exp: Date.now() + Math.max(0, (tok.expires_in || 3600) - 60) * 1000 };
+  return gAccess.token;
+}
+
+async function gDisconnect(env) {
+  const saved = await env.VESPER.get('google', 'json');
+  if (saved && saved.refresh) { try { await fetch(`${G_REVOKE}?${gForm({ token: saved.refresh })}`, { method: 'POST' }); } catch (e) { /* best effort */ } }
+  await env.VESPER.delete('google');
+  gAccess = { token: '', exp: 0 };
+}
+
+const G_LOCAL = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
+function gAddMinutes(local, minutes) {
+  const [d, t] = local.split('T');
+  const [y, mo, da] = d.split('-').map(Number);
+  const [h, mi] = t.split(':').map(Number);
+  return new Date(Date.UTC(y, mo - 1, da, h, mi) + minutes * 60000).toISOString().slice(0, 19);
+}
+
+// Creates the event, or updates it when the same key (task + kind) was scheduled before, so nothing doubles up.
+async function gEvent(env, { key, title, details, start, minutes }) {
+  if (!G_LOCAL.test(String(start || ''))) throw new Error('start must look like 2026-10-28T18:00 (local time).');
+  const mins = Math.max(5, Math.min(1440, parseInt(minutes, 10) || 30));
+  const startAt = start.length === 16 ? start + ':00' : start;
+  const tz = gTz(env);
+  const body = JSON.stringify({ summary: String(title || 'Vesper').slice(0, 200), description: String(details || '').slice(0, 4000), start: { dateTime: startAt, timeZone: tz }, end: { dateTime: gAddMinutes(startAt, mins), timeZone: tz } });
+  const access = await gAccessToken(env);
+  const head = { Authorization: 'Bearer ' + access, 'Content-Type': 'application/json' };
+  const map = (await env.VESPER.get('gevents', 'json')) || {};
+  let res = null;
+  let moved = false;
+  if (map[key]) {
+    res = await fetch(`${G_API}/${encodeURIComponent(map[key])}`, { method: 'PATCH', headers: head, body });
+    if (res.status === 404 || res.status === 410) res = null; else moved = true;
+  }
+  if (!res) res = await fetch(G_API, { method: 'POST', headers: head, body });
+  const ev = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? 'Google refused the calendar change. Connect Google Calendar again.' : 'Google Calendar could not save the event.');
+  map[key] = ev.id;
+  await env.VESPER.put('gevents', JSON.stringify(map));
+  return { id: ev.id, link: ev.htmlLink || '', moved };
+}
+
+async function googleRoutes(request, env, origin, path) {
+  const status = async () => ({ configured: gConfigured(env), connected: gConfigured(env) && !!((await env.VESPER.get('google', 'json')) || {}).refresh });
+  if (path === '/google/status' && request.method === 'GET') return json(200, await status(), origin);
+  if (!gConfigured(env)) return json(400, { error: 'Google is not set up on the hub yet (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and PUBLIC_URL).', configured: false }, origin);
+  if (path === '/google/start' && request.method === 'POST') return json(200, { url: await gStart(env) }, origin);
+  if (path === '/google/disconnect' && request.method === 'POST') { await gDisconnect(env); return json(200, { connected: false }, origin); }
+  if (path === '/calendar/event' && request.method === 'POST') {
+    let b;
+    try { b = JSON.parse(await request.text()); } catch (e) { return json(400, { error: 'invalid JSON' }, origin); }
+    try {
+      const out = await gEvent(env, { key: `${String(b.deck || 'x').slice(0, 40)}:${String(b.kind || 'work').slice(0, 20)}`, title: b.title, details: b.details, start: b.start, minutes: b.minutes });
+      return json(200, out, origin);
+    } catch (e) { return json(400, { error: e.message }, origin); }
+  }
+  return json(404, { error: 'not found' }, origin);
+}
+
 // ---- Claude connector (MCP over HTTP, plain JSON replies) -------------------------------
 
 const norm2 = (s) => String(s || '').trim().toLowerCase();
@@ -485,6 +603,7 @@ const TOOLS = [
   { name: 'vesper_create_project', description: 'Create a project (a group of tasks).', inputSchema: obj({ name: str('Project name') }, ['name']) },
   { name: 'vesper_create_task', description: 'Create a task inside a project.', inputSchema: obj({ project: str('Project id or exact name'), title: str('Task name') }, ['project', 'title']) },
   { name: 'vesper_set_note', description: 'Write a note into one step (or the slide notes when step is left out). Filling a step also ticks it. Existing text is kept: new text is appended unless mode is "replace". Never overwrite what the person wrote unless they asked.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer', description: 'Step number on that slide, from vesper_framework. Omit for the slide notes.' }, text: str('The note, in the person\'s words, short'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked' } }, ['task', 'slide', 'text']) },
+  { name: 'vesper_schedule', description: 'Put a task on the person\'s Google Calendar (once they have connected it in Vesper). Use kind "work" for a work block and "selah" for the pause at the end of a stage. Scheduling the same task and kind again moves the existing event. Scheduling a Selah does not pass it; the person still does that.', inputSchema: obj({ task: str('Task id or exact title'), when: str('Local start time like 2026-10-28T18:00'), minutes: { type: 'integer', description: 'Length, default 30' }, kind: { type: 'string', enum: ['work', 'selah'] }, title: str('Optional event title') }, ['task', 'when']) },
   { name: 'vesper_tick', description: 'Tick or untick one step.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer' }, done: { type: 'boolean' } }, ['task', 'slide', 'step']) },
 ];
 
@@ -532,6 +651,20 @@ async function callTool(env, name, a) {
     const d = findTask(state, a.task);
     if (!d) return fail(`No task found for "${a.task}".`);
     return run([{ type: 'tick', task: d.id, slide: a.slide, step: a.step, done: a.done }]);
+  }
+  if (name === 'vesper_schedule') {
+    const d = findTask(state, a.task);
+    if (!d) return fail(`No task found for "${a.task}".`);
+    if (!gConfigured(env)) return fail('Google Calendar is not set up on the hub yet.');
+    const kind = a.kind === 'selah' ? 'selah' : 'work';
+    const stage = (SLIDES[d.slide] && SLIDES[d.slide].stage) || STAGES[0];
+    const base = gBase(env);
+    const title = a.title || (kind === 'selah' ? `Selah: ${d.title} (${stage.name})` : `${d.title}: ${whereIs(d)}`);
+    const details = `Vesper task "${d.title}".${kind === 'selah' ? ` Pause and ask: ${stage.selah}` : ''}\n${base}/#/d/${d.id}`;
+    try {
+      const out = await gEvent(env, { key: `${d.id}:${kind}`, title, details, start: a.when, minutes: a.minutes });
+      return text({ scheduled: title, when: a.when, link: out.link });
+    } catch (e) { return fail(e.message); }
   }
   return fail(`Unknown tool "${name}".`);
 }
@@ -628,6 +761,12 @@ export default {
       return mcp(request, env);
     }
 
+    // Google sends the person back here after sign-in. It carries no token; a one-time code in the address protects it.
+    if (path === '/google/callback' && request.method === 'GET') {
+      if (!env.VESPER) return json(500, { error: 'KV binding VESPER is not set on the Worker' });
+      return gCallback(request, env);
+    }
+
     // The app: only from allowed origins, with the token.
     const origin = request.headers.get('Origin') || '';
     const extra = String(env.ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean);
@@ -638,6 +777,10 @@ export default {
     if (path === '/sync') {
       if (!env.VESPER) return json(500, { error: 'KV binding VESPER is not set on the Worker' }, origin);
       return sync(request, env, origin);
+    }
+    if (path.startsWith('/google/') || path === '/calendar/event') {
+      if (!env.VESPER) return json(500, { error: 'KV binding VESPER is not set on the Worker' }, origin);
+      return googleRoutes(request, env, origin, path);
     }
     if (request.method === 'POST' && (path === '/v1/chat/completions' || path === '/chat/completions')) return aiProxy(request, env, origin);
     return json(404, { error: 'not found' }, origin);

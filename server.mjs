@@ -5,6 +5,7 @@
 //   ORIGINS         the address of your site, e.g. https://vesper.soundmind.org.in (default below)
 //   DATA_DIR        where the data file lives (default ./data). Keep it outside the public web folder if you can.
 //   NVIDIA_API_KEY  optional, only for the AI proxy
+//   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, PUBLIC_URL, GOOGLE_TZ  optional, for the Google Calendar link (see worker/README.md)
 //   MODELS          optional, comma-separated model names the proxy allows
 //   PORT            set by the host
 import http from 'node:http';
@@ -38,11 +39,25 @@ const store = {
   },
 };
 
+store.delete = async (key) => {
+  try {
+    const all = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    delete all[key];
+    const tmp = dataFile + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(all));
+    fs.renameSync(tmp, dataFile);
+  } catch (e) { /* nothing stored yet */ }
+};
+
 const env = {
   APP_TOKEN: process.env.APP_TOKEN || '',
   NVIDIA_API_KEY: process.env.NVIDIA_API_KEY || '',
   MODELS: process.env.MODELS || '',
   ORIGINS: process.env.ORIGINS || 'https://vesper.soundmind.org.in',
+  PUBLIC_URL: process.env.PUBLIC_URL || (process.env.ORIGINS || 'https://vesper.soundmind.org.in').split(',')[0].trim(),
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
+  GOOGLE_TZ: process.env.GOOGLE_TZ || 'Asia/Kolkata',
   VESPER: store,
 };
 
@@ -50,7 +65,7 @@ const env = {
 const PUBLIC_FILES = new Set(['index.html', 'manifest.webmanifest', 'sw.js']);
 const PUBLIC_DIRS = ['css', 'js', 'icons', 'img', 'fonts'];
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf' };
-const HUB = /^\/(sync|mcp|v1|chat)(\/|$)/;
+const HUB = /^\/(sync|mcp|v1|chat|google|calendar)(\/|$)/;
 
 function serveFile(req, res, pathname) {
   let rel = decodeURIComponent(pathname).replace(/^\/+/, '') || 'index.html';

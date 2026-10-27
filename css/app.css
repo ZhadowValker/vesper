@@ -373,3 +373,4 @@ button.metric:active{transform:scale(.98)}
 .iv-links .btn{text-decoration:none}
 .ai-panel form.composer[hidden]{display:none}
 .ai-export{width:100%;min-height:150px;padding:10px 12px;border-radius:14px;border:1px solid var(--edge-strong);background:rgba(14,11,36,.5);color:var(--ink);font:12.5px/1.45 ui-monospace,Menlo,monospace;resize:vertical}
+.modal [hidden]{display:none!important}

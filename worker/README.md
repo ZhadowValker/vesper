@@ -46,3 +46,15 @@ One Cloudflare Worker that gives Vesper three extras. The app works fine without
 6. Claude connector address: `https://vesper.soundmind.org.in/mcp/<APP_TOKEN>`.
 
 Back up the `data` folder now and then. After you update the code in GitHub, redeploy the app in hPanel.
+
+## Google Calendar link (optional)
+
+With this on, Vesper's "Add to calendar" creates and moves events in your Google Calendar by itself, and Claude can do it too ("schedule a Selah for my Paint task on Friday 6pm"). Only the "see and edit events" permission is asked for. The sign-in is stored in the hub's data file, so keep that file private and back it up carefully. "Disconnect" in Google's account settings (myaccount.google.com/permissions) removes it any time.
+
+1. Go to console.cloud.google.com and create a project named `Vesper`.
+2. **APIs & Services → Library**: search "Google Calendar API" and **Enable** it.
+3. **OAuth consent screen** (Google Auth Platform): user type **External**; app name `Vesper`; your email as support and developer contact. Add the scope `.../auth/calendar.events`. Add your own Google account under **Test users**.
+4. Set the app to **In production** (Publish app). If you leave it in "Testing", Google ends the sign-in after 7 days. In production you will see a "Google hasn't verified this app" warning when you sign in: choose **Advanced → Go to Vesper**. That is expected for your own app with only you as the user.
+5. **Credentials → Create credentials → OAuth client ID → Web application**. Under **Authorized redirect URIs** add exactly `https://vesper.soundmind.org.in/google/callback`. Copy the **Client ID** and **Client secret**.
+6. In Hostinger's environment variables add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `PUBLIC_URL` = `https://vesper.soundmind.org.in`, and optionally `GOOGLE_TZ` (default `Asia/Kolkata`). Redeploy.
+7. In Vesper open a task, **Add to calendar**, press **Connect Google**, approve, and you land back in Vesper. After that, **Add to Google Calendar** adds or moves the event. Scheduling the same task and kind again moves the same event instead of adding a copy.

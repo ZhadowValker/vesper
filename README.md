@@ -96,4 +96,4 @@ A free Cloudflare Worker (`worker/vesper-hub.js`, setup in `worker/README.md`) a
 - **Sync** between devices (Overview → Sync and Claude).
 - **Claude connector**: Claude chats read your tasks, run the interview and fill steps. Selah is never passed by Claude.
 - **Send elsewhere**: copy, download or share any task or project as Markdown (Notion, Docs, GitHub, email).
-- **Add to calendar**: from a task, open Google Calendar with the entry filled in, or download an .ics file.
+- **Add to calendar**: from a task, open Google Calendar with the entry filled in, or download an .ics file. With the optional Google link on the hub (`worker/README.md`), Vesper and Claude add and move events by themselves.

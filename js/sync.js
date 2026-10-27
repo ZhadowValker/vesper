@@ -62,3 +62,16 @@ export function startSync() {
   window.addEventListener('online', () => syncNow());
   document.addEventListener('focusout', () => { if (status.state === 'later') later(1500); });
 }
+
+// Calls the hub with your token. Used for Google Calendar. Returns { ok, status, data }.
+export async function hubCall(path, { method = 'GET', body } = {}) {
+  const cfg = getSync();
+  const res = await fetch(cfg.url + path, {
+    method,
+    headers: { Authorization: 'Bearer ' + cfg.token, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* no body */ }
+  return { ok: res.ok, status: res.status, data };
+}

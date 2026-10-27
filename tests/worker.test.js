@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import hub from '../worker/vesper-hub.js';
 
 const kv = new Map();
-const env = { APP_TOKEN: 'tok-123', VESPER: { get: async (k, t) => (kv.has(k) ? (t === 'json' ? JSON.parse(kv.get(k)) : kv.get(k)) : null), put: async (k, v) => { kv.set(k, v); } } };
+const env = { APP_TOKEN: 'tok-123', VESPER: { get: async (k, t) => (kv.has(k) ? (t === 'json' ? JSON.parse(kv.get(k)) : kv.get(k)) : null), put: async (k, v) => { kv.set(k, v); }, delete: async (k) => { kv.delete(k); } } };
+env.GOOGLE_CLIENT_ID = 'cid'; env.GOOGLE_CLIENT_SECRET = 'csecret'; env.PUBLIC_URL = 'https://vesper.test'; env.GOOGLE_TZ = 'Asia/Kolkata';
 const ORIGIN = 'https://zhadowvalker.github.io';
 let n = 0, failed = 0;
 const test = async (name, fn) => { try { await fn(); n++; } catch (e) { failed++; console.error('FAIL', name, '\n', e); } };
@@ -88,6 +89,91 @@ await test('ai proxy needs key and checks models', async () => {
   const b = { model: 'm', messages: [] };
   assert.equal((await call('/v1/chat/completions', { method: 'POST', headers: app, body: b })).status, 500);
 });
+
+
+// ---- Google Calendar (Google is faked) ----
+const gcalls = [];
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, init = {}) => {
+  url = String(url);
+  gcalls.push({ url, method: init.method, body: init.body, headers: init.headers });
+  const ok = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json' } });
+  if (url === 'https://oauth2.googleapis.com/token') {
+    const p = new URLSearchParams(init.body);
+    if (p.get('grant_type') === 'authorization_code') return p.get('code') === 'goodcode' ? ok({ access_token: 'acc1', refresh_token: 'ref1', expires_in: 3600 }) : ok({ error: 'invalid_grant' }, 400);
+    return p.get('refresh_token') === 'ref1' ? ok({ access_token: 'acc2', expires_in: 3600 }) : ok({ error: 'invalid_grant' }, 400);
+  }
+  if (url.startsWith('https://oauth2.googleapis.com/revoke')) return ok({});
+  if (url === 'https://www.googleapis.com/calendar/v3/calendars/primary/events') return ok({ id: 'ev' + gcalls.length, htmlLink: 'https://calendar.google.com/event?eid=x' });
+  if (url.startsWith('https://www.googleapis.com/calendar/v3/calendars/primary/events/')) return init.method === 'PATCH' ? ok({ id: decodeURIComponent(url.split('/').pop()), htmlLink: 'https://calendar.google.com/event?eid=y' }) : ok({}, 405);
+  return realFetch(url, init);
+};
+
+await test('google: status, start, callback state check', async () => {
+  let r = await (await call('/google/status', { headers: app })).json();
+  assert.deepEqual(r, { configured: true, connected: false });
+  assert.equal((await call('/google/start', { method: 'POST', headers: { Origin: ORIGIN } })).status, 401);
+  r = await (await call('/google/start', { method: 'POST', headers: app })).json();
+  const u = new URL(r.url);
+  assert.equal(u.searchParams.get('client_id'), 'cid');
+  assert.equal(u.searchParams.get('redirect_uri'), 'https://vesper.test/google/callback');
+  assert.equal(u.searchParams.get('scope'), 'https://www.googleapis.com/auth/calendar.events');
+  assert.equal(u.searchParams.get('access_type'), 'offline');
+  const state = u.searchParams.get('state');
+  let page = await (await call('/google/callback?code=goodcode&state=wrong')).text();
+  assert.match(page, /expired/);
+  assert.equal((await (await call('/google/status', { headers: app })).json()).connected, false);
+  page = await (await call(`/google/callback?code=goodcode&state=${state}`)).text();
+  assert.match(page, /connected/);
+  assert.equal((await (await call('/google/status', { headers: app })).json()).connected, true);
+  page = await (await call(`/google/callback?code=goodcode&state=${state}`)).text();
+  assert.match(page, /expired/);   // the state works once only
+});
+
+await test('google: create then move the same event', async () => {
+  const b = { deck: 'd9', kind: 'selah', title: 'Selah: Paint', details: 'Ask', start: '2026-10-28T18:00', minutes: 45 };
+  let r = await (await call('/calendar/event', { method: 'POST', headers: app, body: b })).json();
+  assert.ok(r.id && !r.moved);
+  const post = gcalls.filter((c) => c.method === 'POST' && c.url.endsWith('/events')).pop();
+  const ev = JSON.parse(post.body);
+  assert.equal(ev.start.dateTime, '2026-10-28T18:00:00');
+  assert.equal(ev.end.dateTime, '2026-10-28T18:45:00');
+  assert.equal(ev.start.timeZone, 'Asia/Kolkata');
+  assert.equal(post.headers.Authorization, 'Bearer acc1');
+  r = await (await call('/calendar/event', { method: 'POST', headers: app, body: { ...b, start: '2026-10-29T09:30' } })).json();
+  assert.equal(r.moved, true);
+  assert.ok(gcalls.some((c) => c.method === 'PATCH'));
+  const bad = await call('/calendar/event', { method: 'POST', headers: app, body: { ...b, start: 'tomorrow' } });
+  assert.equal(bad.status, 400);
+});
+
+await test('google: Claude can schedule a task, Selah is only an event', async () => {
+  const l = await rpc('tools/list');
+  assert.ok(l.result.tools.some((t) => t.name === 'vesper_schedule'));
+  const r = await tool('vesper_schedule', { task: 'Build bed', when: '2026-10-30T07:00', kind: 'selah' });
+  assert.equal(r.isError, undefined);
+  assert.match(txt(r).scheduled, /Selah: Build bed/);
+  const t = txt(await tool('vesper_get_task', { task: 'Build bed' }));
+  assert.deepEqual(t.selahPassed, []);
+  assert.equal((await tool('vesper_schedule', { task: 'nope', when: '2026-10-30T07:00' })).isError, true);
+});
+
+await test('google: disconnect forgets the sign-in', async () => {
+  const r = await (await call('/google/disconnect', { method: 'POST', headers: app })).json();
+  assert.equal(r.connected, false);
+  assert.equal((await (await call('/google/status', { headers: app })).json()).connected, false);
+  assert.ok(gcalls.some((c) => c.url.includes('/revoke')));
+  const e = await call('/calendar/event', { method: 'POST', headers: app, body: { deck: 'd9', title: 'x', start: '2026-10-28T18:00' } });
+  assert.equal(e.status, 400);
+});
+
+await test('google: unset hub explains itself', async () => {
+  const saved = env.GOOGLE_CLIENT_ID; env.GOOGLE_CLIENT_ID = '';
+  assert.equal((await (await call('/google/status', { headers: app })).json()).configured, false);
+  assert.equal((await call('/google/start', { method: 'POST', headers: app })).status, 400);
+  env.GOOGLE_CLIENT_ID = saved;
+});
+globalThis.fetch = realFetch;
 
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);
 process.exit(failed ? 1 : 0);
