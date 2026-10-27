@@ -378,3 +378,4 @@ button.metric:active{transform:scale(.98)}
 .ai-adv{border:1px solid var(--edge);border-radius:14px;padding:10px 12px}.ai-adv summary{cursor:pointer;font-size:13.5px;color:var(--muted)}.ai-adv[open] summary{margin-bottom:10px}.ai-adv .ai-f{margin-top:8px}
 .avatar-btn{flex:none}.avatar-btn.on{border-color:var(--edge-strong)}.avatar{display:grid;place-items:center;width:100%;height:100%;border-radius:50%;font-weight:700;font-size:15px;background:linear-gradient(135deg,#8f7bff,#52d6c4);color:#12102b}
 .hub-det{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:8px 0 0;font-size:14px}.hub-det dt{color:var(--muted,#9a98b8)}.hub-det dd{margin:0;word-break:break-word}
+.mcp-link{width:100%;margin:6px 0;font-size:12px}

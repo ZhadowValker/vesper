@@ -84,3 +84,7 @@ Good to know:
 - Back up the hub's `data` folder. Each person's data lives there, and in their Drive copy.
 - Each person can press **Delete my data** in the Sync dialog. It removes their data from the hub and their Drive copy.
 - Every sign-in asks Google for consent again. That is by design for now: it makes sure Google hands over the permission the Drive copy needs.
+
+## A Claude link for each person
+
+Anyone signed in with Google can open the account dialog, press **Create my Claude link** under Hub details, and paste the link into Claude (Settings, Connectors, Add custom connector). The link is `https://your-hub/mcp/u/<token>` and reaches only that person's own projects. It is shown once, works like a password, and **Replace link** or **Turn off** ends the old one. Deleting the account removes it too. Your own owner link (`/mcp/<APP_TOKEN>`) is unchanged.

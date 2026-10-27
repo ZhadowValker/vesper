@@ -278,6 +278,18 @@ await test('login: a person gets a session and a private space', async () => {
   assert.ok(!owner.state.projects.some((x) => x.name === 'Ann project'));
 });
 
+await test('connector: Ann\'s personal link shows only Ann\'s projects, and Bob can turn his off', async () => {
+  const link = await (await call('/me/mcp-link', { method: 'POST', headers: as(ann.token), body: {} })).json();
+  const over = await (await call(link.path, { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vesper_overview', arguments: {} } } })).json();
+  const text = JSON.stringify(over);
+  assert.ok(text.includes('Ann project'));
+  const bl = await (await call('/me/mcp-link', { method: 'POST', headers: as(bob.token), body: {} })).json();
+  const bover = JSON.stringify(await (await call(bl.path, { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vesper_overview', arguments: {} } } })).json());
+  assert.ok(!bover.includes('Ann project'));
+  await call('/me/mcp-link', { method: 'POST', headers: as(bob.token), body: { revoke: true } });
+  assert.equal((await call(bl.path, { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } })).status, 401);
+});
+
 await test('login: wrong audience, bad state and fake sessions are refused', async () => {
   const s = await signIn('eve@x.com', 'sub-eve', 'someone-elses-app');
   assert.match(await s.back.text(), /did not confirm/);
@@ -372,6 +384,19 @@ await test('settings: AI settings are saved per person and cleaned', async () =>
   assert.equal(put.status, 200);
   const got = await (await call('/me/settings', { headers: app })).json();
   assert.deepEqual(got.settings, { ai: { key: 'k1', draft: 'm' } });
+});
+
+await test('connector: a personal Claude link reaches only that person, and can be replaced', async () => {
+  const made = await (await call('/me/mcp-link', { method: 'POST', headers: app, body: {} })).json();
+  assert.match(made.path, /^\/mcp\/u\/[A-Za-z0-9_-]{20,}$/);
+  const hit = await call(made.path, { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
+  assert.equal(hit.status, 200);
+  assert.equal((await call('/mcp/u/' + 'x'.repeat(30), { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } })).status, 401);
+  const again = await (await call('/me/mcp-link', { method: 'POST', headers: app, body: {} })).json();
+  assert.equal((await call(made.path, { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } })).status, 401);
+  assert.equal((await call(again.path, { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } })).status, 200);
+  await call('/me/mcp-link', { method: 'POST', headers: app, body: { revoke: true } });
+  assert.equal((await call(again.path, { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } })).status, 401);
 });
 
 await test('login: not set up means a clear message', async () => {

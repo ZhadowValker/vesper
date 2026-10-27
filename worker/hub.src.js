@@ -588,6 +588,20 @@ async function accountRoutes(request, ctx, origin, path) {
     const drive = await env.VESPER.get('drive', 'json');
     return json(200, { email: ctx.email, owner: ctx.owner, drive: { connected: !!(drive && drive.refresh), last: (drive && drive.last) || 0 } }, origin);
   }
+  if (path === '/me/mcp-link') {
+    const old = await env.VESPER.get('mcplink', 'json');
+    if (request.method === 'GET') return json(200, { exists: !!old }, origin);
+    if (request.method !== 'POST') return json(405, { error: 'use GET or POST' }, origin);
+    let b = {};
+    try { b = JSON.parse((await request.text()) || '{}'); } catch (e) { /* no body */ }
+    if (old) await env.RAW.delete('mcp:' + old.hash);
+    if (b.revoke) { await env.VESPER.delete('mcplink'); return json(200, { exists: false }, origin); }
+    const token = gRand() + gRand();
+    const hash = await sha(token);
+    await env.RAW.put('mcp:' + hash, JSON.stringify(ctx.owner ? { owner: true } : { sub: env.UID }));
+    await env.VESPER.put('mcplink', JSON.stringify({ hash, at: Date.now() }));
+    return json(200, { exists: true, path: '/mcp/u/' + token }, origin);
+  }
   if (path === '/me/settings') {
     if (request.method === 'GET') return json(200, { settings: (await env.VESPER.get('settings', 'json')) || { ai: {} } }, origin);
     if (request.method === 'PUT') {
@@ -615,9 +629,11 @@ async function accountRoutes(request, ctx, origin, path) {
   }
   if (path === '/me/delete' && request.method === 'POST') {
     if (ctx.owner) return json(400, { error: 'The owner space is not deleted from the app.' }, origin);
+    const lk = await env.VESPER.get('mcplink', 'json');
+    if (lk) await env.RAW.delete('mcp:' + lk.hash);
     await driveDelete(env);
     await gDisconnect(env);
-    for (const k of ['state', 'google', 'gcal', 'gevents', 'drive', 'settings']) await env.VESPER.delete(k);
+    for (const k of ['state', 'google', 'gcal', 'gevents', 'drive', 'settings', 'mcplink']) await env.VESPER.delete(k);
     await env.RAW.delete('user:' + env.UID);
     await env.RAW.put('usercount', String(Math.max(0, (Number(await env.RAW.get('usercount')) || 1) - 1)));
     if (ctx.sessKey) await env.RAW.delete(ctx.sessKey);
@@ -638,6 +654,13 @@ export default {
     const path = url.pathname.replace(/\/+$/, '');
 
     // The Claude connector: token in the address (or a Bearer header). Owner only. No browser origin needed.
+    const pm = path.match(/^\/mcp\/u\/([A-Za-z0-9_-]{20,100})$/);
+    if (pm) {
+      if (!env.VESPER) return json(500, { error: 'KV binding VESPER is not set on the Worker' });
+      const link = await env.VESPER.get('mcp:' + (await sha(pm[1])), 'json');
+      if (!link) return json(401, { error: 'bad token' });
+      return mcp(request, link.owner ? ownerEnv(env) : userEnv(env, link.sub));
+    }
     const m = path.match(/^\/mcp(?:\/(.+))?$/);
     if (m) {
       if (!hasToken(env, m[1] ? decodeURIComponent(m[1]) : bearer(request))) return json(401, { error: 'bad token' });

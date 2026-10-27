@@ -110,8 +110,13 @@ export function syncDialog({ onChange } = {}) {
     hubCall('/me').then((r) => {
       const me = r && r.ok ? r.data : null;
       cell('drive').textContent = !me ? 'Could not check' : me.drive.connected ? (me.drive.last ? 'On. Last copy ' + ago(me.drive.last) : 'On. First copy will be saved on your next sync') : 'Not connected. Sign in with Google again.';
-      cell('mcp').textContent = !me ? 'Could not check' : !me.owner ? 'Not available for your account yet' : cfg.email === 'owner' ? '' : location.origin + '/mcp/YOUR_APP_TOKEN  (use the token set on the hub)';
-      if (me && me.owner && cfg.email === 'owner') { cell('mcp').innerHTML = '<button type="button" class="btn ghost small" data-act="copymcp">Copy connector link</button>'; }
+      if (!me) { cell('mcp').textContent = 'Could not check'; return; }
+      hubCall('/me/mcp-link').then((l) => {
+        const has = l && l.ok && l.data.exists;
+        cell('mcp').innerHTML = has
+          ? 'A link exists. <button type="button" class="btn ghost small" data-act="mcpnew">Replace link</button> <button type="button" class="btn ghost small" data-act="mcprevoke">Turn off</button>'
+          : '<button type="button" class="btn ghost small" data-act="mcpnew">Create my Claude link</button>';
+      });
     }).catch(() => { cell('drive').textContent = cell('mcp').textContent = 'Could not check'; });
     hubCall('/google/status').then((r) => {
       const g = r && r.ok ? r.data : null;
@@ -136,8 +141,21 @@ export function syncDialog({ onChange } = {}) {
       say('Opening Google...');
       try { await googleSignIn((form.url.value || '').trim() || location.origin); }
       catch (err) { say(err.message.includes('Failed to fetch') ? 'Could not reach the hub. Open Vesper from your own hub address, or fill in the address under advanced.' : err.message, true); }
+    } else if (act === 'mcpnew') {
+      const r = await hubCall('/me/mcp-link', { method: 'POST', body: {} }).catch(() => null);
+      if (!r || !r.ok) { say('Could not create the link.', true); return; }
+      const link = location.origin + r.data.path;
+      const box = dlg.querySelector('[data-d=mcp]');
+      box.innerHTML = '<input readonly class="mcp-link" aria-label="Your Claude link"> <button type="button" class="btn ghost small" data-act="copymcp">Copy</button><p class="muted">Shown once. In Claude: Settings, Connectors, Add custom connector, paste it. It works like a password.</p>';
+      box.querySelector('input').value = link;
+      box.dataset.link = link;
+    } else if (act === 'mcprevoke') {
+      const yes = await confirmBox('Turn off your Claude link?', 'Claude will lose access until you create a new link.', { ok: 'Turn off' });
+      if (!yes) return;
+      await hubCall('/me/mcp-link', { method: 'POST', body: { revoke: true } }).catch(() => null);
+      dlg.querySelector('[data-d=mcp]').innerHTML = '<button type="button" class="btn ghost small" data-act="mcpnew">Create my Claude link</button>';
     } else if (act === 'copymcp') {
-      try { await navigator.clipboard.writeText(`${cfg.url}/mcp/${cfg.token}`); say('Connector link copied. Keep it private; it works like a password.'); } catch (err) { say('Could not copy.', true); }
+      try { await navigator.clipboard.writeText(dlg.querySelector('[data-d=mcp]').dataset.link || ''); say('Link copied. Keep it private.'); } catch (err) { say('Could not copy.', true); }
     } else if (act === 'now') {
       say('Syncing...');
       const st = await syncNow({ force: true });
