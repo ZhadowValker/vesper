@@ -33,7 +33,7 @@ export function home() {
   })() : '';
 
   const banner = selahCount
-    ? `<div class="banner"><span aria-hidden="true">${ICON.star}</span><div><strong style="font-weight:500">${selahCount} task${selahCount === 1 ? '' : 's'} paused at Selah</strong><br><span style="font-size:13px">Answer to move ${selahCount === 1 ? 'it' : 'them'} on</span></div></div>`
+    ? `<button type="button" class="banner banner-btn" data-metric="selah"><span aria-hidden="true">${ICON.star}</span><div><strong style="font-weight:500">${selahCount} task${selahCount === 1 ? '' : 's'} paused at Selah</strong><br><span style="font-size:13px">Tap to see ${selahCount === 1 ? 'it' : 'them'} and move on</span></div></button>`
     : '';
 
   const projectCards = projects.map((p) => {
@@ -75,7 +75,7 @@ export function home() {
       </div>
       <div class="o4 card stack tight">
         <h2>Where tasks are now</h2>
-        ${spread.map(({ s, n }) => `<div class="spread"><span class="lab">${s.name}</span><div class="bar s-${s.id}"><i style="width:${Math.round((n / max) * 100)}%"></i></div><span class="num">${n}</span></div>`).join('')}
+        ${spread.map(({ s, n }) => `<button type="button" class="spread spread-btn" data-metric="stage:${s.id}" aria-label="${s.name}: ${n} task${n === 1 ? '' : 's'}"><span class="lab">${s.name}</span><div class="bar s-${s.id}"><i style="width:${Math.round((n / max) * 100)}%"></i></div><span class="num">${n}</span></button>`).join('')}
       </div>` : ''}
       <div class="o6 stack tight">
         <h2 class="section">Backup</h2>
@@ -107,6 +107,10 @@ export function home() {
         finished: ['Finished', all.filter((d) => d.finished), 'No finished tasks yet.'],
         loops: ['Loops so far', all.filter((d) => d.loops > 0), 'No task has looped back yet.'],
       };
+      if (kind.startsWith('stage:')) {
+        const st = STAGES.find((x) => x.id === kind.slice(6));
+        sets[kind] = [st ? st.name : 'Stage', all.filter((d) => !d.finished && deckStatus(d).stageId === kind.slice(6)), 'No tasks are in this stage.'];
+      }
       const [title, list, none] = sets[kind];
       const sorted = [...list].sort((a, b) => b.updated - a.updated);
       const rows = sorted.map((d) => {
