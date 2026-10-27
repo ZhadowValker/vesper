@@ -1,4 +1,4 @@
-const VERSION = 'vesper-v32';
+const VERSION = 'vesper-v34';
 const ASSETS = [
   './',
   'index.html',
@@ -25,6 +25,7 @@ const ASSETS = [
   'js/ai/steps.js',
   'js/merge.js',
   'js/sync.js',
+  'js/signin.js',
   'js/export.js',
   'js/connect-ui.js',
   'js/util.js',

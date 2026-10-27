@@ -100,6 +100,9 @@ await test('ai proxy needs key and checks models', async () => {
 
 // ---- Google Calendar (Google is faked) ----
 const gcalls = [];
+const drive = { id: '', data: '', uploads: 0, deleted: false };
+const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+const idToken = (email, sub, aud = 'cid') => `${b64({ alg: 'RS256' })}.${b64({ aud, sub, email, email_verified: true })}.sig`;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
   url = String(url);
@@ -107,10 +110,21 @@ globalThis.fetch = async (url, init = {}) => {
   const ok = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json' } });
   if (url === 'https://oauth2.googleapis.com/token') {
     const p = new URLSearchParams(init.body);
+    if (p.get('grant_type') === 'authorization_code' && p.get('code').startsWith('login:')) { const [, email, sub, aud] = p.get('code').split(':'); return ok({ access_token: 'dacc', refresh_token: 'dref', expires_in: 3600, id_token: idToken(email, sub, aud || 'cid') }); }
     if (p.get('grant_type') === 'authorization_code') return p.get('code') === 'goodcode' ? ok({ access_token: 'acc1', refresh_token: 'ref1', expires_in: 3600 }) : ok({ error: 'invalid_grant' }, 400);
+    if (p.get('refresh_token') === 'dref') return ok({ access_token: 'dacc2', expires_in: 3600 });
     return p.get('refresh_token') === 'ref1' ? ok({ access_token: 'acc2', expires_in: 3600 }) : ok({ error: 'invalid_grant' }, 400);
   }
   if (url.startsWith('https://oauth2.googleapis.com/revoke')) return ok({});
+  if (url.startsWith('https://www.googleapis.com/drive/v3/files?')) return ok({ files: drive.id ? [{ id: drive.id }] : [] });
+  if (url.startsWith('https://www.googleapis.com/upload/drive/v3/files')) {
+    drive.uploads++;
+    const json = String(init.body).split('\r\n').filter((l) => l.startsWith('{')).pop();
+    drive.data = json; drive.id = drive.id || 'drivefile1';
+    return ok({ id: drive.id });
+  }
+  if (/^https:\/\/www\.googleapis\.com\/drive\/v3\/files\/[^?]+\?alt=media$/.test(url)) return drive.data ? new Response(drive.data, { status: 200 }) : ok({}, 404);
+  if (/^https:\/\/www\.googleapis\.com\/drive\/v3\/files\/[^?]+$/.test(url) && init.method === 'DELETE') { drive.id = ''; drive.data = ''; drive.deleted = true; return new Response(null, { status: 204 }); }
   if (url.startsWith('https://www.googleapis.com/calendar/v3/users/me/calendarList')) return ok({ items: [{ id: 'me@x.com', summary: 'Diet Schedule', primary: true }, { id: 'abc123@group.calendar.google.com', summary: 'Team' }] });
   if (url === 'https://www.googleapis.com/calendar/v3/calendars') return ok({ id: 'newcal@group.calendar.google.com', summary: JSON.parse(init.body).summary });
   if (/^https:\/\/www\.googleapis\.com\/calendar\/v3\/calendars\/[^/]+\/events$/.test(url)) return ok({ id: 'ev' + gcalls.length, htmlLink: 'https://calendar.google.com/event?eid=x' });
@@ -213,6 +227,146 @@ await test('google: unset hub explains itself', async () => {
   assert.equal((await call('/google/start', { method: 'POST', headers: app })).status, 400);
   env.GOOGLE_CLIENT_ID = saved;
 });
+
+// ---- Sign in with Google (Google is faked) ----
+const signIn = async (email, sub, aud) => {
+  const o = { Origin: ORIGIN, 'Content-Type': 'application/json' };
+  const start = await (await call('/auth/google/start', { method: 'POST', headers: o })).json();
+  const u = new URL(start.url);
+  const state = u.searchParams.get('state');
+  const back = await call(`/google/callback?code=login:${email}:${sub}${aud ? ':' + aud : ''}&state=${state}`);
+  return { start: u, back };
+};
+const finish = async (back) => {
+  const loc = back.headers.get('Location');
+  const code = new URL(loc.replace('/#/', '/')).searchParams.get('c');
+  return (await call('/auth/exchange', { method: 'POST', headers: { Origin: ORIGIN, 'Content-Type': 'application/json' }, body: { code } })).json();
+};
+const as = (token) => ({ Origin: ORIGIN, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' });
+const project = (id, name) => ({ id, name, created: 1, updated: 5 });
+
+await test('login: start needs a known website, asks for sign-in and Drive-only permissions', async () => {
+  const bad = await call('/auth/google/start', { method: 'POST', headers: { Origin: 'https://evil.example' } });
+  assert.equal(bad.status, 403);
+  const none = await call('/auth/google/start', { method: 'POST' });
+  assert.equal(none.status, 403);
+  const { start } = await signIn('ann@x.com', 'sub-ann');
+  assert.deepEqual(start.searchParams.get('scope').split(' '), ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/drive.appdata']);
+  assert.equal(start.searchParams.get('redirect_uri'), 'https://vesper.test/google/callback');
+});
+
+let ann, bob;
+await test('login: a person gets a session and a private space', async () => {
+  const s = await signIn('ann@x.com', 'sub-ann');
+  assert.equal(s.back.status, 302);
+  assert.match(s.back.headers.get('Location'), /^https:\/\/vesper\.test\/#\/signin\?c=[0-9a-f]+$/);
+  ann = await finish(s.back);
+  assert.equal(ann.email, 'ann@x.com');
+  assert.equal(ann.owner, false);
+  assert.ok(ann.token && ann.token.length >= 32);
+  const again = await call('/auth/exchange', { method: 'POST', headers: { Origin: ORIGIN, 'Content-Type': 'application/json' }, body: { code: new URL(s.back.headers.get('Location').replace('/#/', '/')).searchParams.get('c') } });
+  assert.equal(again.status, 400);   // the one-time code works once
+  const mine = await (await call('/sync', { headers: as(ann.token) })).json();
+  assert.equal(mine.state.projects.length, 0);   // not the owner's data
+  await call('/sync', { method: 'PUT', headers: as(ann.token), body: { state: { projects: [project('pa', 'Ann project')], decks: [], deleted: {} } } });
+  bob = await finish((await signIn('bob@x.com', 'sub-bob')).back);
+  const bobs = await (await call('/sync', { headers: as(bob.token) })).json();
+  assert.equal(bobs.state.projects.length, 0);   // Bob cannot see Ann's
+  const annAgain = await (await call('/sync', { headers: as(ann.token) })).json();
+  assert.deepEqual(annAgain.state.projects.map((x) => x.name), ['Ann project']);
+  const owner = await (await call('/sync', { headers: app })).json();
+  assert.ok(!owner.state.projects.some((x) => x.name === 'Ann project'));
+});
+
+await test('login: wrong audience, bad state and fake sessions are refused', async () => {
+  const s = await signIn('eve@x.com', 'sub-eve', 'someone-elses-app');
+  assert.match(await s.back.text(), /did not confirm/);
+  const stale = await call('/google/callback?code=login:eve@x.com:s&state=nope');
+  assert.match(await stale.text(), /expired/);
+  assert.equal((await call('/sync', { headers: as('0'.repeat(64)) })).status, 401);
+  assert.equal((await call('/me', { headers: as('') })).status, 401);
+});
+
+await test('login: people cannot use the shared AI proxy or the Claude connector', async () => {
+  env.NVIDIA_API_KEY = 'nv';
+  const ai = await call('/v1/chat/completions', { method: 'POST', headers: as(ann.token), body: { model: 'm', messages: [] } });
+  assert.equal(ai.status, 403);
+  env.NVIDIA_API_KEY = '';
+  assert.equal((await call(`/mcp/${ann.token}`, { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'ping' } })).status, 401);
+});
+
+await test('login: calendar connect works per person', async () => {
+  const start = await (await call('/google/start', { method: 'POST', headers: as(ann.token) })).json();
+  const state = new URL(start.url).searchParams.get('state');
+  assert.match(await (await call(`/google/callback?code=goodcode&state=${state}`)).text(), /connected/);
+  assert.equal((await (await call('/google/status', { headers: as(ann.token) })).json()).connected, true);
+  assert.equal((await (await call('/google/status', { headers: as(bob.token) })).json()).connected, false);
+  const own = await (await call('/google/calendars', { headers: as(ann.token) })).json();
+  assert.equal(own.calendars.length, 2);
+  assert.ok(gcalls.some((c) => c.url.includes('showHidden=true')));
+});
+
+await test('drive: copy is saved to the person\'s Drive, at most every five minutes, and can be restored', async () => {
+  assert.equal(drive.uploads, 1);   // Ann's first sync already saved a copy
+  assert.deepEqual(JSON.parse(drive.data).projects.map((x) => x.name), ['Ann project']);
+  await call('/sync', { method: 'PUT', headers: as(ann.token), body: { state: { projects: [project('pa', 'Ann project'), project('pb', 'Second')], decks: [], deleted: {} } } });
+  assert.equal(drive.uploads, 1);   // too soon, not saved again
+  const forced = await call('/me/backup', { method: 'POST', headers: as(ann.token) });
+  assert.equal(forced.status, 200);
+  assert.equal(drive.uploads, 2);
+  assert.deepEqual(JSON.parse(drive.data).projects.map((x) => x.name).sort(), ['Ann project', 'Second']);
+  // the hub copy is replaced by an older one, then restored from Drive
+  const saved = drive.data;
+  await call('/sync', { method: 'PUT', headers: as(ann.token), body: { state: { projects: [], decks: [], deleted: { pa: 1, pb: 1 } } } });
+  const r = await (await call('/me/restore', { method: 'POST', headers: as(ann.token) })).json();
+  assert.equal(r.state.projects.length, 2);
+  assert.equal(drive.data, saved);
+  assert.equal((await call('/me/restore', { method: 'POST', headers: app })).status, 400);   // the owner token has no Drive link
+});
+
+await test('login: sign out ends the session', async () => {
+  const x = await finish((await signIn('cy@x.com', 'sub-cy')).back);
+  assert.equal((await call('/sync', { headers: as(x.token) })).status, 200);
+  assert.equal((await call('/auth/logout', { method: 'POST', headers: as(x.token) })).status, 200);
+  assert.equal((await call('/sync', { headers: as(x.token) })).status, 401);
+});
+
+await test('login: delete my data removes everything and the Drive copy', async () => {
+  drive.deleted = false;
+  const r = await (await call('/me/delete', { method: 'POST', headers: as(ann.token) })).json();
+  assert.equal(r.deleted, true);
+  assert.equal(drive.deleted, true);
+  assert.equal((await call('/sync', { headers: as(ann.token) })).status, 401);
+  const owner = await call('/me/delete', { method: 'POST', headers: app });
+  assert.equal(owner.status, 400);   // the owner space is not deleted from the app
+});
+
+await test('login: the owner email opens the owner data; the list and the cap limit sign-ups', async () => {
+  env.OWNER_EMAIL = 'me@x.com';
+  const o = await finish((await signIn('ME@x.com', 'sub-me')).back);
+  assert.equal(o.owner, true);
+  const mine = await (await call('/sync', { headers: as(o.token) })).json();
+  assert.ok(mine.state.projects.some((p) => p.name === 'Garden'));   // the same data the token login sees
+  const ai = (await call('/me', { headers: as(o.token) }));
+  assert.equal((await ai.json()).owner, true);
+  env.OWNER_EMAIL = '';
+  env.ALLOWED_EMAILS = 'only@x.com';
+  assert.match(await (await signIn('zed@x.com', 'sub-zed')).back.text(), /private/);
+  const ok = await signIn('only@x.com', 'sub-only');
+  assert.equal(ok.back.status, 302);
+  env.ALLOWED_EMAILS = '';
+  env.MAX_USERS = '1';
+  assert.match(await (await signIn('new1@x.com', 'sub-n1')).back.text(), /full/);
+  env.MAX_USERS = '';
+});
+
+await test('login: not set up means a clear message', async () => {
+  const saved = env.GOOGLE_CLIENT_ID; env.GOOGLE_CLIENT_ID = '';
+  const r = await call('/auth/google/start', { method: 'POST', headers: { Origin: ORIGIN } });
+  assert.equal(r.status, 400);
+  env.GOOGLE_CLIENT_ID = saved;
+});
+
 globalThis.fetch = realFetch;
 
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);

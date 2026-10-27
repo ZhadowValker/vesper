@@ -64,3 +64,23 @@ With this on, Vesper's "Add to calendar" creates and moves events in your Google
 In Vesper: open a task, **Add to calendar**, and use the **Calendar** dropdown. It lists your calendars, plus **+ Create new: Vesper Tasks**, which makes that calendar for you. If the dropdown is missing, press **Connect Google** again once, to give Vesper permission to list and create calendars. Events already added to another calendar stay there; delete them by hand. Advanced: `GOOGLE_CALENDAR_ID` sets a default calendar by its ID.
 
 Add these two permissions under Data Access in Google Cloud before reconnecting: `.../auth/calendar.app.created` and `.../auth/calendar.calendarlist.readonly`.
+
+## Sign in with Google (optional)
+
+Anyone can sign in with Google. Each person gets their own private space on your hub, and a copy of their data is kept in a hidden app folder in their own Google Drive. Your own token and Claude connector keep working exactly as before. People who sign in cannot use your Claude connector or your shared AI key (they can enter their own AI key in AI settings).
+
+Set up (uses the same Google Cloud project as the calendar):
+1. **Google Auth Platform → Data Access**: add the scope `https://www.googleapis.com/auth/drive.appdata`. (`openid`, `email` and `profile` are already included.)
+2. **Branding**: set the **Application home page** to `https://vesper.soundmind.org.in` and **Privacy policy link** to `https://vesper.soundmind.org.in/privacy.html`. Save.
+3. **Audience**: press **Publish app**. While it says "Testing", only the test users you listed can sign in.
+4. In Hostinger add these variables and redeploy:
+   - `OWNER_EMAIL`: your own Google email. When you sign in with that account you open YOUR data, the same as your token does, including the AI proxy.
+   - `ALLOWED_EMAILS` (optional): comma-separated emails. If set, only these can sign in. Leave empty to allow anyone.
+   - `MAX_USERS` (optional, default 100): sign-ups stop after this many people.
+5. In Vesper open **Sync and Claude** and press **Continue with Google**. Open Vesper from your hub address (`https://vesper.soundmind.org.in`) so the sign-in returns to the right place.
+
+Good to know:
+- Sign-in only asks for your email and the hidden Drive folder, which Google treats as low risk. The calendar permission is asked for separately, only if you press **Connect Google** in Add to calendar.
+- Back up the hub's `data` folder. Each person's data lives there, and in their Drive copy.
+- Each person can press **Delete my data** in the Sync dialog. It removes their data from the hub and their Drive copy.
+- Every sign-in asks Google for consent again. That is by design for now: it makes sure Google hands over the permission the Drive copy needs.

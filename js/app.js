@@ -4,9 +4,11 @@ import { projectView } from './views/project.js';
 import { deckView } from './views/deck.js';
 import { slideView } from './views/slide.js';
 import { startSync } from './sync.js';
+import { signinView } from './signin.js';
 
 const routes = [
   [/^#\/(overview)?$/, home],
+  [/^#\/signin\?c=(\w+)$/, signinView],
   [/^#\/p\/(\w+)$/, projectView],
   [/^#\/d\/(\w+)$/, deckView],
   [/^#\/d\/(\w+)\/s\/(\d+)$/, slideView],
@@ -36,7 +38,7 @@ render();
 
 // Optional sync: when newer data arrives from another device, redraw in place (never on a slide, never under a dialog).
 document.addEventListener('vesper:synced', () => {
-  if (/\/s\/\d+$/.test(location.hash) || document.querySelector('dialog[open]')) return;
+  if (/\/s\/\d+$/.test(location.hash) || /^#\/signin/.test(location.hash) || document.querySelector('dialog[open]')) return;
   const y = window.scrollY;
   render();
   window.scrollTo(0, y);

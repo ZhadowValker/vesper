@@ -5,7 +5,7 @@
 //   ORIGINS         the address of your site, e.g. https://vesper.soundmind.org.in (default below)
 //   DATA_DIR        where the data file lives (default ./data). Keep it outside the public web folder if you can.
 //   NVIDIA_API_KEY  optional, only for the AI proxy
-//   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, PUBLIC_URL, GOOGLE_TZ, GOOGLE_CALENDAR_ID  optional, for the Google Calendar link (see worker/README.md)
+//   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, PUBLIC_URL, GOOGLE_TZ, GOOGLE_CALENDAR_ID, OWNER_EMAIL, ALLOWED_EMAILS, MAX_USERS  optional, for the Google Calendar link (see worker/README.md)
 //   MODELS          optional, comma-separated model names the proxy allows
 //   PORT            set by the host
 import http from 'node:http';
@@ -59,14 +59,17 @@ const env = {
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
   GOOGLE_TZ: process.env.GOOGLE_TZ || 'Asia/Kolkata',
   GOOGLE_CALENDAR_ID: process.env.GOOGLE_CALENDAR_ID || '',
+  OWNER_EMAIL: process.env.OWNER_EMAIL || '',
+  ALLOWED_EMAILS: process.env.ALLOWED_EMAILS || '',
+  MAX_USERS: process.env.MAX_USERS || '',
   VESPER: store,
 };
 
 // Only the app's own files are public. Never the server, tests, data or notes.
-const PUBLIC_FILES = new Set(['index.html', 'manifest.webmanifest', 'sw.js']);
+const PUBLIC_FILES = new Set(['index.html', 'manifest.webmanifest', 'sw.js', 'privacy.html']);
 const PUBLIC_DIRS = ['css', 'js', 'icons', 'img', 'fonts'];
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf' };
-const HUB = /^\/(sync|mcp|v1|chat|google|calendar)(\/|$)/;
+const HUB = /^\/(sync|mcp|v1|chat|google|calendar|auth|me)(\/|$)/;
 
 function serveFile(req, res, pathname) {
   let rel = decodeURIComponent(pathname).replace(/^\/+/, '') || 'index.html';

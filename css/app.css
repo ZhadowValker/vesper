@@ -375,3 +375,4 @@ button.metric:active{transform:scale(.98)}
 .ai-export{width:100%;min-height:150px;padding:10px 12px;border-radius:14px;border:1px solid var(--edge-strong);background:rgba(14,11,36,.5);color:var(--ink);font:12.5px/1.45 ui-monospace,Menlo,monospace;resize:vertical}
 .modal [hidden]{display:none!important}
 .ai-f select{height:46px;padding:0 12px;border-radius:16px;border:1px solid var(--edge-strong);background:rgba(14,11,36,.5);color:var(--ink);font-size:15px}
+.ai-adv{border:1px solid var(--edge);border-radius:14px;padding:10px 12px}.ai-adv summary{cursor:pointer;font-size:13.5px;color:var(--muted)}.ai-adv[open] summary{margin-bottom:10px}.ai-adv .ai-f{margin-top:8px}

@@ -1,8 +1,8 @@
 // Dialogs for the hub (sync), exporting a task or project, and adding to a calendar.
 import { store } from './store.js';
-import { esc } from './util.js';
+import { esc, confirmBox } from './util.js';
 import { rerender } from './nav.js';
-import { getSync, saveSync, syncReady, syncNow, syncStatus, hubCall } from './sync.js';
+import { getSync, saveSync, syncReady, syncNow, syncStatus, hubCall, googleSignIn, signOut } from './sync.js';
 import { taskMarkdown, projectMarkdown, googleCalendarLink, icsFile, calendarSuggestion } from './export.js';
 
 function open(html) {
@@ -37,30 +37,82 @@ export function when(st) {
 
 export function syncDialog({ onChange } = {}) {
   const cfg = getSync();
+  const google = !!cfg.email && syncReady();
+  const advanced = `<details class="ai-adv"${!google && cfg.url ? ' open' : ''}>
+      <summary>${google ? 'Hub details' : 'Use a hub token instead (advanced)'}</summary>
+      <label class="ai-f">Hub address<input name="url" type="url" inputmode="url" placeholder="https://vesper.yoursite.com" value="${esc(cfg.url)}" autocomplete="off"></label>
+      <label class="ai-f">Token<input name="token" type="password" placeholder="The APP_TOKEN you set on the hub" value="${google ? '' : esc(cfg.token)}" autocomplete="off"></label>
+    </details>`;
   const { dlg, close } = open(`<form>
-    <h2>Sync and Claude connector</h2>
-    <p class="ai-note muted">Your own free Vesper hub keeps every device the same, and lets Claude read and fill your tasks. Setup steps are in worker/README.md.</p>
-    <label class="ai-f">Hub address<input name="url" type="url" inputmode="url" placeholder="https://vesper-hub.you.workers.dev" value="${esc(cfg.url)}" autocomplete="off"></label>
-    <label class="ai-f">Token<input name="token" type="password" placeholder="The APP_TOKEN you set on the hub" value="${esc(cfg.token)}" autocomplete="off"></label>
+    <h2>Sync, Google and Claude</h2>
+    ${google
+      ? `<p class="ai-note">Signed in as <b>${esc(cfg.email)}</b>. Your projects sync across devices and a copy is kept in your own Google Drive.</p>`
+      : '<p class="ai-note muted">Sign in with Google to keep your projects on every device, with a copy in your own Google Drive. Or use a hub token (advanced).</p>'}
+    ${google ? '' : '<button type="button" class="btn" data-act="google">Continue with Google</button>'}
     <p class="ai-status" data-kind="${syncStatus().state === 'error' ? 'bad' : ''}" role="status">${esc(when(syncStatus()))}</p>
+    ${google ? `<div class="modal-actions ai-actions">
+      <button type="button" class="btn ghost" data-act="now">Sync now</button>
+      <button type="button" class="btn ghost" data-act="backup">Back up to Drive</button>
+      <button type="button" class="btn ghost" data-act="restore">Restore from Drive</button>
+    </div>` : ''}
+    ${advanced}
     <div class="modal-actions ai-actions">
       <button type="button" class="btn ghost" data-close>Close</button>
-      ${syncReady() ? '<button type="button" class="btn ghost" data-act="off">Turn off</button>' : ''}
-      <button type="submit" class="btn">Save and sync</button>
+      ${google ? '<button type="button" class="btn ghost" data-act="signout">Sign out</button><button type="button" class="btn ghost danger" data-act="delete">Delete my data</button>' : (syncReady() ? '<button type="button" class="btn ghost" data-act="off">Turn off</button>' : '')}
+      ${google ? '' : '<button type="submit" class="btn">Save and sync</button>'}
     </div>
   </form>`);
   const form = dlg.querySelector('form');
   const status = dlg.querySelector('.ai-status');
-  dlg.querySelector('[data-act="off"]')?.addEventListener('click', () => { saveSync(null); close(); if (onChange) onChange(); });
+  const say = (text, bad) => { status.dataset.kind = bad ? 'bad' : ''; status.textContent = text; };
+  const done = () => { close(); rerender(); if (onChange) onChange(); };
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const url = form.url.value.trim(), token = form.token.value.trim();
-    if (!/^https:\/\//i.test(url) || !token) { status.dataset.kind = 'bad'; status.textContent = 'Enter the https address and the token.'; return; }
+    if (!/^https:\/\//i.test(url) || !token) { say('Enter the https address and the token.', true); return; }
     saveSync({ url, token });
-    status.dataset.kind = ''; status.textContent = 'Syncing...';
+    say('Syncing...');
     const st = await syncNow({ force: true });
-    if (st.state === 'ok') { close(); rerender(); if (onChange) onChange(); }
-    else { status.dataset.kind = 'bad'; status.textContent = when(st); }
+    if (st.state === 'ok') done(); else say(when(st), true);
+  });
+
+  dlg.addEventListener('click', async (e) => {
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (!act) return;
+    if (act === 'google') {
+      say('Opening Google...');
+      try { await googleSignIn((form.url.value || '').trim() || location.origin); }
+      catch (err) { say(err.message.includes('Failed to fetch') ? 'Could not reach the hub. Open Vesper from your own hub address, or fill in the address under advanced.' : err.message, true); }
+    } else if (act === 'now') {
+      say('Syncing...');
+      const st = await syncNow({ force: true });
+      say(when(st), st.state === 'error');
+      if (st.state === 'ok') rerender();
+    } else if (act === 'backup') {
+      say('Saving to Google Drive...');
+      const r = await hubCall('/me/backup', { method: 'POST' }).catch(() => null);
+      say(r && r.ok ? 'Saved a copy to your Google Drive.' : (r && r.data && r.data.error) || 'Could not save to Google Drive.', !(r && r.ok));
+    } else if (act === 'restore') {
+      const yes = await confirmBox('Restore from Google Drive?', 'This adds anything from your Drive copy that is missing here. Nothing newer is overwritten.', { ok: 'Restore', danger: false });
+      if (!yes) return;
+      say('Restoring...');
+      const r = await hubCall('/me/restore', { method: 'POST' }).catch(() => null);
+      if (r && r.ok) { await syncNow({ force: true }); say('Restored from Google Drive.'); rerender(); }
+      else say((r && r.data && r.data.error) || 'Could not restore.', true);
+    } else if (act === 'signout') {
+      await signOut();
+      done();
+    } else if (act === 'delete') {
+      const yes = await confirmBox('Delete my data?', 'This removes your data from the hub and your Vesper copy in Google Drive, and signs you out. The projects on this device stay here.', { ok: 'Delete my data' });
+      if (!yes) return;
+      const r = await hubCall('/me/delete', { method: 'POST' }).catch(() => null);
+      if (r && r.ok) { saveSync(null); done(); }
+      else say((r && r.data && r.data.error) || 'Could not delete.', true);
+    } else if (act === 'off') {
+      saveSync(null);
+      done();
+    }
   });
 }
 

@@ -8,12 +8,12 @@ let timer = null, running = false, listeners = [];
 let status = { state: 'off', at: 0, error: '' };
 
 export function getSync() {
-  try { const s = JSON.parse(localStorage.getItem(KEY) || '{}'); return { url: s.url || '', token: s.token || '' }; } catch (e) { return { url: '', token: '' }; }
+  try { const s = JSON.parse(localStorage.getItem(KEY) || '{}'); return { url: s.url || '', token: s.token || '', email: s.email || '' }; } catch (e) { return { url: '', token: '', email: '' }; }
 }
 export function saveSync(s) {
   try {
     if (!s || !s.url) localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, JSON.stringify({ url: s.url.trim().replace(/\/+$/, ''), token: (s.token || '').trim() }));
+    else localStorage.setItem(KEY, JSON.stringify({ url: s.url.trim().replace(/\/+$/, ''), token: (s.token || '').trim(), email: s.email || '' }));
   } catch (e) { /* storage may be blocked */ }
   status = { state: syncReady() ? 'idle' : 'off', at: 0, error: '' };
   emit();
@@ -55,8 +55,7 @@ export async function syncNow({ force = false } = {}) {
 function later(ms) { clearTimeout(timer); timer = setTimeout(() => syncNow(), ms); }
 
 export function startSync() {
-  if (!syncReady()) return;
-  syncNow();
+  if (syncReady()) syncNow();
   store.onChange(() => { if (syncReady()) later(8000); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow(); });
   window.addEventListener('online', () => syncNow());
@@ -74,4 +73,28 @@ export async function hubCall(path, { method = 'GET', body } = {}) {
   let data = {};
   try { data = await res.json(); } catch (e) { /* no body */ }
   return { ok: res.ok, status: res.status, data };
+}
+
+// ---- Sign in with Google (through the hub) ----
+export async function googleSignIn(hub) {
+  const res = await fetch(hub.replace(/\/+$/, '') + '/auth/google/start', { method: 'POST' });
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* no body */ }
+  if (!res.ok || !data.url) throw new Error(data.error || 'That address does not offer Google sign-in. Open Vesper from your own hub address and try again.');
+  location.assign(data.url);
+}
+
+// Called on the page Google sends you back to. The hub is the site you are on.
+export async function completeSignIn(code) {
+  const res = await fetch(location.origin + '/auth/exchange', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* no body */ }
+  if (!res.ok || !data.token) throw new Error(data.error || 'The sign-in did not finish.');
+  saveSync({ url: location.origin, token: data.token, email: data.email || (data.owner ? 'owner' : '') });
+  return data;
+}
+
+export async function signOut() {
+  try { await hubCall('/auth/logout', { method: 'POST' }); } catch (e) { /* the session ends on the hub when it expires anyway */ }
+  saveSync(null);
 }

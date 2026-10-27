@@ -12,6 +12,9 @@
 //   Google Calendar (optional): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (secret), PUBLIC_URL (this site's address,
 //                          for example https://vesper.soundmind.org.in), GOOGLE_TZ (default Asia/Kolkata),
 //                          GOOGLE_CALENDAR_ID (which calendar gets the events; default your main one)
+//   Sign in with Google (optional, needs the Google settings above): OWNER_EMAIL (your Google email: that login
+//                          opens YOUR data), ALLOWED_EMAILS (comma list: only these may sign in; empty = anyone),
+//                          MAX_USERS (default 100)
 //   Variable (optional)    MODELS                (comma-separated model names the AI proxy allows)
 //
 // GENERATED FILE: edit worker/hub.src.js and the app modules, then run: node worker/build.js
@@ -100,7 +103,6 @@ async function gCal(env) {
 const gApi = (id) => `${G_CAL}/calendars/${encodeURIComponent(id)}/events`;
 const G_SCOPE = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.app.created https://www.googleapis.com/auth/calendar.calendarlist.readonly';
 const G_CAL = 'https://www.googleapis.com/calendar/v3';
-let gAccess = { token: '', exp: 0 };
 
 const gConfigured = (env) => !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.PUBLIC_URL && env.VESPER);
 const gBase = (env) => String(env.PUBLIC_URL || '').replace(/\/+$/, '');
@@ -113,34 +115,181 @@ const gPage = (title, text, env) => new Response(
   `<p><a style="color:#9d8cff" href="${gBase(env) || '/'}/#/">Back to Vesper</a></p></body>`,
   { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
 
-async function gStart(env) {
+// ---- Who is asking: the owner (APP_TOKEN) or a person signed in with Google -------------
+// Every person gets their own space: the same code runs on a view of storage that adds a prefix to every key.
+const ownerEnv = (env) => ({ ...env, RAW: env.VESPER, UID: 'owner', OWNER: true });
+function scopedKV(kv, prefix) {
+  return { get: (k, t) => kv.get(prefix + k, t), put: (k, v) => kv.put(prefix + k, v), delete: (k) => kv.delete(prefix + k) };
+}
+const userEnv = (env, sub) => ({ ...env, RAW: env.VESPER, VESPER: scopedKV(env.VESPER, `u:${sub}:`), UID: sub, OWNER: false });
+
+async function sha(text) {
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+async function who(env, token) {
+  if (hasToken(env, token)) return { env: ownerEnv(env), owner: true, email: '', sessKey: '' };
+  if (!token || !env.VESPER) return null;
+  const key = 'sess:' + (await sha(token));
+  const sess = await env.VESPER.get(key, 'json');
+  if (!sess || sess.exp < Date.now()) return null;
+  return { env: sess.owner ? ownerEnv(env) : userEnv(env, sess.sub), owner: !!sess.owner, email: sess.email || '', sessKey: key };
+}
+
+const gAccessCache = new Map();   // short-lived Google access tokens, per person
+
+// A one-time sign-in address. kind: "calendar" (connect a calendar) or "login" (sign in to Vesper).
+async function gStart(env, kind = 'calendar') {
   const state = gRand();
-  await env.VESPER.put('gauth', JSON.stringify({ state, exp: Date.now() + 10 * 60000 }));
-  const q = gForm({ client_id: env.GOOGLE_CLIENT_ID, redirect_uri: gBase(env) + '/google/callback', response_type: 'code', scope: G_SCOPE, access_type: 'offline', prompt: 'consent', state });
+  await env.RAW.put('gauth:' + state, JSON.stringify({ kind, uid: env.UID, exp: Date.now() + 10 * 60000 }));
+  const q = gForm({
+    client_id: env.GOOGLE_CLIENT_ID, redirect_uri: gBase(env) + '/google/callback', response_type: 'code',
+    scope: kind === 'login' ? G_LOGIN_SCOPE : G_SCOPE, access_type: 'offline', prompt: kind === 'login' ? 'select_account consent' : 'consent', state,
+  });
   return `${G_AUTH}?${q}`;
 }
 
+async function gExchange(env, code) {
+  const res = await fetch(G_TOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: gForm({ code, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, redirect_uri: gBase(env) + '/google/callback', grant_type: 'authorization_code' }) });
+  const tok = await res.json().catch(() => ({}));
+  return { ok: res.ok, tok };
+}
+
+// Google sends the person back here. The one-time state in the address says what they were doing and who they are.
 async function gCallback(request, env) {
   if (!gConfigured(env)) return gPage('Google is not set up', 'The hub has no Google settings yet.', env);
   const u = new URL(request.url);
-  if (u.searchParams.get('error')) return gPage('Google sign-in was cancelled', 'Nothing was connected.', env);
-  const saved = await env.VESPER.get('gauth', 'json');
   const state = u.searchParams.get('state') || '';
-  if (!saved || !saved.state || saved.exp < Date.now() || !same(state, saved.state)) return gPage('That sign-in link expired', 'Start again from Vesper (Add to calendar, then Connect Google).', env);
-  await env.VESPER.delete('gauth');   // a sign-in link works once
+  const rec = state ? await env.VESPER.get('gauth:' + state, 'json') : null;
+  if (!rec || rec.exp < Date.now()) return gPage('That sign-in link expired', 'Start again from Vesper.', env);
+  await env.VESPER.delete('gauth:' + state);   // a sign-in link works once
+  if (u.searchParams.get('error')) return gPage('Google sign-in was cancelled', 'Nothing was changed.', env);
   const code = u.searchParams.get('code');
   if (!code) return gPage('Google sign-in failed', 'No code came back.', env);
-  const res = await fetch(G_TOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: gForm({ code, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, redirect_uri: gBase(env) + '/google/callback', grant_type: 'authorization_code' }) });
-  const tok = await res.json().catch(() => ({}));
-  if (!res.ok || !tok.refresh_token) return gPage('Google sign-in failed', 'Google did not give a long-lasting permission. Remove Vesper from myaccount.google.com/permissions and try again.', env);
-  await env.VESPER.put('google', JSON.stringify({ refresh: tok.refresh_token, scope: tok.scope || '', at: Date.now() }));
-  await env.VESPER.delete('gcal');   // a new sign-in starts with the default calendar
-  gAccess = { token: tok.access_token || '', exp: Date.now() + Math.max(0, (tok.expires_in || 0) - 60) * 1000 };
+  const { ok, tok } = await gExchange(env, code);
+  if (rec.kind === 'login') return loginDone(env, ok, tok);
+  if (!ok || !tok.refresh_token) return gPage('Google sign-in failed', 'Google did not give a long-lasting permission. Remove Vesper from myaccount.google.com/permissions and try again.', env);
+  const uenv = rec.uid === 'owner' || !rec.uid ? ownerEnv(env) : userEnv(env, rec.uid);
+  await uenv.VESPER.put('google', JSON.stringify({ refresh: tok.refresh_token, scope: tok.scope || '', at: Date.now() }));
+  await uenv.VESPER.delete('gcal');   // a new sign-in starts with the default calendar
+  gAccessCache.set('cal:' + uenv.UID, { token: tok.access_token || '', exp: Date.now() + Math.max(0, (tok.expires_in || 0) - 60) * 1000 });
   return gPage('Google Calendar is connected', 'You can close this tab and go back to Vesper.', env);
 }
 
+// ---- Sign in with Google ----------------------------------------------------------------
+const G_LOGIN_SCOPE = 'openid email profile https://www.googleapis.com/auth/drive.appdata';
+const SESSION_DAYS = 90;
+const emails = (v) => String(v || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+
+function idClaims(idToken) {
+  try {
+    const part = String(idToken).split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(part + '='.repeat((4 - (part.length % 4)) % 4)));
+  } catch (e) { return null; }
+}
+
+async function loginDone(env, ok, tok) {
+  const claims = ok ? idClaims(tok.id_token) : null;
+  // The token came straight from Google over a secure connection; still make sure it is for this app and a verified address.
+  if (!claims || claims.aud !== env.GOOGLE_CLIENT_ID || !claims.sub || !claims.email || claims.email_verified === false) return gPage('Google sign-in failed', 'Google did not confirm who you are. Try again.', env);
+  const email = String(claims.email).toLowerCase();
+  const owner = !!env.OWNER_EMAIL && email === String(env.OWNER_EMAIL).trim().toLowerCase();
+  const allowed = emails(env.ALLOWED_EMAILS);
+  if (!owner && allowed.length && !allowed.includes(email)) return gPage('This Vesper is private', 'Your Google account is not on the list for this site.', env);
+  const sub = String(claims.sub).replace(/[^0-9a-zA-Z_-]/g, '');
+  if (!owner) {
+    const known = await env.VESPER.get('user:' + sub, 'json');
+    if (!known) {
+      const count = Number(await env.VESPER.get('usercount')) || 0;
+      if (count >= (parseInt(env.MAX_USERS, 10) || 100)) return gPage('Sign-up is full', 'This Vesper is not taking new people right now.', env);
+      await env.VESPER.put('usercount', String(count + 1));
+    }
+    await env.VESPER.put('user:' + sub, JSON.stringify({ email, at: Date.now() }));
+  }
+  const space = owner ? ownerEnv(env) : userEnv(env, sub);
+  if (tok.refresh_token) await space.VESPER.put('drive', JSON.stringify({ ...((await space.VESPER.get('drive', 'json')) || {}), refresh: tok.refresh_token }));
+  const token = gRand() + gRand();
+  await env.VESPER.put('sess:' + (await sha(token)), JSON.stringify({ sub, email, owner, exp: Date.now() + SESSION_DAYS * 86400000 }));
+  const once = gRand();
+  await env.VESPER.put('login:' + once, JSON.stringify({ token, email, owner, exp: Date.now() + 2 * 60000 }));
+  return new Response(null, { status: 302, headers: { Location: `${gBase(env)}/#/signin?c=${once}`, 'Cache-Control': 'no-store' } });
+}
+
+// ---- Your copy in your own Google Drive (a hidden app folder only Vesper can see) -------------
+const DRIVE = 'https://www.googleapis.com/drive/v3';
+const DRIVE_UP = 'https://www.googleapis.com/upload/drive/v3';
+const DRIVE_FILE = 'vesper-data.json';
+const BACKUP_EVERY = 5 * 60000;
+
+async function driveToken(env) {
+  const hit = gAccessCache.get('drive:' + env.UID);
+  if (hit && hit.exp > Date.now()) return hit.token;
+  const rec = await env.VESPER.get('drive', 'json');
+  if (!rec || !rec.refresh) return '';
+  const res = await fetch(G_TOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: gForm({ client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, refresh_token: rec.refresh, grant_type: 'refresh_token' }) });
+  const tok = await res.json().catch(() => ({}));
+  if (!res.ok || !tok.access_token) return '';
+  gAccessCache.set('drive:' + env.UID, { token: tok.access_token, exp: Date.now() + Math.max(0, (tok.expires_in || 3600) - 60) * 1000 });
+  return tok.access_token;
+}
+
+async function driveFileId(env, access, rec) {
+  if (rec.fileId) return rec.fileId;
+  const q = new URLSearchParams({ spaces: 'appDataFolder', q: `name='${DRIVE_FILE}'`, fields: 'files(id)' });
+  const res = await fetch(`${DRIVE}/files?${q}`, { headers: { Authorization: 'Bearer ' + access } });
+  const data = res.ok ? await res.json().catch(() => ({})) : {};
+  return (data.files && data.files[0] && data.files[0].id) || '';
+}
+
+// Saves a copy at most every five minutes. Never stops a sync if Google is slow or says no.
+async function driveBackup(env, state, { force = false } = {}) {
+  try {
+    const rec = await env.VESPER.get('drive', 'json');
+    if (!rec || !rec.refresh) return false;
+    if (!force && Date.now() - (rec.last || 0) < BACKUP_EVERY) return false;
+    const access = await driveToken(env);
+    if (!access) return false;
+    const id = await driveFileId(env, access, rec);
+    const boundary = 'vesper' + gRand();
+    const meta = id ? { name: DRIVE_FILE } : { name: DRIVE_FILE, parents: ['appDataFolder'] };
+    const body = `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(state)}\r\n--${boundary}--`;
+    const res = await fetch(id ? `${DRIVE_UP}/files/${id}?uploadType=multipart` : `${DRIVE_UP}/files?uploadType=multipart`, { method: id ? 'PATCH' : 'POST', headers: { Authorization: 'Bearer ' + access, 'Content-Type': `multipart/related; boundary=${boundary}` }, body });
+    const file = await res.json().catch(() => ({}));
+    if (!res.ok) return false;
+    await env.VESPER.put('drive', JSON.stringify({ ...rec, fileId: file.id || id, last: Date.now() }));
+    return true;
+  } catch (e) { return false; }
+}
+
+async function driveRestore(env) {
+  const rec = await env.VESPER.get('drive', 'json');
+  const access = rec && rec.refresh ? await driveToken(env) : '';
+  if (!access) throw new Error('Google Drive is not connected. Sign in with Google again.');
+  const id = await driveFileId(env, access, rec);
+  if (!id) throw new Error('No Vesper copy was found in your Google Drive yet.');
+  const res = await fetch(`${DRIVE}/files/${id}?alt=media`, { headers: { Authorization: 'Bearer ' + access } });
+  const data = res.ok ? await res.json().catch(() => null) : null;
+  if (!data || !Array.isArray(data.projects) || !Array.isArray(data.decks)) throw new Error('The copy in Google Drive could not be read.');
+  return data;
+}
+
+async function driveDelete(env) {
+  try {
+    const rec = await env.VESPER.get('drive', 'json');
+    if (!rec || !rec.refresh) return;
+    const access = await driveToken(env);
+    if (access) {
+      const id = await driveFileId(env, access, rec);
+      if (id) await fetch(`${DRIVE}/files/${id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + access } });
+    }
+    await fetch(`${G_REVOKE}?${gForm({ token: rec.refresh })}`, { method: 'POST' });
+  } catch (e) { /* best effort */ }
+}
+
 async function gAccessToken(env) {
-  if (gAccess.token && gAccess.exp > Date.now()) return gAccess.token;
+  const hit = gAccessCache.get('cal:' + env.UID);
+  if (hit && hit.token && hit.exp > Date.now()) return hit.token;
   const saved = await env.VESPER.get('google', 'json');
   if (!saved || !saved.refresh) throw new Error('Google Calendar is not connected. Connect it from Vesper (Add to calendar).');
   const res = await fetch(G_TOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: gForm({ client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, refresh_token: saved.refresh, grant_type: 'refresh_token' }) });
@@ -149,15 +298,15 @@ async function gAccessToken(env) {
     if (tok.error === 'invalid_grant') { await env.VESPER.delete('google'); throw new Error('The Google sign-in expired. Connect Google Calendar again.'); }
     throw new Error('Google would not give access right now. Try again in a minute.');
   }
-  gAccess = { token: tok.access_token, exp: Date.now() + Math.max(0, (tok.expires_in || 3600) - 60) * 1000 };
-  return gAccess.token;
+  gAccessCache.set('cal:' + env.UID, { token: tok.access_token, exp: Date.now() + Math.max(0, (tok.expires_in || 3600) - 60) * 1000 });
+  return tok.access_token;
 }
 
 async function gDisconnect(env) {
   const saved = await env.VESPER.get('google', 'json');
   if (saved && saved.refresh) { try { await fetch(`${G_REVOKE}?${gForm({ token: saved.refresh })}`, { method: 'POST' }); } catch (e) { /* best effort */ } }
   await env.VESPER.delete('google');
-  gAccess = { token: '', exp: 0 };
+  gAccessCache.delete('cal:' + env.UID);
 }
 
 const G_LOCAL = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
@@ -200,7 +349,7 @@ async function googleRoutes(request, env, origin, path) {
   if (!gConfigured(env)) return json(400, { error: 'Google is not set up on the hub yet (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and PUBLIC_URL).', configured: false }, origin);
   if (path === '/google/calendars' && request.method === 'GET') {
     try {
-      const res = await fetch(`${G_CAL}/users/me/calendarList?minAccessRole=writer`, { headers: { Authorization: 'Bearer ' + (await gAccessToken(env)) } });
+      const res = await fetch(`${G_CAL}/users/me/calendarList?minAccessRole=writer&showHidden=true`, { headers: { Authorization: 'Bearer ' + (await gAccessToken(env)) } });
       if (!res.ok) return json(400, { error: 'Google would not list your calendars. Press Connect Google again to allow it.' }, origin);
       const data = await res.json();
       const cur = await gCal(env);
@@ -220,7 +369,7 @@ async function googleRoutes(request, env, origin, path) {
         await env.VESPER.put('gcal', JSON.stringify({ id: cal.id, name }));
         return json(200, { selected: cal.id, name }, origin);
       }
-      const list = await fetch(`${G_CAL}/users/me/calendarList?minAccessRole=writer`, { headers: head });
+      const list = await fetch(`${G_CAL}/users/me/calendarList?minAccessRole=writer&showHidden=true`, { headers: head });
       const data = list.ok ? await list.json() : { items: [] };
       const hit = (data.items || []).find((c) => c.id === b.id);
       if (!hit) return json(400, { error: 'That calendar is not one you can add events to.' }, origin);
@@ -394,12 +543,14 @@ async function sync(request, env, origin) {
   const stored = await loadState(env);
   const merged = mergeStates(stored, inc);
   if (!sameState(stored, merged)) await saveState(env, merged);
+  await driveBackup(env, merged);
   return json(200, { state: merged }, origin);
 }
 
 // ---- AI proxy ---------------------------------------------------------------------------
 
 async function aiProxy(request, env, origin) {
+  if (!env.OWNER) return json(403, { error: 'The shared AI proxy is for the owner only. Use your own AI key in AI settings.' }, origin);
   if (!env.NVIDIA_API_KEY) return json(500, { error: 'NVIDIA_API_KEY is not set on the Worker' }, origin);
   const text = await request.text();
   if (text.length > MAX_AI_BODY) return json(413, { error: 'request too large' }, origin);
@@ -421,6 +572,43 @@ async function aiProxy(request, env, origin) {
   });
 }
 
+// ---- Account -----------------------------------------------------------------------------
+
+async function accountRoutes(request, ctx, origin, path) {
+  const env = ctx.env;
+  if (path === '/me' && request.method === 'GET') {
+    const drive = await env.VESPER.get('drive', 'json');
+    return json(200, { email: ctx.email, owner: ctx.owner, drive: { connected: !!(drive && drive.refresh), last: (drive && drive.last) || 0 } }, origin);
+  }
+  if (path === '/me/restore' && request.method === 'POST') {
+    try {
+      const copy = await driveRestore(env);
+      const merged = mergeStates(await loadState(env), copy);
+      await saveState(env, merged);
+      return json(200, { state: merged }, origin);
+    } catch (e) { return json(400, { error: e.message }, origin); }
+  }
+  if (path === '/me/backup' && request.method === 'POST') {
+    const ok = await driveBackup(env, await loadState(env), { force: true });
+    return json(ok ? 200 : 400, ok ? { saved: true } : { error: 'Could not save to Google Drive. Sign in with Google again.' }, origin);
+  }
+  if (path === '/me/delete' && request.method === 'POST') {
+    if (ctx.owner) return json(400, { error: 'The owner space is not deleted from the app.' }, origin);
+    await driveDelete(env);
+    await gDisconnect(env);
+    for (const k of ['state', 'google', 'gcal', 'gevents', 'drive']) await env.VESPER.delete(k);
+    await env.RAW.delete('user:' + env.UID);
+    await env.RAW.put('usercount', String(Math.max(0, (Number(await env.RAW.get('usercount')) || 1) - 1)));
+    if (ctx.sessKey) await env.RAW.delete(ctx.sessKey);
+    return json(200, { deleted: true }, origin);
+  }
+  if (path === '/auth/logout' && request.method === 'POST') {
+    if (ctx.sessKey) await env.RAW.delete(ctx.sessKey);
+    return json(200, { signedOut: true }, origin);
+  }
+  return json(404, { error: 'not found' }, origin);
+}
+
 // ---- Entry ------------------------------------------------------------------------------
 
 export default {
@@ -428,37 +616,53 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '');
 
-    // The Claude connector: token in the address (or a Bearer header). No browser origin needed.
+    // The Claude connector: token in the address (or a Bearer header). Owner only. No browser origin needed.
     const m = path.match(/^\/mcp(?:\/(.+))?$/);
     if (m) {
       if (!hasToken(env, m[1] ? decodeURIComponent(m[1]) : bearer(request))) return json(401, { error: 'bad token' });
       if (!env.VESPER) return json(500, { error: 'KV binding VESPER is not set on the Worker' });
-      return mcp(request, env);
+      return mcp(request, ownerEnv(env));
     }
 
-    // Google sends the person back here after sign-in. It carries no token; a one-time code in the address protects it.
+    // Google sends the person back here after sign-in. It carries no token; a one-time state in the address protects it.
     if (path === '/google/callback' && request.method === 'GET') {
       if (!env.VESPER) return json(500, { error: 'KV binding VESPER is not set on the Worker' });
-      return gCallback(request, env);
+      return gCallback(request, ownerEnv(env));
     }
 
-    // The app: only from allowed origins, with the token.
+    // The app: only from allowed origins.
     const origin = request.headers.get('Origin') || '';
     const extra = String(env.ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const known = ALLOWED_ORIGINS.includes(origin) || extra.includes(origin);
     // Browsers leave the Origin header off for same-site GET requests; the token below still protects those.
-    if (origin && !ALLOWED_ORIGINS.includes(origin) && !extra.includes(origin)) return json(403, { error: 'origin not allowed' });
+    if (origin && !known) return json(403, { error: 'origin not allowed' });
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(origin) });
-    if (!hasToken(env, bearer(request))) return json(401, { error: 'bad token' }, origin);
+    if (!env.VESPER && path !== '/v1/chat/completions' && path !== '/chat/completions') return json(500, { error: 'KV binding VESPER is not set on the Worker' }, origin);
 
-    if (path === '/sync') {
-      if (!env.VESPER) return json(500, { error: 'KV binding VESPER is not set on the Worker' }, origin);
-      return sync(request, env, origin);
+    // Signing in has no token yet, so these two need a known website address instead.
+    if (path === '/auth/google/start' && request.method === 'POST') {
+      if (!known) return json(403, { error: 'origin not allowed' }, origin);
+      if (!gConfigured(env)) return json(400, { error: 'Google is not set up on this hub yet.' }, origin);
+      return json(200, { url: await gStart(ownerEnv(env), 'login') }, origin);
     }
-    if (path.startsWith('/google/') || path === '/calendar/event') {
-      if (!env.VESPER) return json(500, { error: 'KV binding VESPER is not set on the Worker' }, origin);
-      return googleRoutes(request, env, origin, path);
+    if (path === '/auth/exchange' && request.method === 'POST') {
+      if (!known) return json(403, { error: 'origin not allowed' }, origin);
+      let b;
+      try { b = JSON.parse(await request.text()); } catch (e) { return json(400, { error: 'invalid JSON' }, origin); }
+      const key = 'login:' + String((b && b.code) || '').replace(/[^0-9a-f]/g, '');
+      const rec = await env.VESPER.get(key, 'json');
+      await env.VESPER.delete(key);   // a one-time code
+      if (!rec || rec.exp < Date.now()) return json(400, { error: 'That sign-in expired. Try again.' }, origin);
+      return json(200, { token: rec.token, email: rec.email, owner: rec.owner }, origin);
     }
-    if (request.method === 'POST' && (path === '/v1/chat/completions' || path === '/chat/completions')) return aiProxy(request, env, origin);
+
+    const ctx = await who(env, bearer(request));
+    if (!ctx) return json(401, { error: 'bad token' }, origin);
+
+    if (path === '/sync') return sync(request, ctx.env, origin);
+    if (path.startsWith('/google/') || path === '/calendar/event') return googleRoutes(request, ctx.env, origin, path);
+    if (path === '/me' || path.startsWith('/me/') || path === '/auth/logout') return accountRoutes(request, ctx, origin, path);
+    if (request.method === 'POST' && (path === '/v1/chat/completions' || path === '/chat/completions')) return aiProxy(request, ctx.env, origin);
     return json(404, { error: 'not found' }, origin);
   },
 };
