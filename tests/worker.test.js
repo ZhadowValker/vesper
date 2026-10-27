@@ -360,6 +360,13 @@ await test('login: the owner email opens the owner data; the list and the cap li
   env.MAX_USERS = '';
 });
 
+await test('login: the app can ask whether Google sign-in is offered', async () => {
+  assert.deepEqual(await (await call('/auth/config')).json(), { google: true });
+  const saved = env.GOOGLE_CLIENT_ID; env.GOOGLE_CLIENT_ID = '';
+  assert.deepEqual(await (await call('/auth/config')).json(), { google: false });
+  env.GOOGLE_CLIENT_ID = saved;
+});
+
 await test('login: not set up means a clear message', async () => {
   const saved = env.GOOGLE_CLIENT_ID; env.GOOGLE_CLIENT_ID = '';
   const r = await call('/auth/google/start', { method: 'POST', headers: { Origin: ORIGIN } });

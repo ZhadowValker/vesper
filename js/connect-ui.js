@@ -35,6 +35,33 @@ export function when(st) {
   return 'Synced ' + new Date(st.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// First visit on a hub that offers Google sign-in. Resolves 'google', 'offline', or 'later' (closed without choosing).
+export function loginDialog() {
+  return new Promise((resolve) => {
+    const { dlg, close } = open(`<form>
+      <h2>Welcome to Vesper</h2>
+      <p class="ai-note">Sign in with Google to keep your projects on every device, with a copy in your own Google Drive. Or carry on without an account; everything then stays on this device.</p>
+      <p class="ai-status" role="status"></p>
+      <div class="modal-actions ai-actions">
+        <button type="button" class="btn" data-act="google">Continue with Google</button>
+        <button type="button" class="btn ghost" data-act="offline">Continue offline</button>
+      </div>
+    </form>`);
+    const status = dlg.querySelector('.ai-status');
+    let answered = false;
+    const finish = (v) => { if (answered) return; answered = true; close(); resolve(v); };
+    dlg.addEventListener('close', () => finish('later'));
+    dlg.addEventListener('click', async (e) => {
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'offline') { try { localStorage.setItem('vesper.login.choice', 'offline'); } catch (err) { /* storage blocked */ } finish('offline'); }
+      else if (act === 'google') {
+        status.textContent = 'Opening Google...';
+        try { await googleSignIn(location.origin); } catch (err) { status.dataset.kind = 'bad'; status.textContent = err.message; }
+      } else if (e.target === dlg) finish('later');
+    });
+  });
+}
+
 export function syncDialog({ onChange } = {}) {
   const cfg = getSync();
   const google = !!cfg.email && syncReady();
@@ -44,7 +71,7 @@ export function syncDialog({ onChange } = {}) {
       <label class="ai-f">Token<input name="token" type="password" placeholder="The APP_TOKEN you set on the hub" value="${google ? '' : esc(cfg.token)}" autocomplete="off"></label>
     </details>`;
   const { dlg, close } = open(`<form>
-    <h2>Sync, Google and Claude</h2>
+    <h2>${google ? 'Your account' : 'Sign in'}</h2>
     ${google
       ? `<p class="ai-note">Signed in as <b>${esc(cfg.email)}</b>. Your projects sync across devices and a copy is kept in your own Google Drive.</p>`
       : '<p class="ai-note muted">Sign in with Google to keep your projects on every device, with a copy in your own Google Drive. Or use a hub token (advanced).</p>'}

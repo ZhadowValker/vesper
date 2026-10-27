@@ -7,6 +7,7 @@ import { buildSample } from '../sample.js';
 import { showGuide, guideSeen } from '../guide.js';
 import { openChatPanel } from '../ai/panel.js';
 import { syncDialog } from '../connect-ui.js';
+import { accountButton, maybeFirstLogin } from '../account.js';
 import { syncReady } from '../sync.js';
 
 export function home() {
@@ -57,6 +58,7 @@ export function home() {
       <button class="icon-btn ai-set" data-act="ai" aria-label="Open the AI assistant">AI</button>
       <button class="icon-btn" data-act="guide" aria-label="How to use Vesper">?</button>
       <button class="btn small" data-act="new-project">${ICON.plus}Project</button>
+      ${accountButton()}
     </div>
     <div class="col">
       ${projects.length ? '' : `<div class="o1">${empty}</div>`}
@@ -91,7 +93,7 @@ export function home() {
 
   function mount(root) {
     root.addEventListener('click', onClick);
-    if (!guideSeen()) showGuide().then((r) => { if (r === 'sample') openSample(); });
+    maybeFirstLogin().then(() => { if (!guideSeen()) return showGuide().then((r) => { if (r === 'sample') openSample(); }); });
     const file = $('#import-file', root);
     if (file) file.addEventListener('change', onFile);
     return () => root.removeEventListener('click', onClick);
@@ -149,7 +151,7 @@ export function home() {
         a.download = `vesper-backup-${new Date().toISOString().slice(0, 10)}.json`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      } else if (act === 'sync') {
+      } else if (act === 'account' || act === 'sync') {
         syncDialog({ onChange: rerender });
       } else if (act === 'sample') {
         openSample();

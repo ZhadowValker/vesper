@@ -639,6 +639,9 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(origin) });
     if (!env.VESPER && path !== '/v1/chat/completions' && path !== '/chat/completions') return json(500, { error: 'KV binding VESPER is not set on the Worker' }, origin);
 
+    // Lets the app know whether this hub offers Google sign-in (no secrets in the answer).
+    if (path === '/auth/config' && request.method === 'GET') return json(200, { google: gConfigured(env) }, origin);
+
     // Signing in has no token yet, so these two need a known website address instead.
     if (path === '/auth/google/start' && request.method === 'POST') {
       if (!known) return json(403, { error: 'origin not allowed' }, origin);
