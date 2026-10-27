@@ -385,3 +385,29 @@ button.spread-btn{width:100%;background:none;border:0;padding:6px 4px;margin:0;f
 button.spread-btn:hover{background:var(--glass-soft)}
 .avatar-btn{padding:0;min-width:44px;aspect-ratio:1/1;overflow:hidden;display:grid;place-items:center;line-height:0}
 .avatar{width:36px;height:36px;aspect-ratio:1/1;flex:none}
+
+/* navigation island */
+:root{--island-h:78px}
+.island{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom));transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:2px;padding:6px;max-width:calc(100vw - 20px);border-radius:30px;border:1px solid var(--edge-strong);background:linear-gradient(145deg,rgba(40,34,84,.88),rgba(22,18,54,.9));-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);box-shadow:0 14px 40px rgba(6,4,24,.6),inset 0 1px 0 rgba(255,255,255,.2)}
+.island[hidden]{display:none}
+.isl-b{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;min-width:52px;height:50px;padding:0 6px;border:0;border-radius:22px;background:none;color:var(--muted);cursor:pointer;font-size:10.5px;line-height:1}
+.isl-b:hover{background:rgba(255,255,255,.1);color:var(--ink)}
+.isl-b[aria-current=page]{color:var(--ink);background:rgba(255,255,255,.14)}
+.isl-b:disabled{opacity:.35;cursor:default}
+.isl-b svg{display:block}
+.isl-av{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;font-size:12px;font-weight:700;background:linear-gradient(135deg,#8f7bff,#52d6c4);color:#12102b}
+.isl-count{min-width:44px;text-align:center;font-size:13px;font-weight:600;color:var(--ink)}
+@media (max-width:380px){.isl-b{min-width:44px}.isl-b span{display:none}.isl-b{height:46px}}
+.has-island .page{padding-bottom:calc(var(--island-h) + 28px + env(safe-area-inset-bottom))}
+@media print{.island{display:none!important}}
+
+/* slides fill the screen on phones; only the writing area scrolls */
+.slide-scroll{display:flex;flex-direction:column;gap:16px}
+@media (max-width:700px){
+  .player{height:100vh;height:100dvh;min-height:0;overflow:hidden;padding-bottom:calc(var(--island-h) + 10px + env(safe-area-inset-bottom))}
+  .player .slide{flex:1 1 0;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+  .player .slide.has-scroll{overflow:hidden}
+  .player .slide.has-scroll .slide-scroll{flex:1 1 0;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-right:2px;-webkit-overflow-scrolling:touch}
+  .player .slide h1{font-size:30px}
+}
+@media (min-width:701px){.has-island .player{padding-bottom:calc(var(--island-h) + 20px)}}

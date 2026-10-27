@@ -25,7 +25,6 @@ export function deckView(id) {
     <div class="top">
       <a class="back" href="#/p/${deck.projectId}" aria-label="Back to project">${ICON.back}</a>
       <div class="grow"><h1>${esc(deck.title)}</h1><p class="sub">${esc(project ? project.name : '')}${deck.passes > 1 ? `, pass ${deck.passes}` : ''}</p></div>
-      <button class="icon-btn ai-set" data-act="ai-chat" aria-label="Open the AI assistant">AI</button>
     </div>
     <div class="card now-card">
       <div class="now-text"><p class="sub">Now</p><p class="now-t">${esc(now)}</p><p class="sub">Slide ${deck.slide + 1} of ${SLIDES.length}</p>${stageBar(deck.slide)}</div>

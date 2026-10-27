@@ -5,6 +5,7 @@ import { deckView } from './views/deck.js';
 import { slideView } from './views/slide.js';
 import { startSync } from './sync.js';
 import { signinView } from './signin.js';
+import { mountIsland } from './island.js';
 
 const routes = [
   [/^#\/(overview)?$/, home],
@@ -27,6 +28,7 @@ function render() {
     root.innerHTML = result.html;
     window.scrollTo(0, 0);
     if (result.mount) cleanup = result.mount(root) || null;
+    mountIsland();
     return;
   }
   location.hash = '#/';

@@ -24,15 +24,9 @@ export function slideView(deckId, nStr) {
     <div class="head">
       <a class="back" href="#/d/${deck.id}" aria-label="Back to task">${ICON.back}</a>
       <div class="meta">${esc(deck.title)}${project ? ', ' + esc(project.name) : ''}</div>
-      <button class="icon-btn ai-set no-print" data-act="ai-chat" aria-label="Open the AI assistant">AI</button>
     </div>
     ${stageBar(n)}
     ${body(deck, slide, project)}
-    <div class="nav no-print">
-      <button class="btn" data-nav="prev" aria-label="Previous slide" ${n === 0 ? 'disabled' : ''}>${ICON.back}</button>
-      <span class="count">${n + 1} of ${SLIDES.length}</span>
-      <button class="btn" data-nav="next" aria-label="Next slide" ${n === last ? 'disabled' : ''}>${ICON.next}</button>
-    </div>
   </div>`;
 
   function mount(root) {
@@ -250,13 +244,15 @@ function sub(deck, slide) {
     </div>`;
   }
 
-  return `<div class="slide s-${stage.id}">
+  return `<div class="slide has-scroll s-${stage.id}">
     <div><span class="chip s-${stage.id}">${stage.name} ${slide.n} of ${stage.subs.length}</span></div>
     <div><h1>${esc(s.name)}</h1><p class="lead">${esc(s.what)}</p></div>
+    <div class="slide-scroll">
     <ul class="steps">${steps}</ul>
     ${aiReady() ? '<div class="no-print"><button class="btn small ai-btn" data-act="ai-draft">Help me with this</button></div>' : ''}
     ${extra}
     <label class="notes">Notes for this slide<textarea data-note="${slide.key}" placeholder="Write here">${esc(deck.notes[slide.key] || '')}</textarea></label>
+    </div>
   </div>`;
 }
 
