@@ -56,7 +56,7 @@ await test('initialize, list, notifications', async () => {
   const l = await rpc('tools/list');
   const names = l.result.tools.map((t) => t.name);
   assert.ok(names.includes('vesper_set_note') && names.includes('vesper_next_questions'));
-  assert.ok(!names.some((x) => /selah|delete/.test(x)));
+  assert.ok(names.includes('vesper_pass_selah') && names.includes('vesper_delete'));
   const note = await call('/mcp/tok-123', { method: 'POST', body: { jsonrpc: '2.0', method: 'notifications/initialized' } });
   assert.equal(note.status, 202);
   assert.equal((await rpc('nope')).error.code, -32601);
@@ -401,6 +401,36 @@ await test('connector: a personal Claude link reaches only that person, and can 
   assert.equal((await call(again.path, { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } })).status, 200);
   await call('/me/mcp-link', { method: 'POST', headers: app, body: { revoke: true } });
   assert.equal((await call(again.path, { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } })).status, 401);
+});
+
+await test('connector: Claude can drive a task through a Selah, loop back, finish and delete', async () => {
+  await tool('vesper_create_project', { name: 'Drive proj' });
+  await tool('vesper_create_task', { project: 'Drive proj', title: 'Drive task' });
+  const changed = (r) => txt(r);
+  // needs an answer
+  let r = changed(await tool('vesper_pass_selah', { task: 'Drive task', answer: '' }));
+  assert.equal(r.changed.length, 0);
+  assert.match(r.notApplied[0], /needs the answer/);
+  // out of order is refused
+  r = changed(await tool('vesper_pass_selah', { task: 'Drive task', answer: 'enough to choose', stage: 'plan' }));
+  assert.equal(r.changed.length, 0);
+  // in order works, is marked as Claude, and moves the task on
+  r = changed(await tool('vesper_pass_selah', { task: 'Drive task', answer: 'Yes, I can say it in two sentences.' }));
+  assert.match(r.changed[0], /Passed the Vision Selah \(by Claude\)/);
+  let t = txt(await tool('vesper_get_task', { task: 'Drive task' }));
+  assert.ok(JSON.stringify(t).includes('Vision'));
+  r = changed(await tool('vesper_loop_back', { task: 'Drive task', stage: 'vision' }));
+  assert.match(r.changed[0], /Looped/);
+  r = changed(await tool('vesper_pass_selah', { task: 'Drive task', answer: 'Second pass: still clear.' }));
+  assert.match(r.changed[0], /Vision Selah/);   // vision is the next one again after the loop
+  assert.match(changed(await tool('vesper_finish', { task: 'Drive task' })).changed[0], /Finished/);
+  assert.match(changed(await tool('vesper_finish', { task: 'Drive task', reopen: true })).changed[0], /Reopened/);
+  // delete needs a clear yes
+  r = changed(await tool('vesper_delete', { task: 'Drive task', confirm: false }));
+  assert.equal(r.changed.length, 0);
+  r = changed(await tool('vesper_delete', { project: 'Drive proj', confirm: true }));
+  assert.match(r.changed[0], /Deleted project/);
+  assert.ok(!JSON.stringify(txt(await tool('vesper_overview', {}))).includes('Drive proj'));
 });
 
 await test('login: not set up means a clear message', async () => {

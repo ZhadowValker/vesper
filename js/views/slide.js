@@ -147,6 +147,12 @@ export function slideView(deckId, nStr) {
     function onSelah(choice) {
       const stage = slide.stage;
       const pending = stagePending(deck, stage);
+      if (choice === 'undo') {
+        for (let i = STAGES.findIndex((s) => s.id === stage.id); i < STAGES.length; i++) { delete deck.selah[STAGES[i].id]; if (deck.selahBy) delete deck.selahBy[STAGES[i].id]; }
+        store.save(deck);
+        rerender();
+        return;
+      }
       if (choice === 'not') {
         const firstOpen = stage.subs.find((sub) => !subDone(deck, stage, sub));
         goSlide(firstOpen ? slideIndex(`${stage.id}.${firstOpen.id}`) : firstSlideOf(stage.id));
@@ -161,6 +167,7 @@ export function slideView(deckId, nStr) {
         return;
       }
       deck.selah[stage.id] = true;
+      if (deck.selahBy) delete deck.selahBy[stage.id];
       store.save(deck);
       goSlide(n + 1);
     }
@@ -264,7 +271,7 @@ function selah(deck, slide) {
     <p class="q">${esc(stage.selah)}</p>
     ${pending > 0 ? `<p class="hint">${pending} step${pending === 1 ? '' : 's'} not ticked yet.</p>` : ''}
     <p class="hint" id="selah-msg" hidden></p>
-    ${passed ? '<p class="lead">You already continued from here.</p>' : ''}
+    ${passed ? `<p class="lead">${deck.selahBy && deck.selahBy[stage.id] ? `Passed by ${deck.selahBy[stage.id] === 'claude' ? 'Claude' : 'Vesper AI'}.` : 'You already continued from here.'}</p>${(deck.notes[`${stage.id}.selah`] || '').trim() ? `<p class="hint">${esc(deck.notes[`${stage.id}.selah`])}</p>` : ''}${deck.selahBy && deck.selahBy[stage.id] ? '<button class="btn small" data-selah="undo">Take this Selah back</button>' : ''}` : ''}
     <div class="btns">
       <button class="btn" data-selah="not">Not yet</button>
       <button class="btn primary" data-selah="ok">Continue</button>

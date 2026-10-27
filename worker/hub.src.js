@@ -86,6 +86,15 @@ function makeDb(state) {
       return d;
     },
     save(deck) { deck.updated = Date.now(); },
+    removeDeck(id) { state.deleted = state.deleted || {}; state.deleted[id] = Date.now(); state.decks = state.decks.filter((d) => d.id !== id); },
+    removeProject(id) {
+      state.deleted = state.deleted || {};
+      const now = Date.now();
+      state.decks.filter((d) => d.projectId === id).forEach((d) => { state.deleted[d.id] = now; });
+      state.deleted[id] = now;
+      state.decks = state.decks.filter((d) => d.projectId !== id);
+      state.projects = state.projects.filter((p) => p.id !== id);
+    },
   };
 }
 
@@ -432,8 +441,12 @@ const TOOLS = [
   { name: 'vesper_create_project', description: 'Create a project (a group of tasks).', inputSchema: obj({ name: str('Project name') }, ['name']) },
   { name: 'vesper_create_task', description: 'Create a task inside a project.', inputSchema: obj({ project: str('Project id or exact name'), title: str('Task name') }, ['project', 'title']) },
   { name: 'vesper_set_note', description: 'Write a note into one step (or the slide notes when step is left out). Filling a step also ticks it. Existing text is kept: new text is appended unless mode is "replace". Never overwrite what the person wrote unless they asked.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer', description: 'Step number on that slide, from vesper_framework. Omit for the slide notes.' }, text: str('The note, in the person\'s words, short'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked' } }, ['task', 'slide', 'text']) },
-  { name: 'vesper_schedule', description: 'Put a task on the person\'s Google Calendar (once they have connected it in Vesper). Use kind "work" for a work block and "selah" for the pause at the end of a stage. Scheduling the same task and kind again moves the existing event. Scheduling a Selah does not pass it; the person still does that.', inputSchema: obj({ task: str('Task id or exact title'), when: str('Local start time like 2026-10-28T18:00'), minutes: { type: 'integer', description: 'Length, default 30' }, kind: { type: 'string', enum: ['work', 'selah'] }, title: str('Optional event title') }, ['task', 'when']) },
+  { name: 'vesper_schedule', description: 'Put a task on the person\'s Google Calendar (once they have connected it in Vesper). Use kind "work" for a work block and "selah" for the pause at the end of a stage. Scheduling the same task and kind again moves the existing event. Scheduling a Selah does not pass it; use vesper_pass_selah for that.', inputSchema: obj({ task: str('Task id or exact title'), when: str('Local start time like 2026-10-28T18:00'), minutes: { type: 'integer', description: 'Length, default 30' }, kind: { type: 'string', enum: ['work', 'selah'] }, title: str('Optional event title') }, ['task', 'when']) },
   { name: 'vesper_tick', description: 'Tick or untick one step.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer' }, done: { type: 'boolean' } }, ['task', 'slide', 'step']) },
+  { name: 'vesper_pass_selah', description: 'Pass the next Selah of a task (stages go in order) and move the task on. Selah is the pause that ends each stage, with one question per stage (see vesper_framework). Give the answer to that question in the person\'s words; it is saved on the Selah slide and the stage is marked "passed by Claude". Only do this when the person has asked you to drive the task forward or you have asked and they agreed.', inputSchema: obj({ task: str('Task id or exact title'), answer: str('The answer to the stage pause question'), stage: str('Optional stage id; must be the next unpassed one') }, ['task', 'answer']) },
+  { name: 'vesper_loop_back', description: 'Go back to an earlier stage on purpose (the loop in the framework). Clears the Selah passes from that stage on and starts another pass.', inputSchema: obj({ task: str('Task id or exact title'), stage: str('Stage id or name: vision, research, plan, execute or review') }, ['task', 'stage']) },
+  { name: 'vesper_finish', description: 'Mark a task finished, or reopen it.', inputSchema: obj({ task: str('Task id or exact title'), reopen: { type: 'boolean', description: 'true to reopen a finished task' } }, ['task']) },
+  { name: 'vesper_delete', description: 'Delete a task or a whole project with its tasks. Cannot be undone. Ask the person first and only pass confirm true after they say yes.', inputSchema: obj({ task: str('Task id or exact title (to delete one task)'), project: str('Project id or name (to delete a whole project)'), confirm: { type: 'boolean', description: 'Must be true' } }, ['confirm']) },
 ];
 
 async function callTool(env, name, a) {
@@ -442,7 +455,7 @@ async function callTool(env, name, a) {
   const text = (v) => ({ content: [{ type: 'text', text: typeof v === 'string' ? v : JSON.stringify(v, null, 2) }] });
   const fail = (m) => ({ isError: true, content: [{ type: 'text', text: m }] });
   const run = async (actions) => {
-    const out = applyActions(actions, { db });
+    const out = applyActions(actions, { db, by: 'claude' });
     if (out.changes.length) await saveState(env, state);
     return text({ changed: out.changes.map((c) => c.text), notApplied: out.skipped });
   };
@@ -461,7 +474,7 @@ async function callTool(env, name, a) {
     if (!d) return fail(`No task found for "${a.task}". Use vesper_overview to see the ids.`);
     if (name === 'vesper_next_questions') {
       const n = Math.max(1, Math.min(20, parseInt(a.limit, 10) || 5));
-      return text({ ...taskSummary(state, d), next: emptySteps(d).slice(0, n).map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, question: s.question })), reminder: 'Only the person passes a Selah. Remind them of the stage question when a stage is filled.' });
+      return text({ ...taskSummary(state, d), next: emptySteps(d).slice(0, n).map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, question: s.question })), reminder: 'When a stage is filled, ask the person the stage Selah question (or, if they asked you to drive the task, answer it with them and call vesper_pass_selah).' });
     }
     return text({
       ...taskSummary(state, d),
@@ -480,6 +493,14 @@ async function callTool(env, name, a) {
     const d = findTask(state, a.task);
     if (!d) return fail(`No task found for "${a.task}".`);
     return run([{ type: 'tick', task: d.id, slide: a.slide, step: a.step, done: a.done }]);
+  }
+  if (name === 'vesper_pass_selah') return run([{ type: 'pass_selah', task: a.task, answer: a.answer, stage: a.stage }]);
+  if (name === 'vesper_loop_back') return run([{ type: 'loop_back', task: a.task, stage: a.stage }]);
+  if (name === 'vesper_finish') return run([{ type: a.reopen ? 'reopen' : 'finish', task: a.task }]);
+  if (name === 'vesper_delete') {
+    if (a.task) return run([{ type: 'delete_task', task: a.task, confirm: a.confirm === true }]);
+    if (a.project) return run([{ type: 'delete_project', project: a.project, confirm: a.confirm === true }]);
+    return fail('Give a task or a project to delete.');
   }
   if (name === 'vesper_schedule') {
     const d = findTask(state, a.task);
@@ -507,7 +528,7 @@ async function handleRpc(env, msg) {
       protocolVersion: (msg.params && msg.params.protocolVersion) || '2025-06-18',
       capabilities: { tools: {} },
       serverInfo: { name: 'vesper', version: '1.0.0' },
-      instructions: 'Vesper is a work framework: Vision, Research, Plan, Execute, Review, with a Selah pause after each stage. Read vesper_framework first. To interview the person, call vesper_next_questions, ask one question at a time, and save each answer with vesper_set_note. You cannot pass a Selah or delete anything; remind the person to take each Selah themselves.',
+      instructions: 'Vesper is a work framework: Vision, Research, Plan, Execute, Review, with a Selah pause after each stage. Read vesper_framework first. To interview the person, call vesper_next_questions, ask one question at a time, and save each answer with vesper_set_note. You may carry a task through the stages when the person asks you to: fill the steps, then pass each Selah with vesper_pass_selah, giving the answer to the stage pause question in their words. Loop back with vesper_loop_back when the Review says to. Delete only after they say yes.',
     });
   }
   if (msg.method === 'ping') return ok({});

@@ -1,6 +1,6 @@
 // The chat bot's brain, without any screen code: what it is told, how its reply is read,
 // and how its actions are applied to the task data. It can fill and tick steps, but it can
-// never pass a Selah, delete anything, or finish a task. Those stay with the person.
+// pass a Selah only with the person's answer, and delete only after they say yes.
 import { store } from '../store.js';
 import { STAGES, SLIDES } from '../framework.js';
 import { applyActions as applyWith } from './apply.js';
@@ -29,7 +29,8 @@ HOW YOU WORK
 - If they describe new work, create a project (only if none fits) and a task, then fill Vision first.
 - If something you need is missing, ask ONE short, plain question. Do not ask several at once.
 - Do not overwrite what is already written unless they ask you to change it. Use mode "append" to add to a note.
-- You cannot pass a Selah. When a stage looks filled in, say so and ask them to open that stage's Selah slide and answer its pause question themselves. Say the question.
+- When a stage looks filled in, say so and ask them the stage's pause question. When they answer (or tell you to go ahead and answer it for them), pass the Selah with their answer. Never pass a Selah they have not agreed to.
+- Delete only a task or project they clearly asked to delete, with "confirm":true.
 - Keep replies short and warm, in plain everyday words. No jargon.
 - If they only ask a question or chat, answer with no actions.
 
@@ -43,6 +44,10 @@ Action types (use ids from the state, or exact names):
   - "mode" is "append" (default when something is already written) or "replace".
   - Filling a step also ticks it. Add "tick": false to leave it unticked.
 {"type":"tick","task":"...","slide":"vision.why","step":1,"done":true}
+{"type":"pass_selah","task":"...","answer":"their answer to the stage pause question"}   (the next unpassed stage only)
+{"type":"loop_back","task":"...","stage":"research"}   (go back on purpose; clears Selah passes from there)
+{"type":"finish","task":"..."}  or  {"type":"reopen","task":"..."}
+{"type":"delete_task","task":"...","confirm":true}  or  {"type":"delete_project","project":"...","confirm":true}
 {"type":"focus","task":"<task id or title>"}   (switch which task you are working on)
 Use [] for actions when there is nothing to change.`;
 }
@@ -76,7 +81,7 @@ export function stateText(focusId) {
       lines.push(row);
     }
     const passed = STAGES.filter((st) => f.selah[st.id]).map((st) => st.name);
-    lines.push(`Selah passed by the person: ${passed.length ? passed.join(', ') : 'none yet'}.`);
+    lines.push(`Selah passed: ${passed.length ? passed.join(', ') : 'none yet'}.`);
   }
   return lines.join('\n');
 }

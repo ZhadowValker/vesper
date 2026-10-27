@@ -222,7 +222,7 @@ function progress(deck) {
 // ---- from js/ai/apply.js ----
 // Applies the assistant's actions to task data. It works on any "db" with the same small
 // interface as the app's store, so the app and the online connector share one set of rules:
-// it can fill and tick steps, but never pass a Selah, delete anything, or finish a task.
+// it can fill and tick steps, pass a Selah (with the person's answer recorded and who passed it), loop back, finish or reopen a task, and delete a task or project when told to confirm.
 
 const MAX_TEXT = 2000;
 
@@ -240,7 +240,7 @@ function slideLabel(slide, step) {
   return step == null ? `${slide.sub.name} notes` : `${slide.sub.name} › ${slide.sub.steps[step]}`;
 }
 
-function applyActions(actions, { focusId = null, db } = {}) {
+function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
   const changes = [];
   const skipped = [];
   const touched = new Map();   // deck id -> highest slide index touched
@@ -330,6 +330,58 @@ function applyActions(actions, { focusId = null, db } = {}) {
       if (step !== null && a.tick !== false) deck.ticks[tickKey(slide.stage, slide.sub, step)] = true;
       touch(deck, idx);
       changes.push({ text: `${old ? 'Added to' : 'Filled'} ${slideLabel(slide, step)}`, href: `#/d/${deck.id}/s/${idx}` });
+    } else if (type === 'pass_selah') {
+      const deck = findTask(a.task);
+      if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
+      const next = STAGES.find((st) => !deck.selah[st.id]);
+      if (!next) { skipped.push(`"${deck.title}" has no Selah left to pass.`); continue; }
+      const stage = a.stage ? STAGES.find((st) => st.id === norm(a.stage) || norm(st.name) === norm(a.stage)) : next;
+      if (!stage) { skipped.push(`There is no stage "${a.stage}".`); continue; }
+      if (stage.id !== next.id) { skipped.push(`Pass ${next.name} first, then ${stage.name}.`); continue; }
+      const answer = String(a.answer || '').trim().slice(0, MAX_TEXT);
+      if (answer.length < 3) { skipped.push(`Passing the ${stage.name} Selah needs the answer to: ${stage.selah}`); continue; }
+      const key = `${stage.id}.selah`;
+      deck.notes[key] = `${answer}${(deck.notes[key] || '').trim() ? '\n' + deck.notes[key].trim() : ''}`;
+      deck.selah[stage.id] = true;
+      deck.selahBy = { ...(deck.selahBy || {}), [stage.id]: by };
+      const at = selahIndex(stage.id);
+      if (deck.slide <= at) deck.slide = Math.min(at + 1, SLIDES.length - 1);
+      deck.reached = Math.max(deck.reached, deck.slide);
+      db.save(deck);
+      focus = deck.id;
+      changes.push({ text: `Passed the ${stage.name} Selah (${by === 'claude' ? 'by Claude' : 'by Vesper AI'})`, href: `#/d/${deck.id}/s/${at}` });
+    } else if (type === 'loop_back') {
+      const deck = findTask(a.task);
+      if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
+      const stage = STAGES.find((st) => st.id === norm(a.stage) || norm(st.name) === norm(a.stage));
+      if (!stage) { skipped.push(`There is no stage "${a.stage}" to go back to.`); continue; }
+      const from = STAGES.indexOf(stage);
+      for (let i = from; i < STAGES.length; i++) { delete deck.selah[STAGES[i].id]; if (deck.selahBy) delete deck.selahBy[STAGES[i].id]; }
+      deck.loops += 1; deck.passes += 1; deck.finished = null;
+      deck.slide = firstSlideOf(stage.id);
+      db.save(deck);
+      focus = deck.id;
+      changes.push({ text: `Looped "${deck.title}" back to ${stage.name}`, href: `#/d/${deck.id}` });
+    } else if (type === 'finish' || type === 'reopen') {
+      const deck = findTask(a.task);
+      if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
+      deck.finished = type === 'finish' ? Date.now() : null;
+      db.save(deck);
+      changes.push({ text: `${type === 'finish' ? 'Finished' : 'Reopened'} "${deck.title}"`, href: `#/d/${deck.id}` });
+    } else if (type === 'delete_task' || type === 'delete_project') {
+      if (a.confirm !== true) { skipped.push('Deleting needs confirm: true, after the person has said yes.'); continue; }
+      if (type === 'delete_task') {
+        const deck = findTask(a.task);
+        if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
+        db.removeDeck(deck.id);
+        if (focus === deck.id) focus = null;
+        changes.push({ text: `Deleted task "${deck.title}"`, href: '#/' });
+      } else {
+        const project = findProject(a.project);
+        if (!project) { skipped.push(`Could not find the project "${a.project || ''}".`); continue; }
+        db.removeProject(project.id);
+        changes.push({ text: `Deleted project "${project.name}" and its tasks`, href: '#/' });
+      }
     } else {
       skipped.push(`Unknown action "${type}".`);
     }
@@ -452,6 +504,15 @@ function makeDb(state) {
       return d;
     },
     save(deck) { deck.updated = Date.now(); },
+    removeDeck(id) { state.deleted = state.deleted || {}; state.deleted[id] = Date.now(); state.decks = state.decks.filter((d) => d.id !== id); },
+    removeProject(id) {
+      state.deleted = state.deleted || {};
+      const now = Date.now();
+      state.decks.filter((d) => d.projectId === id).forEach((d) => { state.deleted[d.id] = now; });
+      state.deleted[id] = now;
+      state.decks = state.decks.filter((d) => d.projectId !== id);
+      state.projects = state.projects.filter((p) => p.id !== id);
+    },
   };
 }
 
@@ -798,8 +859,12 @@ const TOOLS = [
   { name: 'vesper_create_project', description: 'Create a project (a group of tasks).', inputSchema: obj({ name: str('Project name') }, ['name']) },
   { name: 'vesper_create_task', description: 'Create a task inside a project.', inputSchema: obj({ project: str('Project id or exact name'), title: str('Task name') }, ['project', 'title']) },
   { name: 'vesper_set_note', description: 'Write a note into one step (or the slide notes when step is left out). Filling a step also ticks it. Existing text is kept: new text is appended unless mode is "replace". Never overwrite what the person wrote unless they asked.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer', description: 'Step number on that slide, from vesper_framework. Omit for the slide notes.' }, text: str('The note, in the person\'s words, short'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked' } }, ['task', 'slide', 'text']) },
-  { name: 'vesper_schedule', description: 'Put a task on the person\'s Google Calendar (once they have connected it in Vesper). Use kind "work" for a work block and "selah" for the pause at the end of a stage. Scheduling the same task and kind again moves the existing event. Scheduling a Selah does not pass it; the person still does that.', inputSchema: obj({ task: str('Task id or exact title'), when: str('Local start time like 2026-10-28T18:00'), minutes: { type: 'integer', description: 'Length, default 30' }, kind: { type: 'string', enum: ['work', 'selah'] }, title: str('Optional event title') }, ['task', 'when']) },
+  { name: 'vesper_schedule', description: 'Put a task on the person\'s Google Calendar (once they have connected it in Vesper). Use kind "work" for a work block and "selah" for the pause at the end of a stage. Scheduling the same task and kind again moves the existing event. Scheduling a Selah does not pass it; use vesper_pass_selah for that.', inputSchema: obj({ task: str('Task id or exact title'), when: str('Local start time like 2026-10-28T18:00'), minutes: { type: 'integer', description: 'Length, default 30' }, kind: { type: 'string', enum: ['work', 'selah'] }, title: str('Optional event title') }, ['task', 'when']) },
   { name: 'vesper_tick', description: 'Tick or untick one step.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer' }, done: { type: 'boolean' } }, ['task', 'slide', 'step']) },
+  { name: 'vesper_pass_selah', description: 'Pass the next Selah of a task (stages go in order) and move the task on. Selah is the pause that ends each stage, with one question per stage (see vesper_framework). Give the answer to that question in the person\'s words; it is saved on the Selah slide and the stage is marked "passed by Claude". Only do this when the person has asked you to drive the task forward or you have asked and they agreed.', inputSchema: obj({ task: str('Task id or exact title'), answer: str('The answer to the stage pause question'), stage: str('Optional stage id; must be the next unpassed one') }, ['task', 'answer']) },
+  { name: 'vesper_loop_back', description: 'Go back to an earlier stage on purpose (the loop in the framework). Clears the Selah passes from that stage on and starts another pass.', inputSchema: obj({ task: str('Task id or exact title'), stage: str('Stage id or name: vision, research, plan, execute or review') }, ['task', 'stage']) },
+  { name: 'vesper_finish', description: 'Mark a task finished, or reopen it.', inputSchema: obj({ task: str('Task id or exact title'), reopen: { type: 'boolean', description: 'true to reopen a finished task' } }, ['task']) },
+  { name: 'vesper_delete', description: 'Delete a task or a whole project with its tasks. Cannot be undone. Ask the person first and only pass confirm true after they say yes.', inputSchema: obj({ task: str('Task id or exact title (to delete one task)'), project: str('Project id or name (to delete a whole project)'), confirm: { type: 'boolean', description: 'Must be true' } }, ['confirm']) },
 ];
 
 async function callTool(env, name, a) {
@@ -808,7 +873,7 @@ async function callTool(env, name, a) {
   const text = (v) => ({ content: [{ type: 'text', text: typeof v === 'string' ? v : JSON.stringify(v, null, 2) }] });
   const fail = (m) => ({ isError: true, content: [{ type: 'text', text: m }] });
   const run = async (actions) => {
-    const out = applyActions(actions, { db });
+    const out = applyActions(actions, { db, by: 'claude' });
     if (out.changes.length) await saveState(env, state);
     return text({ changed: out.changes.map((c) => c.text), notApplied: out.skipped });
   };
@@ -827,7 +892,7 @@ async function callTool(env, name, a) {
     if (!d) return fail(`No task found for "${a.task}". Use vesper_overview to see the ids.`);
     if (name === 'vesper_next_questions') {
       const n = Math.max(1, Math.min(20, parseInt(a.limit, 10) || 5));
-      return text({ ...taskSummary(state, d), next: emptySteps(d).slice(0, n).map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, question: s.question })), reminder: 'Only the person passes a Selah. Remind them of the stage question when a stage is filled.' });
+      return text({ ...taskSummary(state, d), next: emptySteps(d).slice(0, n).map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, question: s.question })), reminder: 'When a stage is filled, ask the person the stage Selah question (or, if they asked you to drive the task, answer it with them and call vesper_pass_selah).' });
     }
     return text({
       ...taskSummary(state, d),
@@ -846,6 +911,14 @@ async function callTool(env, name, a) {
     const d = findTask(state, a.task);
     if (!d) return fail(`No task found for "${a.task}".`);
     return run([{ type: 'tick', task: d.id, slide: a.slide, step: a.step, done: a.done }]);
+  }
+  if (name === 'vesper_pass_selah') return run([{ type: 'pass_selah', task: a.task, answer: a.answer, stage: a.stage }]);
+  if (name === 'vesper_loop_back') return run([{ type: 'loop_back', task: a.task, stage: a.stage }]);
+  if (name === 'vesper_finish') return run([{ type: a.reopen ? 'reopen' : 'finish', task: a.task }]);
+  if (name === 'vesper_delete') {
+    if (a.task) return run([{ type: 'delete_task', task: a.task, confirm: a.confirm === true }]);
+    if (a.project) return run([{ type: 'delete_project', project: a.project, confirm: a.confirm === true }]);
+    return fail('Give a task or a project to delete.');
   }
   if (name === 'vesper_schedule') {
     const d = findTask(state, a.task);
@@ -873,7 +946,7 @@ async function handleRpc(env, msg) {
       protocolVersion: (msg.params && msg.params.protocolVersion) || '2025-06-18',
       capabilities: { tools: {} },
       serverInfo: { name: 'vesper', version: '1.0.0' },
-      instructions: 'Vesper is a work framework: Vision, Research, Plan, Execute, Review, with a Selah pause after each stage. Read vesper_framework first. To interview the person, call vesper_next_questions, ask one question at a time, and save each answer with vesper_set_note. You cannot pass a Selah or delete anything; remind the person to take each Selah themselves.',
+      instructions: 'Vesper is a work framework: Vision, Research, Plan, Execute, Review, with a Selah pause after each stage. Read vesper_framework first. To interview the person, call vesper_next_questions, ask one question at a time, and save each answer with vesper_set_note. You may carry a task through the stages when the person asks you to: fill the steps, then pass each Selah with vesper_pass_selah, giving the answer to the stage pause question in their words. Loop back with vesper_loop_back when the Review says to. Delete only after they say yes.',
     });
   }
   if (msg.method === 'ping') return ok({});

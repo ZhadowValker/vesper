@@ -83,7 +83,7 @@ Off until you open **AI** on the home screen and add an address, a key and a mod
 
 ## AI assistant (optional)
 
-The dashboard stays the home screen. The **AI** button (home, task and slide pages) opens a chat panel (`js/ai/panel.js`). The settings icon inside the panel opens the address, key and model form. With AI set up you talk in plain words and the assistant (`js/ai/agent.js`) creates projects and tasks, fills step notes, ticks steps and moves a task forward. It cannot pass a Selah, delete anything or finish a task. Each turn that changes something has an Undo (only while nothing else has changed). Chat history is in `vesper.chat`, separate from task data.
+The dashboard stays the home screen. The **AI** button (home, task and slide pages) opens a chat panel (`js/ai/panel.js`). The settings icon inside the panel opens the address, key and model form. With AI set up you talk in plain words and the assistant (`js/ai/agent.js`) creates projects and tasks, fills step notes, ticks steps and moves a task forward. It can also pass a Selah (only with your answer to that stage's question, saved on the Selah slide and marked "Passed by Vesper AI", with a "Take this Selah back" button), loop back, finish or reopen a task, and delete a task or project after you say yes. Each turn that changes something has an Undo (only while nothing else has changed). Chat history is in `vesper.chat`, separate from task data.
 
 ### Interview mode
 
@@ -94,7 +94,7 @@ The **Interview** tab in the AI panel asks the questions and fills the notes. Pi
 A free Cloudflare Worker (`worker/vesper-hub.js`, setup in `worker/README.md`) adds:
 
 - **Sync** between devices (Overview → Sync and Claude).
-- **Claude connector**: Claude chats read your tasks, run the interview and fill steps. Selah is never passed by Claude.
+- **Claude connector**: Claude chats read your tasks, run the interview and fill steps. Claude can also pass each Selah (with your answer recorded and marked "Passed by Claude"), loop back, finish and, after you say yes, delete, so you can start a task in Claude and carry it through every stage.
 - **Send elsewhere**: copy, download or share any task or project as Markdown (Notion, Docs, GitHub, email).
 - **Add to calendar**: from a task, open Google Calendar with the entry filled in, or download an .ics file. With the optional Google link on the hub (`worker/README.md`), Vesper and Claude add and move events by themselves.
 - **Sign in with Google** (optional): each person gets a private space, with a copy saved in their own Google Drive. See `worker/README.md`.

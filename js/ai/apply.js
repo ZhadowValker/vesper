@@ -1,7 +1,7 @@
 // Applies the assistant's actions to task data. It works on any "db" with the same small
 // interface as the app's store, so the app and the online connector share one set of rules:
-// it can fill and tick steps, but never pass a Selah, delete anything, or finish a task.
-import { STAGES, SLIDES, slideIndex, selahIndex, tickKey } from '../framework.js';
+// it can fill and tick steps, pass a Selah (with the person's answer recorded and who passed it), loop back, finish or reopen a task, and delete a task or project when told to confirm.
+import { STAGES, SLIDES, slideIndex, selahIndex, firstSlideOf, tickKey } from '../framework.js';
 
 const MAX_TEXT = 2000;
 
@@ -19,7 +19,7 @@ function slideLabel(slide, step) {
   return step == null ? `${slide.sub.name} notes` : `${slide.sub.name} › ${slide.sub.steps[step]}`;
 }
 
-export function applyActions(actions, { focusId = null, db } = {}) {
+export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
   const changes = [];
   const skipped = [];
   const touched = new Map();   // deck id -> highest slide index touched
@@ -109,6 +109,58 @@ export function applyActions(actions, { focusId = null, db } = {}) {
       if (step !== null && a.tick !== false) deck.ticks[tickKey(slide.stage, slide.sub, step)] = true;
       touch(deck, idx);
       changes.push({ text: `${old ? 'Added to' : 'Filled'} ${slideLabel(slide, step)}`, href: `#/d/${deck.id}/s/${idx}` });
+    } else if (type === 'pass_selah') {
+      const deck = findTask(a.task);
+      if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
+      const next = STAGES.find((st) => !deck.selah[st.id]);
+      if (!next) { skipped.push(`"${deck.title}" has no Selah left to pass.`); continue; }
+      const stage = a.stage ? STAGES.find((st) => st.id === norm(a.stage) || norm(st.name) === norm(a.stage)) : next;
+      if (!stage) { skipped.push(`There is no stage "${a.stage}".`); continue; }
+      if (stage.id !== next.id) { skipped.push(`Pass ${next.name} first, then ${stage.name}.`); continue; }
+      const answer = String(a.answer || '').trim().slice(0, MAX_TEXT);
+      if (answer.length < 3) { skipped.push(`Passing the ${stage.name} Selah needs the answer to: ${stage.selah}`); continue; }
+      const key = `${stage.id}.selah`;
+      deck.notes[key] = `${answer}${(deck.notes[key] || '').trim() ? '\n' + deck.notes[key].trim() : ''}`;
+      deck.selah[stage.id] = true;
+      deck.selahBy = { ...(deck.selahBy || {}), [stage.id]: by };
+      const at = selahIndex(stage.id);
+      if (deck.slide <= at) deck.slide = Math.min(at + 1, SLIDES.length - 1);
+      deck.reached = Math.max(deck.reached, deck.slide);
+      db.save(deck);
+      focus = deck.id;
+      changes.push({ text: `Passed the ${stage.name} Selah (${by === 'claude' ? 'by Claude' : 'by Vesper AI'})`, href: `#/d/${deck.id}/s/${at}` });
+    } else if (type === 'loop_back') {
+      const deck = findTask(a.task);
+      if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
+      const stage = STAGES.find((st) => st.id === norm(a.stage) || norm(st.name) === norm(a.stage));
+      if (!stage) { skipped.push(`There is no stage "${a.stage}" to go back to.`); continue; }
+      const from = STAGES.indexOf(stage);
+      for (let i = from; i < STAGES.length; i++) { delete deck.selah[STAGES[i].id]; if (deck.selahBy) delete deck.selahBy[STAGES[i].id]; }
+      deck.loops += 1; deck.passes += 1; deck.finished = null;
+      deck.slide = firstSlideOf(stage.id);
+      db.save(deck);
+      focus = deck.id;
+      changes.push({ text: `Looped "${deck.title}" back to ${stage.name}`, href: `#/d/${deck.id}` });
+    } else if (type === 'finish' || type === 'reopen') {
+      const deck = findTask(a.task);
+      if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
+      deck.finished = type === 'finish' ? Date.now() : null;
+      db.save(deck);
+      changes.push({ text: `${type === 'finish' ? 'Finished' : 'Reopened'} "${deck.title}"`, href: `#/d/${deck.id}` });
+    } else if (type === 'delete_task' || type === 'delete_project') {
+      if (a.confirm !== true) { skipped.push('Deleting needs confirm: true, after the person has said yes.'); continue; }
+      if (type === 'delete_task') {
+        const deck = findTask(a.task);
+        if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
+        db.removeDeck(deck.id);
+        if (focus === deck.id) focus = null;
+        changes.push({ text: `Deleted task "${deck.title}"`, href: '#/' });
+      } else {
+        const project = findProject(a.project);
+        if (!project) { skipped.push(`Could not find the project "${a.project || ''}".`); continue; }
+        db.removeProject(project.id);
+        changes.push({ text: `Deleted project "${project.name}" and its tasks`, href: '#/' });
+      }
     } else {
       skipped.push(`Unknown action "${type}".`);
     }

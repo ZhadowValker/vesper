@@ -3,7 +3,7 @@
 One Cloudflare Worker that gives Vesper three extras. The app works fine without it.
 
 1. **Sync**: the same projects and tasks on your phone and laptop.
-2. **Claude connector**: Claude chats can read your tasks, run the interview and fill steps (never pass a Selah, never delete).
+2. **Claude connector**: Claude chats can read your tasks, run the interview and fill steps and carry a task through the stages: pass each Selah (answer recorded, marked "by Claude", and you can take it back), loop back, finish, and delete after you confirm.
 3. **AI proxy**: lets the app use NVIDIA's free API without a key on your phone (NVIDIA blocks direct browser calls).
 
 ## Set up (about 10 minutes, no card needed)
