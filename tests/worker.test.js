@@ -17,10 +17,17 @@ const txt = (r) => JSON.parse(r.content[0].text);
 const app = { Origin: ORIGIN, Authorization: 'Bearer tok-123', 'Content-Type': 'application/json' };
 
 await test('sync needs origin and token', async () => {
-  assert.equal((await call('/sync', { headers: { Authorization: 'Bearer tok-123' } })).status, 403);
   assert.equal((await call('/sync', { headers: { Origin: ORIGIN, Authorization: 'Bearer nope' } })).status, 401);
   assert.equal((await call('/sync', { headers: { Origin: 'https://evil.example', Authorization: 'Bearer tok-123' } })).status, 403);
   assert.equal((await call('/sync', { method: 'OPTIONS', headers: { Origin: ORIGIN } })).status, 204);
+});
+
+await test('same-site requests without an Origin header still need the token', async () => {
+  assert.equal((await call('/sync', { headers: { Authorization: 'Bearer tok-123' } })).status, 200);
+  assert.equal((await call('/sync', { headers: { Authorization: 'Bearer nope' } })).status, 401);
+  assert.equal((await call('/sync')).status, 401);
+  assert.equal((await call('/google/status', { headers: { Authorization: 'Bearer tok-123' } })).status, 200);
+  assert.equal((await call('/sync', { headers: { Origin: 'https://evil.example', Authorization: 'Bearer tok-123' } })).status, 403);
 });
 
 await test('sync merges and returns newest', async () => {

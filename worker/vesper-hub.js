@@ -395,6 +395,7 @@ const MAX_TOKENS = 4096;
 // ---- small helpers ---------------------------------------------------------------------
 
 function cors(origin) {
+  if (!origin) return {};
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Headers': 'authorization,content-type',
@@ -810,7 +811,8 @@ export default {
     // The app: only from allowed origins, with the token.
     const origin = request.headers.get('Origin') || '';
     const extra = String(env.ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean);
-    if (!ALLOWED_ORIGINS.includes(origin) && !extra.includes(origin)) return json(403, { error: 'origin not allowed' });
+    // Browsers leave the Origin header off for same-site GET requests; the token below still protects those.
+    if (origin && !ALLOWED_ORIGINS.includes(origin) && !extra.includes(origin)) return json(403, { error: 'origin not allowed' });
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(origin) });
     if (!hasToken(env, bearer(request))) return json(401, { error: 'bad token' }, origin);
 
