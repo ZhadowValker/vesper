@@ -5,7 +5,9 @@ import { go, rerender } from './nav.js';
 import { openChatPanel } from './ai/panel.js';
 import { syncDialog } from './connect-ui.js';
 import { getSync } from './sync.js';
-import { esc } from './util.js';
+import { esc, ask } from './util.js';
+import { showGuide } from './guide.js';
+import { buildSample } from './sample.js';
 
 const I = {
   home: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
@@ -13,6 +15,8 @@ const I = {
   prev: '<path d="M15 5l-7 7 7 7"/>',
   next: '<path d="M9 5l7 7-7 7"/>',
   ai: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7"/><path d="M12 17h.01"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
 };
 const svg = (name) => `<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${I[name]}</svg>`;
@@ -56,7 +60,9 @@ function paint(el) {
   el.innerHTML =
     (home ? btn('home', 'home', 'Home', 'aria-current="page"') : btn('home', 'home', 'Home') + btn('up', 'up', 'Back')) +
     (s ? btn('prev', 'prev', 'Previous', n === 0 ? 'disabled' : '') + `<span class="isl-count" aria-live="off">${n + 1}/${SLIDES.length}</span>` + btn('next', 'next', 'Next', n === last ? 'disabled' : '') : '') +
+    (s ? '' : btn('new', 'plus', 'New')) +
     btn('ai', 'ai', 'AI') +
+    (s ? '' : btn('help', 'help', 'Help')) +
     `<button type="button" class="isl-b" data-isl="account" aria-label="Account" title="Account">${letter ? `<b class="isl-av">${esc(letter)}</b>` : svg('user')}<span>Account</span></button>`;
 }
 
@@ -72,6 +78,12 @@ function onClick(e) {
     if (!m) return;
     const to = Math.min(Math.max(parseInt(m[2], 10) + (act === 'next' ? 1 : -1), 0), SLIDES.length - 1);
     go(`#/d/${m[1]}/s/${to}`);
+  } else if (act === 'new') {
+    ask('Name your project', { ok: 'Create project', placeholder: 'Office relocation' }).then((name) => { if (name) go(`#/p/${store.addProject(name).id}`); });
+  } else if (act === 'help') {
+    showGuide().then((r) => {
+      if (r === 'sample') { const have = store.findSample('book'); go(`#/p/${(have || store.insertSample(buildSample())).id}`); }
+    });
   } else if (act === 'ai') {
     const m = hash.match(/^#\/d\/(\w+)/);
     openChatPanel({ focusId: m ? m[1] : null });
