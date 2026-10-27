@@ -4,6 +4,7 @@ import { esc, confirmBox } from './util.js';
 import { rerender } from './nav.js';
 import { getSync, saveSync, syncReady, syncNow, syncStatus, hubCall, googleSignIn, signOut } from './sync.js';
 import { taskMarkdown, projectMarkdown, googleCalendarLink, icsFile, calendarSuggestion } from './export.js';
+import { aiReady } from './ai/settings.js';
 
 function open(html) {
   const dlg = document.createElement('dialog');
@@ -65,10 +66,19 @@ export function loginDialog() {
 export function syncDialog({ onChange } = {}) {
   const cfg = getSync();
   const google = !!cfg.email && syncReady();
-  const advanced = `<details class="ai-adv"${!google && cfg.url ? ' open' : ''}>
-      <summary>${google ? 'Hub details' : 'Use a hub token instead (advanced)'}</summary>
+  const advanced = google
+    ? `<details class="ai-adv" open>
+      <summary>Hub details</summary>
+      <dl class="hub-det"><dt>Hub address</dt><dd>${esc(cfg.url)}</dd><dt>Signed in as</dt><dd>${esc(cfg.email)}</dd>
+        <dt>Google Drive copy</dt><dd data-d="drive">Checking...</dd>
+        <dt>Google Calendar</dt><dd data-d="cal">Checking...</dd>
+        <dt>AI settings</dt><dd data-d="ai">${aiReady() ? 'Saved in your account' : 'Not set. Open AI on the home page.'}</dd>
+        <dt>Claude connector</dt><dd data-d="mcp">Checking...</dd></dl>
+    </details>`
+    : `<details class="ai-adv"${cfg.url ? ' open' : ''}>
+      <summary>Use a hub token instead (advanced)</summary>
       <label class="ai-f">Hub address<input name="url" type="url" inputmode="url" placeholder="https://vesper.yoursite.com" value="${esc(cfg.url)}" autocomplete="off"></label>
-      <label class="ai-f">Token<input name="token" type="password" placeholder="The APP_TOKEN you set on the hub" value="${google ? '' : esc(cfg.token)}" autocomplete="off"></label>
+      <label class="ai-f">Token<input name="token" type="password" placeholder="The APP_TOKEN you set on the hub" value="${esc(cfg.token)}" autocomplete="off"></label>
     </details>`;
   const { dlg, close } = open(`<form>
     <h2>${google ? 'Your account' : 'Sign in'}</h2>
@@ -94,6 +104,21 @@ export function syncDialog({ onChange } = {}) {
   const say = (text, bad) => { status.dataset.kind = bad ? 'bad' : ''; status.textContent = text; };
   const done = () => { close(); rerender(); if (onChange) onChange(); };
 
+  if (google) {
+    const cell = (k) => dlg.querySelector(`[data-d=${k}]`);
+    const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago'; };
+    hubCall('/me').then((r) => {
+      const me = r && r.ok ? r.data : null;
+      cell('drive').textContent = !me ? 'Could not check' : me.drive.connected ? (me.drive.last ? 'On. Last copy ' + ago(me.drive.last) : 'On. First copy will be saved on your next sync') : 'Not connected. Sign in with Google again.';
+      cell('mcp').textContent = !me ? 'Could not check' : !me.owner ? 'Not available for your account yet' : cfg.email === 'owner' ? '' : location.origin + '/mcp/YOUR_APP_TOKEN  (use the token set on the hub)';
+      if (me && me.owner && cfg.email === 'owner') { cell('mcp').innerHTML = '<button type="button" class="btn ghost small" data-act="copymcp">Copy connector link</button>'; }
+    }).catch(() => { cell('drive').textContent = cell('mcp').textContent = 'Could not check'; });
+    hubCall('/google/status').then((r) => {
+      const g = r && r.ok ? r.data : null;
+      cell('cal').textContent = !g ? 'Could not check' : !g.configured ? 'Not set up on this hub' : g.connected ? 'Connected. Calendar: ' + (g.calendar || 'primary') : 'Not connected. Open Add to calendar on a task to connect.';
+    }).catch(() => { cell('cal').textContent = 'Could not check'; });
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const url = form.url.value.trim(), token = form.token.value.trim();
@@ -111,6 +136,8 @@ export function syncDialog({ onChange } = {}) {
       say('Opening Google...');
       try { await googleSignIn((form.url.value || '').trim() || location.origin); }
       catch (err) { say(err.message.includes('Failed to fetch') ? 'Could not reach the hub. Open Vesper from your own hub address, or fill in the address under advanced.' : err.message, true); }
+    } else if (act === 'copymcp') {
+      try { await navigator.clipboard.writeText(`${cfg.url}/mcp/${cfg.token}`); say('Connector link copied. Keep it private; it works like a password.'); } catch (err) { say('Could not copy.', true); }
     } else if (act === 'now') {
       say('Syncing...');
       const st = await syncNow({ force: true });
