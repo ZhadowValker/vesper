@@ -411,3 +411,4 @@ button.spread-btn:hover{background:var(--glass-soft)}
   .player .slide h1{font-size:30px}
 }
 @media (min-width:701px){.has-island .player{padding-bottom:calc(var(--island-h) + 20px)}}
+.item .progress,.item-bar.progress{margin:10px 0 0;height:7px}

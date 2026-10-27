@@ -1,5 +1,6 @@
 import { store } from '../store.js';
-import { deckStatus, atSelah } from '../framework.js';
+import { deckStatus, atSelah, SLIDES } from '../framework.js';
+import { stageBar } from './parts.js';
 import { esc, ask, confirmBox, ICON } from '../util.js';
 import { projectMap, mapLegend, drawTree } from '../mindmaps.js';
 import { go } from '../nav.js';
@@ -16,7 +17,7 @@ export function projectView(id) {
     const st = deckStatus(d);
     return `<a class="item" href="#/d/${d.id}">
       <div class="row between"><span class="t">${esc(d.title)}</span><span class="chip ${st.stageId ? 's-' + st.stageId : st.tone}">${esc(st.label)}</span></div>
-      <div class="bar item-bar ${st.stageId ? 's-' + st.stageId : 'do'}"><i style="width:${st.pct}%"></i></div>
+      ${stageBar(d.finished ? SLIDES.length - 1 : d.reached)}
     </a>`;
   }).join('');
 

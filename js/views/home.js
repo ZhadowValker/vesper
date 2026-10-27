@@ -2,7 +2,7 @@ import { store } from '../store.js';
 import { STAGES, SLIDES, deckStatus, atSelah } from '../framework.js';
 import { esc, ask, confirmBox, notice, ICON, $ } from '../util.js';
 import { go, rerender } from '../nav.js';
-import { resumeButton, stageBar } from './parts.js';
+import { resumeButton, stageBar, projectBar } from './parts.js';
 import { buildSample } from '../sample.js';
 import { showGuide, guideSeen } from '../guide.js';
 import { openChatPanel } from '../ai/panel.js';
@@ -42,7 +42,7 @@ export function home() {
     const pct = ds.length ? Math.round(ds.reduce((n, d) => n + deckStatus(d).pct, 0) / ds.length) : 0;
     return `<a class="item" href="#/p/${p.id}">
       <div class="row between"><span class="t">${esc(p.name)}</span><span class="sub">${ds.length} task${ds.length === 1 ? '' : 's'}${fin ? `, ${fin} finished` : ''}</span></div>
-      <div class="bar item-bar"><i style="width:${pct}%"></i></div>
+      ${projectBar(ds)}
     </a>`;
   }).join('');
 

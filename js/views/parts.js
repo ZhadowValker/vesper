@@ -29,3 +29,19 @@ export function stageBar(n) {
   }).join('');
   return `<div class="progress" role="img" aria-label="Slide ${n + 1} of ${SLIDES.length}">${segs}</div>`;
 }
+
+// One bar for many tasks: each stage's segment shows how far the tasks have got through that stage, on average.
+export function projectBar(decks) {
+  if (!decks.length) return `<div class="progress item-bar" role="img" aria-label="No tasks yet">${STAGES.map((st) => `<span class="s-${st.id}"><i style="width:0"></i></span>`).join('')}</div>`;
+  const segs = STAGES.map((st) => {
+    const from = firstSlideOf(st.id);
+    const to = selahIndex(st.id);
+    const total = decks.reduce((sum, d) => {
+      const n = d.finished ? SLIDES.length : d.reached;
+      return sum + Math.max(0, Math.min(1, (n - from + 1) / (to - from + 1)));
+    }, 0);
+    return `<span class="s-${st.id}"><i style="width:${Math.round((total / decks.length) * 100)}%"></i></span>`;
+  }).join('');
+  const done = decks.filter((d) => d.finished).length;
+  return `<div class="progress item-bar" role="img" aria-label="${decks.length} tasks, ${done} finished">${segs}</div>`;
+}
