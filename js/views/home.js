@@ -55,8 +55,6 @@ export function home() {
   const html = `<div class="page stack home">
     <div class="top">
       <div class="grow"><h1>Vesper</h1><p class="sub">Vision, Research, Plan, Execute, Review</p></div>
-      <button class="icon-btn" data-act="guide" aria-label="How to use Vesper">?</button>
-      <button class="btn small" data-act="new-project">${ICON.plus}Project</button>
     </div>
     <div class="col">
       ${projects.length ? '' : `<div class="o1">${empty}</div>`}

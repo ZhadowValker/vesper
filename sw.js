@@ -1,4 +1,4 @@
-const VERSION = 'vesper-v45';
+const VERSION = 'vesper-v46';
 const ASSETS = [
   './',
   'index.html',
