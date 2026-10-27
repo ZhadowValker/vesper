@@ -1,6 +1,7 @@
 // Keeps your data the same on every device through your own Vesper hub (a Cloudflare Worker).
 // Off until you give it the hub address and token. Sends a copy, gets back the merged result.
 import { store } from './store.js';
+import { getAI, saveAI, aiReady } from './ai/settings.js';
 import { mergeStates, sameState } from './merge.js';
 
 const KEY = 'vesper.sync';
@@ -46,6 +47,7 @@ export async function syncNow({ force = false } = {}) {
       document.dispatchEvent(new CustomEvent('vesper:synced'));
     }
     status = { state: 'ok', at: Date.now(), error: '' };
+    if (await pullSettings()) document.dispatchEvent(new CustomEvent('vesper:synced'));
   } catch (e) {
     status = { state: 'error', at: status.at, error: e.name === 'TypeError' ? 'Could not reach the hub. Check the address and your connection.' : e.message };
   } finally { running = false; emit(); }
@@ -54,7 +56,26 @@ export async function syncNow({ force = false } = {}) {
 
 function later(ms) { clearTimeout(timer); timer = setTimeout(() => syncNow(), ms); }
 
+// AI settings follow the person: save to the account when changed, fill in on a new device.
+async function pushSettings() {
+  if (!syncReady()) return;
+  const cfg = getSync();
+  try { await fetch(cfg.url + '/me/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.token }, body: JSON.stringify({ settings: { ai: getAI() } }) }); } catch (e) { /* tried; the next save tries again */ }
+}
+async function pullSettings() {
+  if (!syncReady() || aiReady()) return false;
+  const cfg = getSync();
+  try {
+    const res = await fetch(cfg.url + '/me/settings', { headers: { Authorization: 'Bearer ' + cfg.token } });
+    if (!res.ok) return false;
+    const { settings } = await res.json();
+    if (settings && settings.ai && settings.ai.key) { saveAI({ ...getAI(), ...settings.ai }, { quiet: true }); return true; }
+  } catch (e) { /* offline */ }
+  return false;
+}
+
 export function startSync() {
+  document.addEventListener('vesper:ai-saved', pushSettings);
   if (syncReady()) syncNow();
   store.onChange(() => { if (syncReady()) later(8000); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow(); });

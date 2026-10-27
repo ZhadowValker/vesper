@@ -367,6 +367,13 @@ await test('login: the app can ask whether Google sign-in is offered', async () 
   env.GOOGLE_CLIENT_ID = saved;
 });
 
+await test('settings: AI settings are saved per person and cleaned', async () => {
+  const put = await call('/me/settings', { method: 'PUT', headers: app, body: { settings: { ai: { key: 'k1', draft: 'm', evil: 'x' } } } });
+  assert.equal(put.status, 200);
+  const got = await (await call('/me/settings', { headers: app })).json();
+  assert.deepEqual(got.settings, { ai: { key: 'k1', draft: 'm' } });
+});
+
 await test('login: not set up means a clear message', async () => {
   const saved = env.GOOGLE_CLIENT_ID; env.GOOGLE_CLIENT_ID = '';
   const r = await call('/auth/google/start', { method: 'POST', headers: { Origin: ORIGIN } });

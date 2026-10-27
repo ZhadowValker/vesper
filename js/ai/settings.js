@@ -1,4 +1,4 @@
-// AI settings live on this device only (not in the project data, not in Export backup).
+// AI settings live on this device (not in the project data, not in Export backup). When signed in, a copy is kept in the person's Vesper account so a new device needs no retyping.
 const KEY = 'vesper.ai';
 export const DEFAULTS = {
   url: 'https://integrate.api.nvidia.com/v1',
@@ -17,11 +17,12 @@ export function getAI() {
   }
 }
 
-export function saveAI(next) {
+export function saveAI(next, { quiet = false } = {}) {
   const clean = {};
   for (const k of Object.keys(DEFAULTS)) clean[k] = String(next[k] ?? DEFAULTS[k]).trim();
   clean.url = clean.url.replace(/\/+$/, '');
   try { localStorage.setItem(KEY, JSON.stringify(clean)); } catch (e) { /* storage blocked */ }
+  if (!quiet) document.dispatchEvent(new CustomEvent('vesper:ai-saved'));
   return clean;
 }
 

@@ -619,7 +619,7 @@ async function driveBackup(env, state, { force = false } = {}) {
     const id = await driveFileId(env, access, rec);
     const boundary = 'vesper' + gRand();
     const meta = id ? { name: DRIVE_FILE } : { name: DRIVE_FILE, parents: ['appDataFolder'] };
-    const body = `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(state)}\r\n--${boundary}--`;
+    const body = `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({ ...state, settings: (await env.VESPER.get('settings', 'json')) || undefined })}\r\n--${boundary}--`;
     const res = await fetch(id ? `${DRIVE_UP}/files/${id}?uploadType=multipart` : `${DRIVE_UP}/files?uploadType=multipart`, { method: id ? 'PATCH' : 'POST', headers: { Authorization: 'Bearer ' + access, 'Content-Type': `multipart/related; boundary=${boundary}` }, body });
     const file = await res.json().catch(() => ({}));
     if (!res.ok) return false;
@@ -940,17 +940,38 @@ async function aiProxy(request, env, origin) {
 
 // ---- Account -----------------------------------------------------------------------------
 
+// Personal settings (AI address, key and models) follow the person to every device.
+const SETTINGS_KEYS = ['url', 'key', 'draft', 'review', 'backup'];
+function cleanSettings(x) {
+  const ai = {};
+  for (const k of SETTINGS_KEYS) if (x && x.ai && typeof x.ai[k] === 'string') ai[k] = x.ai[k].slice(0, 500);
+  return { ai };
+}
+
 async function accountRoutes(request, ctx, origin, path) {
   const env = ctx.env;
   if (path === '/me' && request.method === 'GET') {
     const drive = await env.VESPER.get('drive', 'json');
     return json(200, { email: ctx.email, owner: ctx.owner, drive: { connected: !!(drive && drive.refresh), last: (drive && drive.last) || 0 } }, origin);
   }
+  if (path === '/me/settings') {
+    if (request.method === 'GET') return json(200, { settings: (await env.VESPER.get('settings', 'json')) || { ai: {} } }, origin);
+    if (request.method === 'PUT') {
+      const text = await request.text();
+      if (text.length > 8000) return json(413, { error: 'too large' }, origin);
+      let body; try { body = JSON.parse(text); } catch (e) { return json(400, { error: 'invalid JSON' }, origin); }
+      const clean = cleanSettings(body && body.settings);
+      await env.VESPER.put('settings', JSON.stringify(clean));
+      return json(200, { settings: clean }, origin);
+    }
+    return json(405, { error: 'use GET or PUT' }, origin);
+  }
   if (path === '/me/restore' && request.method === 'POST') {
     try {
       const copy = await driveRestore(env);
       const merged = mergeStates(await loadState(env), copy);
       await saveState(env, merged);
+      if (copy.settings && !(await env.VESPER.get('settings', 'json'))) await env.VESPER.put('settings', JSON.stringify(cleanSettings(copy.settings)));
       return json(200, { state: merged }, origin);
     } catch (e) { return json(400, { error: e.message }, origin); }
   }
@@ -962,7 +983,7 @@ async function accountRoutes(request, ctx, origin, path) {
     if (ctx.owner) return json(400, { error: 'The owner space is not deleted from the app.' }, origin);
     await driveDelete(env);
     await gDisconnect(env);
-    for (const k of ['state', 'google', 'gcal', 'gevents', 'drive']) await env.VESPER.delete(k);
+    for (const k of ['state', 'google', 'gcal', 'gevents', 'drive', 'settings']) await env.VESPER.delete(k);
     await env.RAW.delete('user:' + env.UID);
     await env.RAW.put('usercount', String(Math.max(0, (Number(await env.RAW.get('usercount')) || 1) - 1)));
     if (ctx.sessKey) await env.RAW.delete(ctx.sessKey);
