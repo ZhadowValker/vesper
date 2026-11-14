@@ -1,6 +1,7 @@
 /* Vesper: dusk glass. Dark, translucent panels over a night sky. */
 @font-face{font-family:"Bricolage Grotesque";src:url("../fonts/bricolage.woff2") format("woff2");font-weight:200 800;font-display:swap}
 @font-face{font-family:"Figtree";src:url("../fonts/figtree.woff2") format("woff2");font-weight:300 900;font-display:swap}
+@font-face{font-family:"Noto Sans Telugu";src:url("../fonts/noto-sans-telugu.ttf") format("truetype");font-weight:100 900;font-display:swap}
 
 :root{
   color-scheme:dark;
@@ -13,8 +14,8 @@
   --vision:#ffb067; --research:#ff7a9a; --plan:#c98bff; --execute:#7c9bff; --review:#52d6c4;
   --acc:#c98bff; --ok:#52d6c4; --warn:#ffd6aa; --danger:#ff9aa8;
   --radius:22px;
-  --display:"Bricolage Grotesque",system-ui,sans-serif;
-  --font:"Figtree",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --display:"Bricolage Grotesque","Noto Sans Telugu",system-ui,sans-serif;
+  --font:"Figtree","Noto Sans Telugu",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
 }
 .s-vision{--st:var(--vision)} .s-research{--st:var(--research)} .s-plan{--st:var(--plan)}
 .s-execute{--st:var(--execute)} .s-review{--st:var(--review)}

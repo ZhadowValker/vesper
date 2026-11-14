@@ -193,6 +193,15 @@ The in-app AI and `vesper_create_task` accept optional `mode: "full" | "quick"`.
 per stage for Quick tasks; save its answer with `vesper_set_note`, slide such as
 `vision.quick`, and no step (or `step: null`). Full questions are unchanged.
 
+## Telugu text offline
+
+The display and body font stacks include the bundled **Noto Sans Telugu variable
+font** (`fonts/noto-sans-telugu.ttf`, weights 100–900), so Telugu project/task names
+and notes render without an external font service, including offline. Both the
+font and `fonts/OFL-NotoSansTelugu.txt` are precached by the service worker.
+Source: [Google Fonts / Noto Sans Telugu](https://github.com/google/fonts/tree/main/ofl/notosanstelugu);
+copyright The Noto Project Authors, licensed under SIL Open Font License 1.1.
+
 ## Optional AI helpers
 
 Off until you open **AI** on the home screen and add an address, a key and a model. Settings stay in this browser only (`vesper.ai`) and are not part of Export backup.
