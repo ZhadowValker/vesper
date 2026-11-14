@@ -1,5 +1,7 @@
 # Vesper
 
+[![CI](https://github.com/ZhadowValker/vesper/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ZhadowValker/vesper/actions/workflows/ci.yml)
+
 Vision, Research, Plan, Execute, Review, with a **Selah** pause at the end of each stage.
 Words used in the app: a **Project** holds **Tasks**. Each task is played as a **deck** of 27 **slides**. There are three dashboards: main, project and task.
 
@@ -22,6 +24,7 @@ index.html              app shell
 manifest.webmanifest    install details
 sw.js                   offline cache (VERSION generated from cached file hashes)
 scripts/stamp-sw.mjs     deterministic cache-version stamper (no dependencies)
+scripts/check.mjs        tests, syntax and committed generated-file checks
 css/app.css             all styles
 icons/                  app icons
 fonts/                  Bricolage Grotesque and Figtree (variable, latin)
@@ -40,10 +43,14 @@ tests/logic.test.js     tests for framework, store and mind maps
 
 ## Deploy to GitHub Pages
 
-1. Create a repository and put every file in this folder at the repository root.
-2. Push to the `main` branch.
-3. In the repository go to Settings, then Pages. Set Source to "Deploy from a branch", branch `main`, folder `/ (root)`.
-4. Open `https://<your-username>.github.io/<repository>/`.
+Production deploys **only from `main`**, not `vesper-fixes`.
+Keep the existing GitHub Pages branch deployment: repository **Settings → Pages
+→ Build and deployment → Source: Deploy from a branch → `main` → `/ (root)`**.
+Once a reviewed pull request is merged into `main`, Pages deploys that branch as
+it does today. The CI workflow adds checks, not a new deployment mechanism.
+
+In this GitHub repository, the files in this folder are at the repository root;
+the surrounding Replit `artifacts/vesper` path is not part of the GitHub checkout.
 
 All paths are relative, so it works under a repository sub-path.
 
@@ -55,6 +62,46 @@ masked to avoid hashing itself. `./` resolves to `index.html`. There are no date
 Git hashes or machine-specific paths in the stamp: running it twice with no file
 changes gives exactly the same version. Missing cached files fail explicitly.
 
+## Deploy the Node server on Hostinger
+
+Keep the existing Hostinger app connected to
+`ZhadowValker/vesper`, deployment branch **`main`**. Continue using Node 20 or
+22, entry file `server.mjs`, start command `npm start`, framework **Other** if
+needed, and no application build command (**None**). Do not use `npm run check`
+as a hosting build command; CI checks the committed source before merging.
+
+**Manual hPanel redeploy:**
+
+1. Open **Websites → the Vesper website's Dashboard → Deployments → Redeploy**
+   (or click **Redeploy** directly on the website dashboard).
+2. Review the GitHub source and confirm the selected branch is **`main`**, plus
+   the Node version, start/entry settings and existing environment variables.
+3. Confirm **Redeploy** (some screens say **Save and Redeploy**). A GitHub-based
+   redeploy fetches the latest code from that selected branch; no ZIP upload is
+   needed. Check the deployment status and runtime logs afterward.
+
+**Automatic Git deployments, if available for the existing hosting plan/app:**
+
+- Connect/reconnect the existing app through its dashboard's connection menu
+  (**Connect Git provider / Connect to GitHub**) and authorize the Hostinger
+  GitHub App for **this existing repository**, not a newly cloned copy.
+- In **Settings & Redeploy / Build settings**, select **`main`** as the deployment
+  branch. Git-connected Node apps enable automatic deployments by default; if
+  the dashboard offers an **Auto-deployment** switch, enable it and confirm the
+  **Auto-deployment / Connected with GitHub** status.
+- Only pushes/PR merges to `main` should redeploy production. Keep other branch
+  deployments and any optional pull-request preview deployments disabled for
+  this main-only policy. If auto-deploy is unavailable, use the manual flow above.
+
+Preserve the existing secrets and use a persistent `DATA_DIR` outside disposable
+deployment/build directories. Hostinger replaces deployment files on redeploy;
+back up hub data before a production release. Never commit data or secrets.
+This batch does not change hosting settings or deploy anything.
+
+Hostinger references:
+[manual redeploy](https://www.hostinger.com/support/how-to-redeploy-a-node-js-application/),
+[Git connection and automatic deployments](https://docs.hostinger.com/node.js/git-deployments).
+
 ## Run locally
 
 ```
@@ -63,11 +110,56 @@ python3 -m http.server 8080
 
 Open `http://localhost:8080`. Service workers need `localhost` or HTTPS, so do not open `index.html` by double-clicking.
 
-## Test
+## Dependency-free checks and branch workflow
 
+Use Node **20 or 22**. There are no packages to install: no `npm install` or
+`npm ci` is needed. All work stays on **`vesper-fixes`**; never commit directly
+to `main`. Before committing:
+
+```sh
+git switch vesper-fixes
+node worker/build.js
+node scripts/stamp-sw.mjs
+# Review changes and commit your source plus worker/vesper-hub.js and sw.js.
 ```
-node tests/logic.test.js
+
+After committing, run:
+
+```sh
+npm run check
 ```
+
+That one command:
+
+1. Rebuilds `worker/vesper-hub.js` and regenerates the `sw.js` hash stamp.
+2. Runs `node --check` on every project `.js` and `.mjs` file, including new
+   untracked source files; ignored runtime data/dependencies are excluded.
+3. Runs `node tests/logic.test.js`, `node tests/worker.test.js` and the
+   dependency-free CI regression tests (`node --test tests/ci.test.mjs`).
+4. Fails unless both regenerated files match the **committed `HEAD` bytes**,
+   not merely the Git index. Staging regenerated files is not enough: include
+   them in the commit, then rerun the check. A stale check regenerates local
+   outputs so you can inspect and commit them; it never commits or pushes.
+
+Tests use disposable fixtures, never production data. The app remains plain
+HTML/CSS/JS with no app build step; these are developer/CI checks only. Individual
+test commands above still work for quick checks while editing.
+
+`.github/workflows/ci.yml` runs the same `npm run check` on **every push and every
+pull request, all branches**, using separate Node 20 and 22 jobs. It has read-only
+repository permissions, needs no secrets, does not install dependencies and
+does not deploy. The badge above reports `main`; other branch runs appear in
+the repository's Actions tab.
+
+When pushing is authorized, push **`vesper-fixes`**, open a pull request targeting
+**`main`**, wait for **Check (Node 20)** and **Check (Node 22)** to pass, review,
+then merge. Only that merge releases through the existing `main` deployment
+settings. To enforce the policy, the repository owner should protect `main`
+(**Settings → Rules → Rulesets**, or **Branches → Branch protection rules**),
+require pull requests and both checks, and disallow bypasses/direct pushes.
+Branch-based Pages/Hostinger deployments do not automatically wait for CI:
+required PR checks are what prevent untested changes reaching `main`.
+No GitHub or Hostinger settings are changed by this code.
 
 ## Changing the framework
 
