@@ -13,41 +13,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import hub from './worker/vesper-hub.js';
+import { createFileStore } from './server-store.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(process.env.DATA_DIR || path.join(root, 'data'));
-const dataFile = path.join(dataDir, 'vesper-data.json');
-
-// A tiny stand-in for Cloudflare KV: one JSON file, written safely.
-const store = {
-  async get(key, type) {
-    try {
-      const all = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
-      const v = all[key];
-      if (v === undefined) return null;
-      return type === 'json' ? JSON.parse(v) : v;
-    } catch (e) { return null; }
-  },
-  async put(key, value) {
-    fs.mkdirSync(dataDir, { recursive: true });
-    let all = {};
-    try { all = JSON.parse(fs.readFileSync(dataFile, 'utf8')); } catch (e) { /* first write */ }
-    all[key] = value;
-    const tmp = dataFile + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(all));
-    fs.renameSync(tmp, dataFile);
-  },
-};
-
-store.delete = async (key) => {
-  try {
-    const all = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
-    delete all[key];
-    const tmp = dataFile + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(all));
-    fs.renameSync(tmp, dataFile);
-  } catch (e) { /* nothing stored yet */ }
-};
+const store = createFileStore(dataDir);
 
 const env = {
   APP_TOKEN: process.env.APP_TOKEN || '',

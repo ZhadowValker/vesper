@@ -477,7 +477,24 @@ async function loadState(env) {
   const s = await env.VESPER.get('state', 'json');
   return s && Array.isArray(s.projects) && Array.isArray(s.decks) ? { ...emptyState(), ...s } : emptyState();
 }
-const saveState = (env, s) => env.VESPER.put('state', JSON.stringify(s));
+// Scope the save queue to the backing store and user, not the per-request env wrapper.
+// KV has no cross-isolate transaction: this queue protects one running hub instance.
+const stateWrites = new WeakMap();
+function saveState(env, changed) {
+  const backing = env.RAW || env.VESPER;
+  let queues = stateWrites.get(backing);
+  if (!queues) { queues = new Map(); stateWrites.set(backing, queues); }
+  const key = env.UID || 'owner';
+  const write = (queues.get(key) || Promise.resolve()).then(async () => {
+    const merged = mergeStates(await loadState(env), changed);
+    await env.VESPER.put('state', JSON.stringify(merged));
+    return merged;
+  });
+  const settled = write.catch(() => {});
+  queues.set(key, settled);
+  settled.then(() => { if (queues.get(key) === settled) queues.delete(key); });
+  return write;
+}
 
 const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 
@@ -985,8 +1002,8 @@ async function sync(request, env, origin) {
   const inc = body && body.state;
   if (!inc || !Array.isArray(inc.projects) || !Array.isArray(inc.decks)) return json(400, { error: 'state with projects and decks is required' }, origin);
   const stored = await loadState(env);
-  const merged = mergeStates(stored, inc);
-  if (!sameState(stored, merged)) await saveState(env, merged);
+  let merged = mergeStates(stored, inc);
+  if (!sameState(stored, merged)) merged = await saveState(env, merged);
   await driveBackup(env, merged);
   return json(200, { state: merged }, origin);
 }

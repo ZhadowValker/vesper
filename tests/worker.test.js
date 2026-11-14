@@ -442,5 +442,54 @@ await test('login: not set up means a clear message', async () => {
 
 globalThis.fetch = realFetch;
 
+await test('concurrent connector calls retain both new projects', async () => {
+  const names = ['Concurrent A', 'Concurrent B'];
+  const results = await Promise.all(names.map((name) => tool('vesper_create_project', { name })));
+  results.forEach((r) => assert.ok(!r.isError));
+  const saved = JSON.parse(kv.get('state'));
+  names.forEach((name) => assert.ok(saved.projects.some((p) => p.name === name)));
+});
+
+await test('concurrent sync saves re-read and retain both devices', async () => {
+  const copies = ['Device A', 'Device B'].map((name, i) => ({
+    projects: [{ id: `concurrent-${i}`, name, created: 1, updated: 1 }], decks: [], deleted: {},
+  }));
+  await Promise.all(copies.map((state) => call('/sync', { method: 'PUT', headers: app, body: { state } })));
+  const saved = JSON.parse(kv.get('state'));
+  copies.forEach((s) => assert.ok(saved.projects.some((p) => p.id === s.projects[0].id)));
+});
+
+await test('file KV queues puts and deletes and leaves atomic JSON', async () => {
+  const { createFileStore } = await import('../server-store.mjs');
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vesper-store-'));
+  try {
+    const disk = createFileStore(dir);
+    await Promise.all(Array.from({ length: 30 }, (_, i) => disk.put(`key${i}`, JSON.stringify(i))));
+    await Promise.all([disk.delete('key0'), disk.put('extra', '"kept"'), disk.delete('key1')]);
+    const saved = JSON.parse(await fs.readFile(path.join(dir, 'vesper-data.json'), 'utf8'));
+    assert.equal(Object.keys(saved).length, 29);
+    assert.equal(await disk.get('extra', 'json'), 'kept');
+    assert.equal(await disk.get('key0'), null);
+    assert.deepEqual(await fs.readdir(dir), ['vesper-data.json']);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+await test('file KV never overwrites corrupt data with an empty state', async () => {
+  const { createFileStore } = await import('../server-store.mjs');
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vesper-corrupt-'));
+  try {
+    const file = path.join(dir, 'vesper-data.json');
+    await fs.writeFile(file, 'broken JSON');
+    await assert.rejects(createFileStore(dir).put('state', '{}'));
+    assert.equal(await fs.readFile(file, 'utf8'), 'broken JSON');
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);
 process.exit(failed ? 1 : 0);
