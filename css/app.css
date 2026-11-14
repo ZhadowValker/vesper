@@ -26,6 +26,8 @@
 .task-chips{gap:6px;margin-top:7px}
 .chip.overdue{color:var(--danger);border-color:var(--danger);background:rgba(255,154,168,.1)}
 .chip.priority{color:var(--warn)}
+.order-controls{gap:8px;margin-top:10px}
+.item>a{display:block}
 
 *{box-sizing:border-box}
 html{background:var(--night)}

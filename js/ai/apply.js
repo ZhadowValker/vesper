@@ -1,5 +1,6 @@
 import { finishTask } from '../task-status.js';
 import { setTaskMeta } from '../task-meta.js';
+import { reorderItems, appendOrder } from '../organize.js';
 // Applies the assistant's actions to task data. It works on any "db" with the same small
 // interface as the app's store, so the app and the online connector share one set of rules:
 // it can fill and tick steps, pass a Selah (with the person's answer recorded and who passed it), loop back, finish or reopen a task, and delete a task or project when told to confirm.
@@ -143,6 +144,31 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       db.save(deck);
       focus = deck.id;
       changes.push({ text: `Looped "${deck.title}" back to ${stage.name}`, href: `#/d/${deck.id}` });
+    } else if (type === 'rename') {
+      if (!!a.task === !!a.project) { skipped.push('Give exactly one task or project to rename.'); continue; }
+      const name = typeof a.name === 'string' ? a.name.trim() : '';
+      if (!name || name.length > 80) { skipped.push('Name must be 1–80 characters.'); continue; }
+      const target = a.task ? findTask(a.task) : findProject(a.project);
+      if (!target) { skipped.push('Task or project not found.'); continue; }
+      if (a.task) { target.title = name; db.save(target); }
+      else { target.name = name; db.saveProject(target); }
+      changes.push({ text: `Renamed ${a.task ? 'task' : 'project'} to "${name}"`, href: a.task ? `#/d/${target.id}` : `#/p/${target.id}` });
+    } else if (type === 'move_task') {
+      const deck = findTask(a.task), project = findProject(a.project);
+      if (!deck || !project) { skipped.push('Task or destination project not found.'); continue; }
+      if (deck.projectId === project.id) continue;
+      deck.projectId = project.id;
+      deck.order = appendOrder(db.decksOf(project.id).filter((d) => d.id !== deck.id));
+      db.save(deck);
+      changes.push({ text: `Moved "${deck.title}" to "${project.name}"`, href: `#/d/${deck.id}` });
+    } else if (type === 'reorder') {
+      const project = a.kind === 'tasks' ? findProject(a.project) : null;
+      if (!['projects', 'tasks'].includes(a.kind) || (a.kind === 'tasks' && !project)) { skipped.push('Choose projects, or tasks with an existing project.'); continue; }
+      const items = a.kind === 'projects' ? db.projects() : db.decksOf(project.id);
+      const error = reorderItems(items, a);
+      if (error) { skipped.push(error); continue; }
+      db.saveItems(items, a.kind);
+      changes.push({ text: `Reordered ${a.kind}`, href: project ? `#/p/${project.id}` : '#/' });
     } else if (type === 'set_task') {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }

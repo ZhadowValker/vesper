@@ -607,7 +607,7 @@ test('tasks: priority/due sort and priority filters include legacy tasks without
   const ids = (list) => list.map((d) => d.id);
   assert.deepEqual(ids(sortFilterTasks(tasks, { sort: 'priority' })), ['p1', 'p2', 'p3', 'none']);
   assert.deepEqual(ids(sortFilterTasks(tasks, { sort: 'due' })), ['p1', 'p3', 'p2', 'none']);
-  assert.deepEqual(ids(sortFilterTasks(tasks)), ['p2', 'none', 'p1', 'p3']);
+  assert.deepEqual(ids(sortFilterTasks(tasks, { sort: 'updated' })), ['p2', 'none', 'p1', 'p3']);
   assert.deepEqual(ids(sortFilterTasks(tasks, { priority: 'P1' })), ['p1']);
   assert.deepEqual(ids(sortFilterTasks(tasks, { priority: 'none' })), ['none']);
   assert.deepEqual(sortFilterTasks(tasks, { priority: 'P4' }), []);
@@ -625,7 +625,7 @@ test('tasks: sort/filter preferences are remembered only in browser storage', ()
   assert.deepEqual(getTaskPrefs(), { sort: 'due', priority: 'P2' });
   assert.equal(store.exportJSON(), before);
   saveTaskPrefs({ sort: 'bad', priority: 'bad' });
-  assert.deepEqual(getTaskPrefs(), { sort: 'updated', priority: 'all' });
+  assert.deepEqual(getTaskPrefs(), { sort: 'order', priority: 'all' });
 });
 
 test('tasks: Markdown includes optional priority and due without changing legacy exports', () => {
@@ -677,6 +677,56 @@ await testAsync('tasks: dashboard sort/filter changes save preferences and reren
     assert.equal(renders, 2);
     stop(); assert.equal(handlers.size, 0);
   } finally { setRenderer(() => {}); saveTaskPrefs({}); }
+});
+
+const { orderedItems, reorderItems } = await import('../js/organize.js');
+test('organize: local agent renames, moves and reorders with per-field clocks', () => {
+  store.reset();
+  const a = store.addProject('A'), b = store.addProject('B');
+  const x = store.addDeck(a.id, 'X'), y = store.addDeck(a.id, 'Y'), z = store.addDeck(a.id, 'Z');
+  assert.equal(applyActions([{ type: 'rename', project: a.id, name: 'Renamed A' }]).changes.length, 1);
+  assert.equal(a.name, 'Renamed A');
+  applyActions([{ type: 'rename', task: x.id, name: 'Renamed X' }]);
+  assert.equal(x.title, 'Renamed X');
+  const r = applyActions([{ type: 'reorder', kind: 'tasks', project: a.id, order: [z.id, y.id, x.id] }]);
+  assert.equal(r.skipped.length, 0);
+  assert.deepEqual(orderedItems(store.decksOf(a.id)).map((d) => d.id), [z.id, y.id, x.id]);
+  for (const d of [x, y, z]) assert.ok(d._changed.fields.order);
+  applyActions([{ type: 'move_task', task: x.id, project: b.id }]);
+  assert.equal(x.projectId, b.id); assert.ok(x._changed.fields.projectId);
+  assert.ok(!store.decksOf(a.id).includes(x));
+  applyActions([{ type: 'reorder', kind: 'projects', item: b.id, position: 1 }]);
+  assert.equal(orderedItems(store.projects())[0].id, b.id);
+  assert.equal(applyActions([{ type: 'move_task', task: y.id, project: 'missing' }]).changes.length, 0);
+  assert.equal(applyActions([{ type: 'rename', task: y.id, project: a.id, name: 'bad' }]).changes.length, 0);
+});
+
+test('organize: full order validation is atomic and one-item positions are one-based', () => {
+  const items = [{ id: 'a', order: 0 }, { id: 'b', order: 1 }, { id: 'c', order: 2 }];
+  const before = structuredClone(items);
+  for (const patch of [{ order: ['a'] }, { order: ['a', 'b', 'b'] }, { item: 'a', position: 0 }, { item: 'a', position: 4 }]) {
+    assert.ok(reorderItems(items, patch)); assert.deepEqual(items, before);
+  }
+  assert.equal(reorderItems(items, { item: 'c', position: 1 }), null);
+  assert.deepEqual(orderedItems(items).map((x) => x.id), ['c', 'a', 'b']);
+  assert.equal(items[0].order, 0); assert.equal(items[1].order, 1);
+});
+
+test('organize: project rename/order and task move/note edits merge across devices', () => {
+  const p = { id: 'p', name: 'Old', updated: 1, order: 0 }, q = { id: 'q', name: 'Q', updated: 1, order: 1 };
+  const d = { id: 'd', projectId: 'p', title: 'D', updated: 1, order: 0, notes: {}, ticks: {}, selah: {} };
+  const a = { projects: [structuredClone(p), q], decks: [structuredClone(d)] };
+  const b = structuredClone(a);
+  a.projects[0].name = 'Renamed'; stampDeck(a.projects[0], p, 20);
+  b.projects[0].order = 3; stampDeck(b.projects[0], p, 30);
+  a.decks[0].projectId = 'q'; a.decks[0].order = 2; stampDeck(a.decks[0], d, 20);
+  b.decks[0].notes.x = 'Independent'; stampDeck(b.decks[0], d, 30);
+  const merged = mergeStates(a, b);
+  assert.equal(merged.projects[0].name, 'Renamed'); assert.equal(merged.projects[0].order, 3);
+  assert.equal(merged.decks[0].projectId, 'q'); assert.equal(merged.decks[0].order, 2);
+  assert.equal(merged.decks[0].notes.x, 'Independent');
+  assert.ok(sameState(merged, mergeStates(b, a)));
+  assert.ok(sameState(merged, mergeStates(merged, a)));
 });
 
 console.log(`\n${passed} tests passed`);

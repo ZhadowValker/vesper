@@ -1,6 +1,7 @@
 // All data lives on this device (localStorage) as one JSON document.
 // Everything goes through this module, so the storage can be swapped later.
-import { stampDeck } from './merge.js';
+import { stampDeck, stampProject } from './merge.js';
+import { appendOrder } from './organize.js';
 
 const KEY = 'vesper.v1';
 
@@ -20,6 +21,7 @@ function read() {
 let state = read();
 const copyDecks = () => new Map(state.decks.map((d) => [d.id, JSON.parse(JSON.stringify(d))]));
 let savedDecks = copyDecks();
+let savedProjects = new Map(state.projects.map((p) => [p.id, structuredClone(p)]));
 
 const listeners = [];
 let quiet = false;   // true while a sync is writing, so it does not trigger another sync
@@ -31,6 +33,7 @@ function write() {
     console.warn('Vesper: could not save', e);
   }
   savedDecks = copyDecks();
+  savedProjects = new Map(state.projects.map((p) => [p.id, structuredClone(p)]));
   if (!quiet) listeners.forEach((fn) => { try { fn(); } catch (e) { /* a listener must not break saving */ } });
 }
 
@@ -44,7 +47,7 @@ export const store = {
   deck: (id) => state.decks.find((d) => d.id === id),
 
   addProject(name) {
-    const p = { id: uid(), name, created: Date.now(), updated: Date.now() };
+    const p = { id: uid(), name, created: Date.now(), updated: Date.now(), order: appendOrder(state.projects) };
     state.projects.push(p);
     write();
     return p;
@@ -60,6 +63,7 @@ export const store = {
   addDeck(projectId, title) {
     const d = {
       id: uid(), projectId, title,
+      order: appendOrder(state.decks.filter((d) => d.projectId === projectId)),
       created: Date.now(), updated: Date.now(),
       slide: 0, reached: 0,
       ticks: {}, notes: {}, selah: {},
@@ -85,6 +89,17 @@ export const store = {
   },
   save(deck) {
     stampDeck(deck, savedDecks.get(deck.id));
+    write();
+  },
+  saveProject(project) {
+    stampProject(project, savedProjects.get(project.id));
+    write();
+  },
+  saveItems(items, kind) {
+    for (const item of items) {
+      if (kind === 'projects') stampProject(item, savedProjects.get(item.id));
+      else stampDeck(item, savedDecks.get(item.id));
+    }
     write();
   },
 

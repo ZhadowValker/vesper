@@ -13,7 +13,7 @@ export function taskChips(deck) {
 
 export function taskListControls(prefs) {
   return `<div class="task-controls row wrap">
-    <label>Sort tasks<select data-task-sort aria-label="Sort tasks">${[['updated', 'Recently changed'], ['priority', 'Priority'], ['due', 'Due date']].map(([v, label]) => `<option value="${v}" ${prefs.sort === v ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+    <label>Sort tasks<select data-task-sort aria-label="Sort tasks">${[['order', 'Manual order'], ['updated', 'Recently changed'], ['priority', 'Priority'], ['due', 'Due date']].map(([v, label]) => `<option value="${v}" ${prefs.sort === v ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
     <label>Priority filter<select data-task-filter aria-label="Filter by priority">${[['all', 'All priorities'], ...PRIORITIES.map((p) => [p, p]), ['none', 'No priority']].map(([v, label]) => `<option value="${v}" ${prefs.priority === v ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
   </div>`;
 }

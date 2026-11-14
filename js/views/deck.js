@@ -5,6 +5,8 @@ import { deckMap, mapLegend, drawTree } from '../mindmaps.js';
 import { go, rerender } from '../nav.js';
 import { finishInApp } from './task-actions.js';
 import { isFinishedEarly } from '../task-status.js';
+import { bindOrganize } from './organize-ui.js';
+import { applyActions } from '../ai/agent.js';
 import { resumeButton, stageBar, taskChips } from './parts.js';
 import { PRIORITIES, setTaskMeta } from '../task-meta.js';
 import { openChatPanel } from '../ai/panel.js';
@@ -39,6 +41,10 @@ export function deckView(id) {
       <button class="btn small primary" type="submit">Save details</button>
       <p class="sub">Choose no priority or clear the date to remove it.</p>
     </form>
+    <form class="card task-meta-form" data-move-task>
+      <label>Project<select name="project">${store.projects().map((p) => `<option value="${esc(p.id)}" ${p.id === deck.projectId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+      <div class="row wrap"><button class="btn small" type="submit">Move task</button><button class="btn small" type="button" data-organize="rename" data-kind="tasks" data-item="${esc(id)}" data-name="${esc(deck.title)}">Rename task</button></div>
+    </form>
     <div class="card now-card">
       <div class="now-text"><p class="sub">Now</p><p class="now-t">${esc(now)}</p><p class="sub">Slide ${deck.slide + 1} of ${SLIDES.length}</p>${stageBar(deck.slide)}</div>
       ${resumeButton(deck, project, 'block')}
@@ -50,6 +56,15 @@ export function deckView(id) {
 
   function mount(root) {
     root.addEventListener('click', onClick);
+    const stopOrganize = bindOrganize(root);
+    const moveForm = root.querySelector('[data-move-task]');
+    function moveTask(e) {
+      e.preventDefault();
+      const result = applyActions([{ type: 'move_task', task: id, project: new FormData(moveForm).get('project') }]);
+      if (result.skipped.length) notice('Could not move task', result.skipped.join(' '));
+      else rerender();
+    }
+    moveForm.addEventListener('submit', moveTask);
     const form = root.querySelector('[data-task-meta]');
     form.addEventListener('submit', saveDetails);
     function saveDetails(e) {
@@ -62,7 +77,7 @@ export function deckView(id) {
     const stopTree = drawTree(root);
     const here = root.querySelector('.dt-chip.now');
     if (here && here.scrollIntoView) here.scrollIntoView({ block: 'center', behavior: 'auto' });
-    return () => { root.removeEventListener('click', onClick); form.removeEventListener('submit', saveDetails); stopTree(); };
+    return () => { root.removeEventListener('click', onClick); form.removeEventListener('submit', saveDetails); moveForm.removeEventListener('submit', moveTask); stopOrganize(); stopTree(); };
     async function onClick(e) {
       const statusBtn = e.target.closest('[data-act="finish"],[data-act="reopen"]');
       if (statusBtn) {

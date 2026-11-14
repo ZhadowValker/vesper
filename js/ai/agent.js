@@ -48,6 +48,10 @@ Action types (use ids from the state, or exact names):
 {"type":"loop_back","task":"...","stage":"research"}   (go back on purpose; clears Selah passes from there)
 {"type":"finish","task":"..."}  or  {"type":"reopen","task":"..."}
 {"type":"set_task","task":"...","priority":"P1","due":"2026-12-31"}
+{"type":"rename","task":"id","name":"New name"} or {"type":"rename","project":"id","name":"New name"}
+{"type":"move_task","task":"id","project":"destination id"}
+{"type":"reorder","kind":"projects","order":["project id","project id"]} or {"type":"reorder","kind":"tasks","project":"id","item":"task id","position":1}
+Reorder accepts the full list of ids exactly once, or one item at a 1-based position. Never omit other ids from a full order.
 Task priority is P1, P2, P3 or P4. Due is a real calendar date YYYY-MM-DD. Include only fields requested; use null to clear priority or due. Never invent a due date or priority.
 Finish requires all five Selahs. Only when the person explicitly chooses early finish use {"type":"finish","task":"...","force":true,"reason":"their short reason (1–240 characters)"}.
 {"type":"delete_task","task":"...","confirm":true}  or  {"type":"delete_project","project":"...","confirm":true}

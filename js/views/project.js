@@ -1,4 +1,6 @@
 import { sortFilterTasks, getTaskPrefs } from '../task-meta.js';
+import { orderedItems } from '../organize.js';
+import { orderButtons, bindOrganize } from './organize-ui.js';
 import { store } from '../store.js';
 import { deckStatus, atSelah, SLIDES } from '../framework.js';
 import { stageBar, taskChips, taskListControls, bindTaskListControls } from './parts.js';
@@ -10,18 +12,18 @@ import { exportDialog } from '../connect-ui.js';
 export function projectView(id) {
   const project = store.project(id);
   if (!project) return { html: notFound() };
-  const decks = store.decksOf(id);
+  const decks = orderedItems(store.decksOf(id));
   const finished = decks.filter((d) => d.finished).length;
   const selah = decks.filter(atSelah).length;
 
   const prefs = getTaskPrefs();
   const list = sortFilterTasks(decks, prefs).map((d) => {
     const st = deckStatus(d);
-    return `<a class="item" href="#/d/${d.id}">
+    return `<div class="item"><a href="#/d/${d.id}">
       <div class="row between"><span class="t">${esc(d.title)}</span><span class="chip ${st.stageId ? 's-' + st.stageId : st.tone}">${esc(st.label)}</span></div>
       ${taskChips(d)}
       ${stageBar(d.finished ? SLIDES.length - 1 : d.reached)}
-    </a>`;
+    </a>${orderButtons(d, decks, 'tasks', id)}</div>`;
   }).join('');
 
   const html = `<div class="page stack">
@@ -37,14 +39,15 @@ export function projectView(id) {
     </div>
     <div class="card">${projectMap(project, decks)}${decks.length ? mapLegend('Finished', 'In progress', 'Not started') : ''}</div>
     ${decks.length ? `<h2 class="section">Tasks</h2>${taskListControls(prefs)}<div class="list">${list || '<p class="sub">No tasks match this priority.</p>'}</div>` : ''}
-    <div class="footer-tools"><button class="btn small" data-act="export">Send elsewhere</button><button class="btn small danger" data-act="delete-project">Delete project</button></div>
+    <div class="footer-tools"><button class="btn small" data-organize="rename" data-kind="projects" data-item="${esc(id)}" data-name="${esc(project.name)}">Rename project</button><button class="btn small" data-act="export">Send elsewhere</button><button class="btn small danger" data-act="delete-project">Delete project</button></div>
   </div>`;
 
   function mount(root) {
     root.addEventListener('click', onClick);
     const stopControls = bindTaskListControls(root);
+    const stopOrganize = bindOrganize(root);
     const stopTree = drawTree(root);
-    return () => { root.removeEventListener('click', onClick); stopControls(); stopTree(); };
+    return () => { root.removeEventListener('click', onClick); stopControls(); stopOrganize(); stopTree(); };
     async function onClick(e) {
       const btn = e.target.closest('[data-act]');
       if (!btn) return;

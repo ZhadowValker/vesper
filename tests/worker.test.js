@@ -770,5 +770,22 @@ await test('tasks: simultaneous connector updates preserve priority and due sepa
   assert.equal(saved.priority, null); assert.equal(saved.due, null);
 });
 
+await test('organize: connector renames, moves and orders projects and tasks', async () => {
+  await tool('vesper_create_project', { name: 'Organize A' });
+  await tool('vesper_create_project', { name: 'Organize B' });
+  await tool('vesper_create_task', { project: 'Organize A', title: 'Organize one' });
+  await tool('vesper_create_task', { project: 'Organize A', title: 'Organize two' });
+  const a = txt(await tool('vesper_get_task', { task: 'Organize one' }));
+  const b = txt(await tool('vesper_get_task', { task: 'Organize two' }));
+  assert.equal(txt(await tool('vesper_rename', { task: a.id, name: 'Organized one' })).changed.length, 1);
+  assert.equal(txt(await tool('vesper_reorder', { kind: 'tasks', project: 'Organize A', order: [b.id, a.id] })).changed.length, 1);
+  assert.equal(txt(await tool('vesper_reorder', { kind: 'tasks', project: 'Organize A', item: a.id, position: 1 })).changed.length, 1);
+  assert.equal(txt(await tool('vesper_move_task', { task: a.id, project: 'Organize B' })).changed.length, 1);
+  assert.equal(txt(await tool('vesper_get_task', { task: a.id })).project, 'Organize B');
+  assert.equal(txt(await tool('vesper_rename', { project: 'Organize B', name: 'Organized B' })).changed.length, 1);
+  assert.equal(txt(await tool('vesper_get_task', { task: a.id })).project, 'Organized B');
+  assert.equal(txt(await tool('vesper_reorder', { kind: 'tasks', project: 'Organize A', order: [] })).changed.length, 0);
+});
+
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);
 process.exit(failed ? 1 : 0);

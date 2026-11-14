@@ -101,6 +101,7 @@ const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(3
 // The same small interface as the app's store, over the online copy of the data.
 function makeDb(state) {
   const savedDecks = new Map(state.decks.map((d) => [d.id, JSON.parse(JSON.stringify(d))]));
+  const savedProjects = new Map(state.projects.map((p) => [p.id, structuredClone(p)]));
   return {
     projects: () => state.projects,
     project: (id) => state.projects.find((p) => p.id === id),
@@ -108,13 +109,15 @@ function makeDb(state) {
     allDecks: () => state.decks,
     deck: (id) => state.decks.find((d) => d.id === id),
     addProject(name) {
-      const p = { id: uid(), name, created: Date.now(), updated: Date.now() };
+      const p = { id: uid(), name, created: Date.now(), updated: Date.now(), order: appendOrder(state.projects) };
       state.projects.push(p);
+      savedProjects.set(p.id, structuredClone(p));
       return p;
     },
     addDeck(projectId, title) {
       const d = {
         id: uid(), projectId, title, created: Date.now(), updated: Date.now(),
+        order: appendOrder(state.decks.filter((d) => d.projectId === projectId)),
         slide: 0, reached: 0, ticks: {}, notes: {}, selah: {},
         passes: 1, loops: 0, finished: null, timer: null,
       };
@@ -125,6 +128,21 @@ function makeDb(state) {
     save(deck) {
       stampDeck(deck, savedDecks.get(deck.id));
       savedDecks.set(deck.id, JSON.parse(JSON.stringify(deck)));
+    },
+    saveProject(project) {
+      stampProject(project, savedProjects.get(project.id));
+      savedProjects.set(project.id, structuredClone(project));
+    },
+    saveItems(items, kind) {
+      for (const item of items) {
+        if (kind === 'projects') {
+          stampProject(item, savedProjects.get(item.id));
+          savedProjects.set(item.id, structuredClone(item));
+        } else {
+          stampDeck(item, savedDecks.get(item.id));
+          savedDecks.set(item.id, structuredClone(item));
+        }
+      }
     },
     removeDeck(id) { state.deleted = state.deleted || {}; state.deleted[id] = Date.now(); state.decks = state.decks.filter((d) => d.id !== id); },
     removeProject(id) {
@@ -481,6 +499,9 @@ const TOOLS = [
   { name: 'vesper_create_project', description: 'Create a project (a group of tasks).', inputSchema: obj({ name: str('Project name') }, ['name']) },
   { name: 'vesper_create_task', description: 'Create a task inside a project.', inputSchema: obj({ project: str('Project id or exact name'), title: str('Task name') }, ['project', 'title']) },
   { name: 'vesper_set_task', description: 'Set task priority or calendar due date. Omit unchanged fields; pass null to clear a value.', inputSchema: obj({ task: str('Task id or exact title'), priority: { type: ['string', 'null'], enum: ['P1', 'P2', 'P3', 'P4', null] }, due: { type: ['string', 'null'], format: 'date' } }, ['task']) },
+  { name: 'vesper_rename', description: 'Rename exactly one task or project.', inputSchema: obj({ task: str('Task id or exact title'), project: str('Project id or exact name'), name: str('New name, 1–80 characters') }, ['name']) },
+  { name: 'vesper_move_task', description: 'Move a task into another project.', inputSchema: obj({ task: str('Task id or exact title'), project: str('Destination project id or exact name') }, ['task', 'project']) },
+  { name: 'vesper_reorder', description: 'Reorder projects or tasks in one project. Provide every id in order, or one item id and a 1-based position.', inputSchema: obj({ kind: { type: 'string', enum: ['projects', 'tasks'] }, project: str('Required for tasks'), order: { type: 'array', items: { type: 'string' } }, item: str('Item id to move'), position: { type: 'integer', minimum: 1 } }, ['kind']) },
   { name: 'vesper_set_note', description: 'Write a note into one step (or the slide notes when step is left out). Filling a step also ticks it. Existing text is kept: new text is appended unless mode is "replace". Never overwrite what the person wrote unless they asked.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer', description: 'Step number on that slide, from vesper_framework. Omit for the slide notes.' }, text: str('The note, in the person\'s words, short'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked' } }, ['task', 'slide', 'text']) },
   { name: 'vesper_schedule', description: 'Put a task on the person\'s Google Calendar (once they have connected it in Vesper). Use kind "work" for a work block and "selah" for the pause at the end of a stage. Scheduling the same task and kind again moves the existing event. Scheduling a Selah does not pass it; use vesper_pass_selah for that.', inputSchema: obj({ task: str('Task id or exact title'), when: str('Local start time like 2026-10-28T18:00'), minutes: { type: 'integer', description: 'Length, default 30' }, kind: { type: 'string', enum: ['work', 'selah'] }, title: str('Optional event title') }, ['task', 'when']) },
   { name: 'vesper_tick', description: 'Tick or untick one step.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer' }, done: { type: 'boolean' } }, ['task', 'slide', 'step']) },
@@ -526,6 +547,9 @@ async function callTool(env, name, a) {
   if (name === 'vesper_create_project') return run([{ type: 'create_project', name: a.name }]);
   if (name === 'vesper_create_task') return run([{ type: 'create_task', project: a.project, title: a.title }]);
   if (name === 'vesper_set_task') return run([{ ...a, type: 'set_task' }]);
+  if (name === 'vesper_rename') return run([{ ...a, type: 'rename' }]);
+  if (name === 'vesper_move_task') return run([{ ...a, type: 'move_task' }]);
+  if (name === 'vesper_reorder') return run([{ ...a, type: 'reorder' }]);
   if (name === 'vesper_set_note') {
     const d = findTask(state, a.task);
     if (!d) return fail(`No task found for "${a.task}".`);

@@ -29,6 +29,13 @@ export function stampDeck(deck, before, now = Date.now()) {
   deck.updated = time;
 }
 
+export const stampProject = (project, before, now = Date.now()) => stampDeck(project, before, now);
+function mergeProject(a, b) {
+  const merged = mergeDeck(a, b);
+  for (const group of maps) delete merged[group];
+  return merged;
+}
+
 function mergeDeck(a, b) {
   const newer = stamp(a) > stamp(b) || (stamp(a) === stamp(b) && stable(a) > stable(b)) ? a : b;
   const result = { id: newer.id, created: newer.created, updated: Math.max(stamp(a), stamp(b)), _changed: {} };
@@ -75,7 +82,7 @@ export function mergeStates(a, b) {
   const deleted = { ...(a.deleted || {}) };
   for (const [id, ts] of Object.entries(b.deleted || {})) deleted[id] = Math.max(deleted[id] || 0, ts);
   const alive = (x) => !(deleted[x.id] && deleted[x.id] >= stamp(x));
-  const projects = pick(a.projects || [], b.projects || []).filter(alive);
+  const projects = pick(a.projects || [], b.projects || [], mergeProject).filter(alive);
   const ids = new Set(projects.map((p) => p.id));
   const decks = pick(a.decks || [], b.decks || [], mergeDeck).filter(alive).filter((d) => ids.has(d.projectId));
   return { version: 1, projects, decks, deleted };

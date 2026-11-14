@@ -1,3 +1,4 @@
+import { orderedItems } from './organize.js';
 export const PRIORITIES = ['P1', 'P2', 'P3', 'P4'];
 export const validDue = (value) => typeof value === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value) &&
   value.slice(0, 4) !== '0000' && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) &&
@@ -20,7 +21,7 @@ export const isOverdue = (deck, today = localCalendarDate()) => !deck.finished &
 
 const PREF_KEY = 'vesper.task-list.v1';
 const normalizePrefs = (p) => ({
-  sort: ['updated', 'priority', 'due'].includes(p?.sort) ? p.sort : 'updated',
+  sort: ['order', 'updated', 'priority', 'due'].includes(p?.sort) ? p.sort : 'order',
   priority: ['all', 'none', ...PRIORITIES].includes(p?.priority) ? p.priority : 'all',
 });
 export function getTaskPrefs() {
@@ -36,7 +37,9 @@ export function sortFilterTasks(decks, prefs = {}) {
   const { sort, priority } = normalizePrefs(prefs);
   const rank = (d) => PRIORITIES.includes(d.priority) ? PRIORITIES.indexOf(d.priority) : 4;
   const due = (d) => validDue(d.due) ? d.due : '9999-99-99';
-  return decks.filter((d) => priority === 'all' || (priority === 'none' ? rank(d) === 4 : d.priority === priority)).sort((a, b) => {
+  const filtered = decks.filter((d) => priority === 'all' || (priority === 'none' ? rank(d) === 4 : d.priority === priority));
+  if (sort === 'order') return orderedItems(filtered);
+  return filtered.sort((a, b) => {
     const by = sort === 'priority' ? rank(a) - rank(b) : sort === 'due' ? due(a).localeCompare(due(b)) : 0;
     return by || (b.updated || b.created || 0) - (a.updated || a.created || 0) || String(a.id).localeCompare(String(b.id));
   });

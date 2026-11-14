@@ -1,4 +1,6 @@
 import { sortFilterTasks, getTaskPrefs } from '../task-meta.js';
+import { orderedItems } from '../organize.js';
+import { orderButtons, bindOrganize } from './organize-ui.js';
 import { store } from '../store.js';
 import { STAGES, SLIDES, deckStatus, atSelah } from '../framework.js';
 import { esc, ask, confirmBox, notice, ICON, $ } from '../util.js';
@@ -19,7 +21,7 @@ export function home() {
   const loops = decks.reduce((n, d) => n + d.loops, 0);
   const spread = STAGES.map((s) => ({ s, n: active.filter((d) => deckStatus(d).stageId === s.id).length }));
   const max = Math.max(1, ...spread.map((x) => x.n));
-  const projects = store.projects();
+  const projects = orderedItems(store.projects());
   const prefs = getTaskPrefs();
   const taskCards = sortFilterTasks(decks, prefs).map((d) => {
     const st = deckStatus(d), p = store.project(d.projectId);
@@ -47,10 +49,10 @@ export function home() {
     const ds = store.decksOf(p.id);
     const fin = ds.filter((d) => d.finished).length;
     const pct = ds.length ? Math.round(ds.reduce((n, d) => n + deckStatus(d).pct, 0) / ds.length) : 0;
-    return `<a class="item" href="#/p/${p.id}">
+    return `<div class="item"><a href="#/p/${p.id}">
       <div class="row between"><span class="t">${esc(p.name)}</span><span class="sub">${ds.length} task${ds.length === 1 ? '' : 's'}${fin ? `, ${fin} finished` : ''}</span></div>
       ${projectBar(ds)}
-    </a>`;
+    </a>${orderButtons(p, projects, 'projects')}</div>`;
   }).join('');
 
   const empty = `<div class="card empty">
@@ -98,10 +100,11 @@ export function home() {
   function mount(root) {
     root.addEventListener('click', onClick);
     const stopControls = bindTaskListControls(root);
+    const stopOrganize = bindOrganize(root);
     maybeFirstLogin().then(() => { if (!guideSeen()) return showGuide().then((r) => { if (r === 'sample') openSample(); }); });
     const file = $('#import-file', root);
     if (file) file.addEventListener('change', onFile);
-    return () => { root.removeEventListener('click', onClick); stopControls(); };
+    return () => { root.removeEventListener('click', onClick); stopControls(); stopOrganize(); };
 
     // Tap a number to see the tasks behind it.
     function showList(kind) {
