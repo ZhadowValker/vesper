@@ -20,7 +20,8 @@ Words used in the app: a **Project** holds **Tasks**. Each task is played as a *
 ```
 index.html              app shell
 manifest.webmanifest    install details
-sw.js                   offline cache (bump VERSION when you change files)
+sw.js                   offline cache (VERSION generated from cached file hashes)
+scripts/stamp-sw.mjs     deterministic cache-version stamper (no dependencies)
 css/app.css             all styles
 icons/                  app icons
 fonts/                  Bricolage Grotesque and Figtree (variable, latin)
@@ -46,7 +47,13 @@ tests/logic.test.js     tests for framework, store and mind maps
 
 All paths are relative, so it works under a repository sub-path.
 
-When you change any file after the first deploy, edit `VERSION` at the top of `sw.js` (for example `vesper-v2`) so installed copies refresh.
+Before committing changes, run `node scripts/stamp-sw.mjs` and include the resulting
+`sw.js` in your commit; CI checks it. Do not edit `VERSION` by hand. The script
+hashes the bytes and relative names of every file in the service worker's `ASSETS`
+list (including HTML, fonts and images), plus service-worker code with `VERSION`
+masked to avoid hashing itself. `./` resolves to `index.html`. There are no dates,
+Git hashes or machine-specific paths in the stamp: running it twice with no file
+changes gives exactly the same version. Missing cached files fail explicitly.
 
 ## Run locally
 
