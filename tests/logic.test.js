@@ -547,4 +547,136 @@ test('finish: early-finish metadata merges independently of other task edits', (
   assert.equal(merged.title, 'Renamed elsewhere');
 });
 
+const { setTaskMeta, validDue, sortFilterTasks, getTaskPrefs, saveTaskPrefs, isOverdue, localCalendarDate } = await import('../js/task-meta.js');
+test('tasks: priority and due validate atomically, with null clearing each field', () => {
+  const d = {};
+  assert.equal(setTaskMeta(d, { priority: 'P1', due: '2028-02-29' }), null);
+  assert.deepEqual(d, { priority: 'P1', due: '2028-02-29' });
+  for (const patch of [{ priority: 'P5' }, { due: '2026-02-29' }, { due: '2026-04-31' }, { due: '2026-2-01' }, { priority: 'P2', due: '' }, {}]) {
+    assert.ok(setTaskMeta(d, patch));
+    assert.deepEqual(d, { priority: 'P1', due: '2028-02-29' });
+  }
+  assert.equal(setTaskMeta(d, { priority: null }), null);
+  assert.equal(d.due, '2028-02-29');
+  assert.equal(setTaskMeta(d, { due: null }), null);
+  assert.deepEqual(d, { priority: null, due: null });
+  assert.equal(validDue('0000-01-01'), false);
+  assert.equal(validDue('2026-12-31T00:00:00Z'), false);
+});
+
+test('tasks: local AI sets and clears task metadata, preserving omitted fields', () => {
+  store.reset();
+  const p = store.addProject('Metadata'), d = store.addDeck(p.id, 'Optional fields');
+  assert.equal(d.priority, undefined); assert.equal(d.due, undefined);
+  let r = applyActions([{ type: 'set_task', task: d.id, priority: 'P2', due: '2027-01-20' }]);
+  assert.equal(r.changes.length, 1); assert.equal(d.priority, 'P2'); assert.equal(d.due, '2027-01-20');
+  r = applyActions([{ type: 'set_task', task: d.id, priority: 'P9', due: null }]);
+  assert.equal(r.changes.length, 0); assert.equal(d.due, '2027-01-20');
+  applyActions([{ type: 'set_task', task: d.id, priority: null }]);
+  assert.equal(d.priority, null); assert.equal(d.due, '2027-01-20');
+  applyActions([{ type: 'set_task', task: d.id, due: null }]);
+  assert.equal(d.due, null);
+  assert.ok(d._changed.fields.priority); assert.ok(d._changed.fields.due);
+});
+
+test('tasks: priority and due merge per field across devices, including clears', () => {
+  const base = { id: 'd', projectId: 'p', title: 'Legacy', created: 1, updated: 10, notes: {}, ticks: {}, selah: {} };
+  const a = structuredClone(base), b = structuredClone(base);
+  setTaskMeta(a, { priority: 'P1' }); stampDeck(a, base, 20);
+  setTaskMeta(b, { due: '2027-01-02' }); stampDeck(b, base, 30);
+  const state = (d) => ({ projects: [{ id: 'p' }], decks: [d] });
+  let merged = mergeStates(state(a), state(b));
+  assert.equal(merged.decks[0].priority, 'P1'); assert.equal(merged.decks[0].due, '2027-01-02');
+  assert.ok(sameState(merged, mergeStates(state(b), state(a))));
+  const clear = structuredClone(merged.decks[0]), edit = structuredClone(merged.decks[0]);
+  setTaskMeta(clear, { priority: null }); stampDeck(clear, merged.decks[0], 40);
+  setTaskMeta(edit, { due: null }); stampDeck(edit, merged.decks[0], 50);
+  merged = mergeStates(state(clear), state(edit));
+  assert.equal(merged.decks[0].priority, null); assert.equal(merged.decks[0].due, null);
+  assert.ok(sameState(merged, mergeStates(merged, state(a))));
+  assert.ok(sameState(merged, mergeStates(merged, state(b))));
+});
+
+test('tasks: priority/due sort and priority filters include legacy tasks without mutation', () => {
+  const tasks = [
+    { id: 'none', updated: 3 },
+    { id: 'p3', updated: 1, priority: 'P3', due: '2027-02-01' },
+    { id: 'p1', updated: 2, priority: 'P1', due: '2027-01-01' },
+    { id: 'p2', updated: 4, priority: 'P2' },
+  ];
+  const ids = (list) => list.map((d) => d.id);
+  assert.deepEqual(ids(sortFilterTasks(tasks, { sort: 'priority' })), ['p1', 'p2', 'p3', 'none']);
+  assert.deepEqual(ids(sortFilterTasks(tasks, { sort: 'due' })), ['p1', 'p3', 'p2', 'none']);
+  assert.deepEqual(ids(sortFilterTasks(tasks)), ['p2', 'none', 'p1', 'p3']);
+  assert.deepEqual(ids(sortFilterTasks(tasks, { priority: 'P1' })), ['p1']);
+  assert.deepEqual(ids(sortFilterTasks(tasks, { priority: 'none' })), ['none']);
+  assert.deepEqual(sortFilterTasks(tasks, { priority: 'P4' }), []);
+  assert.deepEqual(ids(tasks), ['none', 'p3', 'p1', 'p2']);
+  assert.equal(isOverdue({ due: '2027-01-01' }, '2027-01-02'), true);
+  assert.equal(isOverdue({ due: '2027-01-02' }, '2027-01-02'), false);
+  assert.equal(isOverdue({ due: '2027-01-01', finished: 1 }, '2027-01-02'), false);
+  assert.equal(isOverdue({ due: 'not a date' }), false);
+  assert.equal(localCalendarDate(new Date(2027, 0, 2, 23, 0)), '2027-01-02');
+});
+
+test('tasks: sort/filter preferences are remembered only in browser storage', () => {
+  const before = store.exportJSON();
+  saveTaskPrefs({ sort: 'due', priority: 'P2' });
+  assert.deepEqual(getTaskPrefs(), { sort: 'due', priority: 'P2' });
+  assert.equal(store.exportJSON(), before);
+  saveTaskPrefs({ sort: 'bad', priority: 'bad' });
+  assert.deepEqual(getTaskPrefs(), { sort: 'updated', priority: 'all' });
+});
+
+test('tasks: Markdown includes optional priority and due without changing legacy exports', () => {
+  const d = { title: 'T', notes: {}, ticks: {}, selah: {} };
+  assert.ok(!taskMarkdown(d).includes('Priority:'));
+  assert.ok(!taskMarkdown(d).includes('Due:'));
+  d.priority = 'P1'; d.due = '2027-01-02';
+  assert.match(taskMarkdown(d), /Priority: P1\nDue: 2027-01-02/);
+  d.priority = null; d.due = null;
+  assert.ok(!taskMarkdown(d).includes('Priority:'));
+});
+
+await testAsync('tasks: rendered dashboards and cards contain the functional task controls', async () => {
+  const { taskChips } = await import('../js/views/parts.js');
+  const { deckView } = await import('../js/views/deck.js');
+  const { projectView } = await import('../js/views/project.js');
+  const { home } = await import('../js/views/home.js');
+  store.reset(); saveTaskPrefs({ sort: 'priority', priority: 'all' });
+  const p = store.addProject('Rendered tasks'), d = store.addDeck(p.id, 'High priority');
+  setTaskMeta(d, { priority: 'P1', due: '2000-01-01' }); store.save(d);
+  assert.match(taskChips(d), /P1/); assert.match(taskChips(d), /overdue/);
+  assert.match(deckView(d.id).html, /data-task-meta/);
+  assert.match(deckView(d.id).html, /name="priority"/);
+  assert.match(deckView(d.id).html, /name="due"/);
+  for (const html of [projectView(p.id).html, home().html]) {
+    assert.match(html, /data-task-sort/); assert.match(html, /data-task-filter/);
+    assert.match(html, /High priority/); assert.match(html, /Overdue/);
+  }
+  finishTask(d, { force: true, reason: 'Stop here.' }); store.save(d);
+  assert.match(taskChips(d), /finished early/);
+  assert.ok(!taskChips(d).includes('overdue'));
+  saveTaskPrefs({ priority: 'P4' });
+  assert.match(projectView(p.id).html, /No tasks match/);
+  saveTaskPrefs({});
+});
+
+await testAsync('tasks: dashboard sort/filter changes save preferences and rerender', async () => {
+  const { bindTaskListControls } = await import('../js/views/parts.js');
+  const { setRenderer } = await import('../js/nav.js');
+  const handlers = new Map();
+  const root = { addEventListener: (name, fn) => handlers.set(name, fn), removeEventListener: (name) => handlers.delete(name) };
+  let renders = 0; setRenderer(() => { renders++; });
+  const stop = bindTaskListControls(root);
+  try {
+    for (const [attribute, value] of [['data-task-sort', 'due'], ['data-task-filter', 'P3']]) {
+      handlers.get('change')({ target: { value, matches: (selector) => selector.split(',').includes(`[${attribute}]`) } });
+    }
+    assert.deepEqual(getTaskPrefs(), { sort: 'due', priority: 'P3' });
+    assert.equal(renders, 2);
+    stop(); assert.equal(handlers.size, 0);
+  } finally { setRenderer(() => {}); saveTaskPrefs({}); }
+});
+
 console.log(`\n${passed} tests passed`);

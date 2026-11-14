@@ -1,4 +1,5 @@
 import { finishTask } from '../task-status.js';
+import { setTaskMeta } from '../task-meta.js';
 // Applies the assistant's actions to task data. It works on any "db" with the same small
 // interface as the app's store, so the app and the online connector share one set of rules:
 // it can fill and tick steps, pass a Selah (with the person's answer recorded and who passed it), loop back, finish or reopen a task, and delete a task or project when told to confirm.
@@ -142,6 +143,13 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       db.save(deck);
       focus = deck.id;
       changes.push({ text: `Looped "${deck.title}" back to ${stage.name}`, href: `#/d/${deck.id}` });
+    } else if (type === 'set_task') {
+      const deck = findTask(a.task);
+      if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
+      const error = setTaskMeta(deck, a);
+      if (error) { skipped.push(error); continue; }
+      db.save(deck);
+      changes.push({ text: `Updated task details for "${deck.title}"`, href: `#/d/${deck.id}` });
     } else if (type === 'finish' || type === 'reopen') {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }

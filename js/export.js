@@ -5,6 +5,8 @@ import { allSteps } from './ai/steps.js';
 export function taskMarkdown(deck, projectName = '') {
   const out = [`# ${deck.title}`];
   if (projectName) out.push(`Project: ${projectName}`);
+  if (deck.priority) out.push(`Priority: ${deck.priority}`);
+  if (deck.due) out.push(`Due: ${deck.due}`);
   for (const st of STAGES) {
     out.push('', `## ${st.name}`);
     for (const sub of st.subs) {

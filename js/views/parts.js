@@ -1,5 +1,35 @@
 import { STAGES, SLIDES, firstSlideOf, selahIndex } from '../framework.js';
 import { esc } from '../util.js';
+import { PRIORITIES, validDue, isOverdue, saveTaskPrefs, getTaskPrefs } from '../task-meta.js';
+import { isFinishedEarly } from '../task-status.js';
+import { rerender } from '../nav.js';
+
+export function taskChips(deck) {
+  const priority = PRIORITIES.includes(deck.priority) ? `<span class="chip priority">${esc(deck.priority)}</span>` : '';
+  const due = validDue(deck.due) ? `<span class="chip ${isOverdue(deck) ? 'overdue' : ''}">${isOverdue(deck) ? 'Overdue' : 'Due'} <time datetime="${deck.due}">${deck.due}</time></span>` : '';
+  const early = isFinishedEarly(deck) ? '<span class="chip think">finished early</span>' : '';
+  return priority || due || early ? `<div class="row wrap task-chips">${priority}${due}${early}</div>` : '';
+}
+
+export function taskListControls(prefs) {
+  return `<div class="task-controls row wrap">
+    <label>Sort tasks<select data-task-sort aria-label="Sort tasks">${[['updated', 'Recently changed'], ['priority', 'Priority'], ['due', 'Due date']].map(([v, label]) => `<option value="${v}" ${prefs.sort === v ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+    <label>Priority filter<select data-task-filter aria-label="Filter by priority">${[['all', 'All priorities'], ...PRIORITIES.map((p) => [p, p]), ['none', 'No priority']].map(([v, label]) => `<option value="${v}" ${prefs.priority === v ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+  </div>`;
+}
+
+export function bindTaskListControls(root) {
+  const change = (e) => {
+    if (!e.target.matches('[data-task-sort],[data-task-filter]')) return;
+    const prefs = getTaskPrefs();
+    if (e.target.matches('[data-task-sort]')) prefs.sort = e.target.value;
+    else prefs.priority = e.target.value;
+    saveTaskPrefs(prefs);
+    rerender();
+  };
+  root.addEventListener('change', change);
+  return () => root.removeEventListener('change', change);
+}
 
 const CHEVRON = '<svg aria-hidden="true" class="crumb-sep" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>';
 

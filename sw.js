@@ -10,6 +10,7 @@ const ASSETS = [
   'js/app.js',
   'js/framework.js',
   'js/task-status.js',
+  'js/task-meta.js',
   'js/views/task-actions.js',
   'js/store.js',
   'js/sample.js',

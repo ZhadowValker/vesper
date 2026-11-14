@@ -1,9 +1,9 @@
-import { isFinishedEarly } from '../task-status.js';
+import { sortFilterTasks, getTaskPrefs } from '../task-meta.js';
 import { store } from '../store.js';
 import { STAGES, SLIDES, deckStatus, atSelah } from '../framework.js';
 import { esc, ask, confirmBox, notice, ICON, $ } from '../util.js';
 import { go, rerender } from '../nav.js';
-import { resumeButton, stageBar, projectBar } from './parts.js';
+import { resumeButton, stageBar, projectBar, taskChips, taskListControls, bindTaskListControls } from './parts.js';
 import { buildSample } from '../sample.js';
 import { showGuide, guideSeen } from '../guide.js';
 import { openChatPanel } from '../ai/panel.js';
@@ -20,6 +20,11 @@ export function home() {
   const spread = STAGES.map((s) => ({ s, n: active.filter((d) => deckStatus(d).stageId === s.id).length }));
   const max = Math.max(1, ...spread.map((x) => x.n));
   const projects = store.projects();
+  const prefs = getTaskPrefs();
+  const taskCards = sortFilterTasks(decks, prefs).map((d) => {
+    const st = deckStatus(d), p = store.project(d.projectId);
+    return `<a class="item" href="#/d/${d.id}"><div class="row between"><span class="t">${esc(d.title)}</span><span class="chip ${st.stageId ? 's-' + st.stageId : st.tone}">${esc(st.label)}</span></div><span class="sub">${esc(p?.name || '')}</span>${taskChips(d)}${stageBar(d.finished ? SLIDES.length - 1 : d.reached)}</a>`;
+  }).join('');
 
   const cont = last ? (() => {
     const st = deckStatus(last);
@@ -27,6 +32,7 @@ export function home() {
     return `<div class="soft s-${st.stageId || ''}">
       <p class="sub">${esc(project ? project.name : '')}</p>
       <p class="hero-t">${esc(last.title)}</p>
+      ${taskChips(last)}
       <p class="sub hero-s">${esc(st.label)}, slide ${last.slide + 1} of ${SLIDES.length}, ${st.pct}% done</p>
       ${stageBar(last.slide)}
       ${resumeButton(last, project, 'block', 'tree')}
@@ -62,6 +68,7 @@ export function home() {
       ${cont ? `<div class="o1">${cont}</div>` : ''}
       ${banner ? `<div class="o2">${banner}</div>` : ''}
       ${projects.length ? `<div class="o5 stack"><h2 class="section">Your projects</h2><div class="list">${projectCards}</div></div>` : ''}
+      ${decks.length ? `<section class="o5 stack"><h2 class="section">Your tasks</h2>${taskListControls(prefs)}<div class="list">${taskCards || '<p class="sub">No tasks match this priority.</p>'}</div></section>` : ''}
     </div>
     <div class="col">
       ${projects.length ? `<div class="o3 grid2">
@@ -90,10 +97,11 @@ export function home() {
 
   function mount(root) {
     root.addEventListener('click', onClick);
+    const stopControls = bindTaskListControls(root);
     maybeFirstLogin().then(() => { if (!guideSeen()) return showGuide().then((r) => { if (r === 'sample') openSample(); }); });
     const file = $('#import-file', root);
     if (file) file.addEventListener('change', onFile);
-    return () => root.removeEventListener('click', onClick);
+    return () => { root.removeEventListener('click', onClick); stopControls(); };
 
     // Tap a number to see the tasks behind it.
     function showList(kind) {
@@ -109,19 +117,19 @@ export function home() {
         sets[kind] = [st ? st.name : 'Stage', all.filter((d) => !d.finished && deckStatus(d).stageId === kind.slice(6)), 'No tasks are in this stage.'];
       }
       const [title, list, none] = sets[kind];
-      const sorted = [...list].sort((a, b) => b.updated - a.updated);
+      const sorted = sortFilterTasks(list, prefs);
       const rows = sorted.map((d) => {
         const p = store.project(d.projectId);
         const st = deckStatus(d);
         const sub = d.finished ? 'Finished' : atSelah(d) ? `${st.label}, paused at Selah` : st.label === 'Not started' ? 'Not started' : `${st.label}, ${st.pct}%`;
         const extra = kind === 'loops' ? ` · ${d.loops} loop${d.loops === 1 ? '' : 's'}` : '';
         return `<a class="item s-${st.stageId || ''}" href="#/d/${d.id}" data-close>
-          <span class="t">${esc(d.title)}</span><span class="sub">${esc(p ? p.name : '')} · ${esc(sub)}${extra}</span>${isFinishedEarly(d) ? '<span class="chip think">finished early</span>' : ''}</a>`;
+          <span class="t">${esc(d.title)}</span><span class="sub">${esc(p ? p.name : '')} · ${esc(sub)}${extra}</span>${taskChips(d)}</a>`;
       }).join('');
       const dlg = document.createElement('dialog');
       dlg.className = 'modal tasklist';
-      dlg.innerHTML = `<div class="tl-head"><h2>${esc(title)}</h2><span class="sub">${list.length}</span></div>
-        <div class="tl-body">${rows ? `<div class="list">${rows}</div>` : `<p class="muted">${esc(none)}</p>`}</div>
+      dlg.innerHTML = `<div class="tl-head"><h2>${esc(title)}</h2><span class="sub">${sorted.length}</span></div>
+        <div class="tl-body">${rows ? `<div class="list">${rows}</div>` : `<p class="muted">${esc(list.length ? 'No tasks match this priority.' : none)}</p>`}</div>
         <div class="modal-actions"><button type="button" class="btn" data-close>Close</button></div>`;
       document.body.appendChild(dlg);
       const done = () => { dlg.close(); dlg.remove(); };

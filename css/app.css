@@ -19,6 +19,14 @@
 .s-vision{--st:var(--vision)} .s-research{--st:var(--research)} .s-plan{--st:var(--plan)}
 .s-execute{--st:var(--execute)} .s-review{--st:var(--review)}
 
+.task-meta-form{display:grid;gap:12px}
+.task-controls{gap:12px}
+.task-controls label,.task-meta-form label{display:grid;gap:5px;flex:1;min-width:120px;font-size:13px;color:var(--muted)}
+.task-controls select,.task-meta-form select,.task-meta-form input{width:100%;min-height:42px;padding:8px 10px;border:1px solid var(--edge);border-radius:10px;background:var(--night);color:var(--ink)}
+.task-chips{gap:6px;margin-top:7px}
+.chip.overdue{color:var(--danger);border-color:var(--danger);background:rgba(255,154,168,.1)}
+.chip.priority{color:var(--warn)}
+
 *{box-sizing:border-box}
 html{background:var(--night)}
 html,body{margin:0;padding:0;color:var(--ink);font-family:var(--font);font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%}

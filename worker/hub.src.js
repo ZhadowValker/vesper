@@ -467,7 +467,7 @@ function whereIs(d) {
 function taskSummary(state, d) {
   const pr = progress(d);
   const p = state.projects.find((x) => x.id === d.projectId);
-  return { id: d.id, title: d.title, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
+  return { id: d.id, title: d.title, priority: d.priority || null, due: d.due || null, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
 }
 
 const obj = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
@@ -480,6 +480,7 @@ const TOOLS = [
   { name: 'vesper_next_questions', description: 'The next empty steps of a task, in order, each with the plain question to ask the person. Use this to interview them, then save each answer with vesper_set_note.', inputSchema: obj({ task: str('Task id or exact title'), limit: { type: 'integer', description: 'How many (default 5, max 20)' } }, ['task']), annotations: { readOnlyHint: true } },
   { name: 'vesper_create_project', description: 'Create a project (a group of tasks).', inputSchema: obj({ name: str('Project name') }, ['name']) },
   { name: 'vesper_create_task', description: 'Create a task inside a project.', inputSchema: obj({ project: str('Project id or exact name'), title: str('Task name') }, ['project', 'title']) },
+  { name: 'vesper_set_task', description: 'Set task priority or calendar due date. Omit unchanged fields; pass null to clear a value.', inputSchema: obj({ task: str('Task id or exact title'), priority: { type: ['string', 'null'], enum: ['P1', 'P2', 'P3', 'P4', null] }, due: { type: ['string', 'null'], format: 'date' } }, ['task']) },
   { name: 'vesper_set_note', description: 'Write a note into one step (or the slide notes when step is left out). Filling a step also ticks it. Existing text is kept: new text is appended unless mode is "replace". Never overwrite what the person wrote unless they asked.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer', description: 'Step number on that slide, from vesper_framework. Omit for the slide notes.' }, text: str('The note, in the person\'s words, short'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked' } }, ['task', 'slide', 'text']) },
   { name: 'vesper_schedule', description: 'Put a task on the person\'s Google Calendar (once they have connected it in Vesper). Use kind "work" for a work block and "selah" for the pause at the end of a stage. Scheduling the same task and kind again moves the existing event. Scheduling a Selah does not pass it; use vesper_pass_selah for that.', inputSchema: obj({ task: str('Task id or exact title'), when: str('Local start time like 2026-10-28T18:00'), minutes: { type: 'integer', description: 'Length, default 30' }, kind: { type: 'string', enum: ['work', 'selah'] }, title: str('Optional event title') }, ['task', 'when']) },
   { name: 'vesper_tick', description: 'Tick or untick one step.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer' }, done: { type: 'boolean' } }, ['task', 'slide', 'step']) },
@@ -524,6 +525,7 @@ async function callTool(env, name, a) {
   }
   if (name === 'vesper_create_project') return run([{ type: 'create_project', name: a.name }]);
   if (name === 'vesper_create_task') return run([{ type: 'create_task', project: a.project, title: a.title }]);
+  if (name === 'vesper_set_task') return run([{ ...a, type: 'set_task' }]);
   if (name === 'vesper_set_note') {
     const d = findTask(state, a.task);
     if (!d) return fail(`No task found for "${a.task}".`);

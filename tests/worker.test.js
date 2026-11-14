@@ -725,5 +725,50 @@ await test('overview: reports passed stages beyond the current slide', async () 
   assert.match(task.check, /before passed Selahs: Research/);
 });
 
+await test('tasks: connector schema, metadata set/clear and overview/detail output', async () => {
+  const tools = (await rpc('tools/list', {})).result.tools;
+  const schema = tools.find((t) => t.name === 'vesper_set_task').inputSchema;
+  assert.ok(schema.properties.priority.enum.includes(null));
+  assert.ok(schema.properties.due.type.includes('null'));
+  await tool('vesper_create_project', { name: 'Task metadata' });
+  await tool('vesper_create_task', { project: 'Task metadata', title: 'Metadata task' });
+  let d = txt(await tool('vesper_get_task', { task: 'Metadata task' }));
+  assert.equal(d.priority, null); assert.equal(d.due, null);
+  let r = txt(await tool('vesper_set_task', { task: d.id, priority: 'P1', due: '2028-02-29' }));
+  assert.equal(r.changed.length, 1);
+  d = txt(await tool('vesper_get_task', { task: d.id }));
+  assert.equal(d.priority, 'P1'); assert.equal(d.due, '2028-02-29');
+  const overview = txt(await tool('vesper_overview', {})).find((p) => p.project === 'Task metadata').tasks[0];
+  assert.equal(overview.priority, 'P1'); assert.equal(overview.due, '2028-02-29');
+  for (const patch of [{ priority: 'P5' }, { due: '2027-02-29' }, { priority: null, due: 'bad' }, {}]) {
+    r = txt(await tool('vesper_set_task', { task: d.id, ...patch }));
+    assert.equal(r.changed.length, 0); assert.ok(r.notApplied.length);
+  }
+  d = txt(await tool('vesper_get_task', { task: d.id }));
+  assert.equal(d.priority, 'P1');
+  await tool('vesper_set_task', { task: d.id, priority: null });
+  d = txt(await tool('vesper_get_task', { task: d.id }));
+  assert.equal(d.priority, null); assert.equal(d.due, '2028-02-29');
+  await tool('vesper_set_task', { task: d.id, due: null });
+  assert.equal(txt(await tool('vesper_get_task', { task: d.id })).due, null);
+});
+
+await test('tasks: simultaneous connector updates preserve priority and due separately', async () => {
+  await tool('vesper_create_task', { project: 'Task metadata', title: 'Parallel metadata' });
+  const d = txt(await tool('vesper_get_task', { task: 'Parallel metadata' }));
+  await Promise.all([
+    tool('vesper_set_task', { task: d.id, priority: 'P2' }),
+    tool('vesper_set_task', { task: d.id, due: '2027-03-01' }),
+  ]);
+  let saved = txt(await tool('vesper_get_task', { task: d.id }));
+  assert.equal(saved.priority, 'P2'); assert.equal(saved.due, '2027-03-01');
+  await Promise.all([
+    tool('vesper_set_task', { task: d.id, priority: null }),
+    tool('vesper_set_task', { task: d.id, due: null }),
+  ]);
+  saved = txt(await tool('vesper_get_task', { task: d.id }));
+  assert.equal(saved.priority, null); assert.equal(saved.due, null);
+});
+
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);
 process.exit(failed ? 1 : 0);

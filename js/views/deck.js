@@ -1,11 +1,12 @@
 import { store } from '../store.js';
 import { SLIDES, deckStatus, atSelah } from '../framework.js';
-import { esc, confirmBox, ICON } from '../util.js';
+import { esc, confirmBox, notice, ICON } from '../util.js';
 import { deckMap, mapLegend, drawTree } from '../mindmaps.js';
 import { go, rerender } from '../nav.js';
 import { finishInApp } from './task-actions.js';
 import { isFinishedEarly } from '../task-status.js';
-import { resumeButton, stageBar } from './parts.js';
+import { resumeButton, stageBar, taskChips } from './parts.js';
+import { PRIORITIES, setTaskMeta } from '../task-meta.js';
 import { openChatPanel } from '../ai/panel.js';
 import { exportDialog, calendarDialog } from '../connect-ui.js';
 
@@ -28,6 +29,16 @@ export function deckView(id) {
       <a class="back" href="#/p/${deck.projectId}" aria-label="Back to project">${ICON.back}</a>
       <div class="grow"><h1>${esc(deck.title)}</h1><p class="sub">${esc(project ? project.name : '')}${deck.passes > 1 ? `, pass ${deck.passes}` : ''}</p></div>
     </div>
+    ${taskChips(deck)}
+    <form class="card task-meta-form" data-task-meta>
+      <h2>Task details</h2>
+      <div class="row wrap">
+        <label>Priority<select name="priority"><option value="">No priority</option>${PRIORITIES.map((p) => `<option value="${p}" ${deck.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
+        <label>Due date<input name="due" type="date" min="0001-01-01" max="9999-12-31" value="${esc(deck.due || '')}"></label>
+      </div>
+      <button class="btn small primary" type="submit">Save details</button>
+      <p class="sub">Choose no priority or clear the date to remove it.</p>
+    </form>
     <div class="card now-card">
       <div class="now-text"><p class="sub">Now</p><p class="now-t">${esc(now)}</p><p class="sub">Slide ${deck.slide + 1} of ${SLIDES.length}</p>${stageBar(deck.slide)}</div>
       ${resumeButton(deck, project, 'block')}
@@ -39,10 +50,19 @@ export function deckView(id) {
 
   function mount(root) {
     root.addEventListener('click', onClick);
+    const form = root.querySelector('[data-task-meta]');
+    form.addEventListener('submit', saveDetails);
+    function saveDetails(e) {
+      e.preventDefault();
+      const data = new FormData(form);
+      const error = setTaskMeta(deck, { priority: data.get('priority') || null, due: data.get('due') || null });
+      if (error) { notice('Could not save task details', error); return; }
+      store.save(deck); rerender();
+    }
     const stopTree = drawTree(root);
     const here = root.querySelector('.dt-chip.now');
     if (here && here.scrollIntoView) here.scrollIntoView({ block: 'center', behavior: 'auto' });
-    return () => { root.removeEventListener('click', onClick); stopTree(); };
+    return () => { root.removeEventListener('click', onClick); form.removeEventListener('submit', saveDetails); stopTree(); };
     async function onClick(e) {
       const statusBtn = e.target.closest('[data-act="finish"],[data-act="reopen"]');
       if (statusBtn) {

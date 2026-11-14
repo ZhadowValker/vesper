@@ -183,6 +183,51 @@ function taskCheck(deck) {
   return notes.join('; ');
 }
 
+// ---- from js/task-meta.js ----
+const PRIORITIES = ['P1', 'P2', 'P3', 'P4'];
+const validDue = (value) => typeof value === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value) &&
+  value.slice(0, 4) !== '0000' && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) &&
+  new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+
+function setTaskMeta(deck, patch) {
+  const has = (key) => Object.prototype.hasOwnProperty.call(patch, key);
+  if (!has('priority') && !has('due')) return 'Provide priority or due; use null to clear a value.';
+  if (has('priority') && patch.priority !== null && !PRIORITIES.includes(patch.priority)) return 'Priority must be P1, P2, P3, P4, or null.';
+  if (has('due') && patch.due !== null && !validDue(patch.due)) return 'Due must be a valid calendar date (YYYY-MM-DD), or null.';
+  // Validate the whole patch before changing anything.
+  for (const key of ['priority', 'due']) if (has(key)) deck[key] = patch[key];
+  return null;
+}
+
+function localCalendarDate(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+const isOverdue = (deck, today = localCalendarDate()) => !deck.finished && validDue(deck.due) && deck.due < today;
+
+const PREF_KEY = 'vesper.task-list.v1';
+const normalizePrefs = (p) => ({
+  sort: ['updated', 'priority', 'due'].includes(p?.sort) ? p.sort : 'updated',
+  priority: ['all', 'none', ...PRIORITIES].includes(p?.priority) ? p.priority : 'all',
+});
+function getTaskPrefs() {
+  try { return normalizePrefs(JSON.parse(localStorage.getItem(PREF_KEY) || '{}')); }
+  catch (e) { return normalizePrefs({}); }
+}
+function saveTaskPrefs(prefs) {
+  const clean = normalizePrefs(prefs);
+  try { localStorage.setItem(PREF_KEY, JSON.stringify(clean)); } catch (e) { /* browser storage unavailable */ }
+  return clean;
+}
+function sortFilterTasks(decks, prefs = {}) {
+  const { sort, priority } = normalizePrefs(prefs);
+  const rank = (d) => PRIORITIES.includes(d.priority) ? PRIORITIES.indexOf(d.priority) : 4;
+  const due = (d) => validDue(d.due) ? d.due : '9999-99-99';
+  return decks.filter((d) => priority === 'all' || (priority === 'none' ? rank(d) === 4 : d.priority === priority)).sort((a, b) => {
+    const by = sort === 'priority' ? rank(a) - rank(b) : sort === 'due' ? due(a).localeCompare(due(b)) : 0;
+    return by || (b.updated || b.created || 0) - (a.updated || a.created || 0) || String(a.id).localeCompare(String(b.id));
+  });
+}
+
 // ---- from js/ai/questions.js ----
 // One plain-language question for every step, in framework order. The interview asks these,
 // so it works even when the AI model is weak or offline. Key: "<slide key>#<step number>".
@@ -393,6 +438,13 @@ function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       db.save(deck);
       focus = deck.id;
       changes.push({ text: `Looped "${deck.title}" back to ${stage.name}`, href: `#/d/${deck.id}` });
+    } else if (type === 'set_task') {
+      const deck = findTask(a.task);
+      if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
+      const error = setTaskMeta(deck, a);
+      if (error) { skipped.push(error); continue; }
+      db.save(deck);
+      changes.push({ text: `Updated task details for "${deck.title}"`, href: `#/d/${deck.id}` });
     } else if (type === 'finish' || type === 'reopen') {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
@@ -972,7 +1024,7 @@ function whereIs(d) {
 function taskSummary(state, d) {
   const pr = progress(d);
   const p = state.projects.find((x) => x.id === d.projectId);
-  return { id: d.id, title: d.title, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
+  return { id: d.id, title: d.title, priority: d.priority || null, due: d.due || null, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
 }
 
 const obj = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
@@ -985,6 +1037,7 @@ const TOOLS = [
   { name: 'vesper_next_questions', description: 'The next empty steps of a task, in order, each with the plain question to ask the person. Use this to interview them, then save each answer with vesper_set_note.', inputSchema: obj({ task: str('Task id or exact title'), limit: { type: 'integer', description: 'How many (default 5, max 20)' } }, ['task']), annotations: { readOnlyHint: true } },
   { name: 'vesper_create_project', description: 'Create a project (a group of tasks).', inputSchema: obj({ name: str('Project name') }, ['name']) },
   { name: 'vesper_create_task', description: 'Create a task inside a project.', inputSchema: obj({ project: str('Project id or exact name'), title: str('Task name') }, ['project', 'title']) },
+  { name: 'vesper_set_task', description: 'Set task priority or calendar due date. Omit unchanged fields; pass null to clear a value.', inputSchema: obj({ task: str('Task id or exact title'), priority: { type: ['string', 'null'], enum: ['P1', 'P2', 'P3', 'P4', null] }, due: { type: ['string', 'null'], format: 'date' } }, ['task']) },
   { name: 'vesper_set_note', description: 'Write a note into one step (or the slide notes when step is left out). Filling a step also ticks it. Existing text is kept: new text is appended unless mode is "replace". Never overwrite what the person wrote unless they asked.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer', description: 'Step number on that slide, from vesper_framework. Omit for the slide notes.' }, text: str('The note, in the person\'s words, short'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked' } }, ['task', 'slide', 'text']) },
   { name: 'vesper_schedule', description: 'Put a task on the person\'s Google Calendar (once they have connected it in Vesper). Use kind "work" for a work block and "selah" for the pause at the end of a stage. Scheduling the same task and kind again moves the existing event. Scheduling a Selah does not pass it; use vesper_pass_selah for that.', inputSchema: obj({ task: str('Task id or exact title'), when: str('Local start time like 2026-10-28T18:00'), minutes: { type: 'integer', description: 'Length, default 30' }, kind: { type: 'string', enum: ['work', 'selah'] }, title: str('Optional event title') }, ['task', 'when']) },
   { name: 'vesper_tick', description: 'Tick or untick one step.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer' }, done: { type: 'boolean' } }, ['task', 'slide', 'step']) },
@@ -1029,6 +1082,7 @@ async function callTool(env, name, a) {
   }
   if (name === 'vesper_create_project') return run([{ type: 'create_project', name: a.name }]);
   if (name === 'vesper_create_task') return run([{ type: 'create_task', project: a.project, title: a.title }]);
+  if (name === 'vesper_set_task') return run([{ ...a, type: 'set_task' }]);
   if (name === 'vesper_set_note') {
     const d = findTask(state, a.task);
     if (!d) return fail(`No task found for "${a.task}".`);

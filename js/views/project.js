@@ -1,7 +1,7 @@
-import { isFinishedEarly } from '../task-status.js';
+import { sortFilterTasks, getTaskPrefs } from '../task-meta.js';
 import { store } from '../store.js';
 import { deckStatus, atSelah, SLIDES } from '../framework.js';
-import { stageBar } from './parts.js';
+import { stageBar, taskChips, taskListControls, bindTaskListControls } from './parts.js';
 import { esc, ask, confirmBox, ICON } from '../util.js';
 import { projectMap, mapLegend, drawTree } from '../mindmaps.js';
 import { go } from '../nav.js';
@@ -14,11 +14,12 @@ export function projectView(id) {
   const finished = decks.filter((d) => d.finished).length;
   const selah = decks.filter(atSelah).length;
 
-  const list = decks.map((d) => {
+  const prefs = getTaskPrefs();
+  const list = sortFilterTasks(decks, prefs).map((d) => {
     const st = deckStatus(d);
     return `<a class="item" href="#/d/${d.id}">
       <div class="row between"><span class="t">${esc(d.title)}</span><span class="chip ${st.stageId ? 's-' + st.stageId : st.tone}">${esc(st.label)}</span></div>
-      ${isFinishedEarly(d) ? '<span class="chip think">finished early</span>' : ''}
+      ${taskChips(d)}
       ${stageBar(d.finished ? SLIDES.length - 1 : d.reached)}
     </a>`;
   }).join('');
@@ -35,14 +36,15 @@ export function projectView(id) {
       ${selah ? `<span class="chip think">${selah} at Selah</span>` : ''}
     </div>
     <div class="card">${projectMap(project, decks)}${decks.length ? mapLegend('Finished', 'In progress', 'Not started') : ''}</div>
-    ${decks.length ? `<h2 class="section">Tasks</h2><div class="list">${list}</div>` : ''}
+    ${decks.length ? `<h2 class="section">Tasks</h2>${taskListControls(prefs)}<div class="list">${list || '<p class="sub">No tasks match this priority.</p>'}</div>` : ''}
     <div class="footer-tools"><button class="btn small" data-act="export">Send elsewhere</button><button class="btn small danger" data-act="delete-project">Delete project</button></div>
   </div>`;
 
   function mount(root) {
     root.addEventListener('click', onClick);
+    const stopControls = bindTaskListControls(root);
     const stopTree = drawTree(root);
-    return () => { root.removeEventListener('click', onClick); stopTree(); };
+    return () => { root.removeEventListener('click', onClick); stopControls(); stopTree(); };
     async function onClick(e) {
       const btn = e.target.closest('[data-act]');
       if (!btn) return;
