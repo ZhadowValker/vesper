@@ -1,3 +1,4 @@
+import { finishTask } from '../task-status.js';
 // Applies the assistant's actions to task data. It works on any "db" with the same small
 // interface as the app's store, so the app and the online connector share one set of rules:
 // it can fill and tick steps, pass a Selah (with the person's answer recorded and who passed it), loop back, finish or reopen a task, and delete a task or project when told to confirm.
@@ -144,7 +145,10 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
     } else if (type === 'finish' || type === 'reopen') {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
-      deck.finished = type === 'finish' ? Date.now() : null;
+      if (type === 'finish') {
+        const error = finishTask(deck, { force: a.force, reason: a.reason });
+        if (error) { skipped.push(error); continue; }
+      } else { deck.finished = null; deck.finishedEarly = null; }
       db.save(deck);
       changes.push({ text: `${type === 'finish' ? 'Finished' : 'Reopened'} "${deck.title}"`, href: `#/d/${deck.id}` });
     } else if (type === 'delete_task' || type === 'delete_project') {

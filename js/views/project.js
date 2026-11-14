@@ -1,3 +1,4 @@
+import { isFinishedEarly } from '../task-status.js';
 import { store } from '../store.js';
 import { deckStatus, atSelah, SLIDES } from '../framework.js';
 import { stageBar } from './parts.js';
@@ -17,6 +18,7 @@ export function projectView(id) {
     const st = deckStatus(d);
     return `<a class="item" href="#/d/${d.id}">
       <div class="row between"><span class="t">${esc(d.title)}</span><span class="chip ${st.stageId ? 's-' + st.stageId : st.tone}">${esc(st.label)}</span></div>
+      ${isFinishedEarly(d) ? '<span class="chip think">finished early</span>' : ''}
       ${stageBar(d.finished ? SLIDES.length - 1 : d.reached)}
     </a>`;
   }).join('');

@@ -1,3 +1,4 @@
+import { finishInApp } from './task-actions.js';
 import { store } from '../store.js';
 import {
   CONFIG, STAGES, SLIDES, firstSlideOf, selahIndex, tickKey, stagePending, subDone, slideIndex,
@@ -100,7 +101,7 @@ export function slideView(deckId, nStr) {
       store.save(deck);
     }
 
-    function onClick(e) {
+    async function onClick(e) {
       const el = e.target.closest('[data-nav],[data-selah],[data-loop],[data-act]');
       if (!el) return;
       if (el.dataset.nav) {
@@ -110,11 +111,12 @@ export function slideView(deckId, nStr) {
       } else if (el.dataset.loop) {
         onLoop(el.dataset.loop);
       } else if (el.dataset.act === 'finish') {
-        deck.finished = Date.now();
+        if (!(await finishInApp(deck))) return;
         store.save(deck);
         rerender();
       } else if (el.dataset.act === 'reopen') {
         deck.finished = null;
+        deck.finishedEarly = null;
         store.save(deck);
         rerender();
       } else if (el.dataset.act === 'ai-chat') {

@@ -1,3 +1,4 @@
+import { isFinishedEarly } from '../task-status.js';
 import { store } from '../store.js';
 import { STAGES, SLIDES, deckStatus, atSelah } from '../framework.js';
 import { esc, ask, confirmBox, notice, ICON, $ } from '../util.js';
@@ -115,7 +116,7 @@ export function home() {
         const sub = d.finished ? 'Finished' : atSelah(d) ? `${st.label}, paused at Selah` : st.label === 'Not started' ? 'Not started' : `${st.label}, ${st.pct}%`;
         const extra = kind === 'loops' ? ` · ${d.loops} loop${d.loops === 1 ? '' : 's'}` : '';
         return `<a class="item s-${st.stageId || ''}" href="#/d/${d.id}" data-close>
-          <span class="t">${esc(d.title)}</span><span class="sub">${esc(p ? p.name : '')} · ${esc(sub)}${extra}</span></a>`;
+          <span class="t">${esc(d.title)}</span><span class="sub">${esc(p ? p.name : '')} · ${esc(sub)}${extra}</span>${isFinishedEarly(d) ? '<span class="chip think">finished early</span>' : ''}</a>`;
       }).join('');
       const dlg = document.createElement('dialog');
       dlg.className = 'modal tasklist';

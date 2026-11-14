@@ -2,7 +2,9 @@ import { store } from '../store.js';
 import { SLIDES, deckStatus, atSelah } from '../framework.js';
 import { esc, confirmBox, ICON } from '../util.js';
 import { deckMap, mapLegend, drawTree } from '../mindmaps.js';
-import { go } from '../nav.js';
+import { go, rerender } from '../nav.js';
+import { finishInApp } from './task-actions.js';
+import { isFinishedEarly } from '../task-status.js';
 import { resumeButton, stageBar } from './parts.js';
 import { openChatPanel } from '../ai/panel.js';
 import { exportDialog, calendarDialog } from '../connect-ui.js';
@@ -15,7 +17,7 @@ export function deckView(id) {
   const slide = SLIDES[deck.slide];
 
   let now;
-  if (deck.finished) now = 'Finished';
+  if (deck.finished) now = isFinishedEarly(deck) ? 'Finished early' : 'Finished';
   else if (slide.type === 'cover') now = deck.reached === 0 ? 'Not started' : 'At the cover';
   else if (slide.type === 'recap') now = 'Recap';
   else if (slide.type === 'selah') now = `${slide.stage.name}, Selah${atSelah(deck) ? ' (waiting)' : ''}`;
@@ -32,7 +34,7 @@ export function deckView(id) {
     </div>
     <h2 class="section">Mind map</h2>
     <div class="card">${deckMap(deck)}${mapLegend('Done', 'Current', 'Not yet')}<p class="sub map-note">Tap any name to jump to that slide. Selah is the pause at the end of each stage.</p></div>
-    <div class="footer-tools"><button class="btn small" data-act="calendar">Add to calendar</button><button class="btn small" data-act="export">Send elsewhere</button><button class="btn small danger" data-act="delete-deck">Delete task</button></div>
+    <div class="footer-tools"><button class="btn small" data-act="${deck.finished ? 'reopen' : 'finish'}">${deck.finished ? 'Reopen' : 'Finish'}</button><button class="btn small" data-act="calendar">Add to calendar</button><button class="btn small" data-act="export">Send elsewhere</button><button class="btn small danger" data-act="delete-deck">Delete task</button></div>
   </div>`;
 
   function mount(root) {
@@ -42,6 +44,12 @@ export function deckView(id) {
     if (here && here.scrollIntoView) here.scrollIntoView({ block: 'center', behavior: 'auto' });
     return () => { root.removeEventListener('click', onClick); stopTree(); };
     async function onClick(e) {
+      const statusBtn = e.target.closest('[data-act="finish"],[data-act="reopen"]');
+      if (statusBtn) {
+        if (statusBtn.dataset.act === 'finish') { if (!(await finishInApp(deck))) return; }
+        else { deck.finished = null; deck.finishedEarly = null; }
+        store.save(deck); rerender(); return;
+      }
       const chatBtn = e.target.closest('[data-act="ai-chat"]');
       if (chatBtn) { openChatPanel({ focusId: id }); return; }
       const other = e.target.closest('[data-act="calendar"],[data-act="export"]');

@@ -152,6 +152,37 @@ function deckStatus(deck) {
   return { label: 'Recap', stageId: null, pct, tone: 'do', state: 'now' };
 }
 
+// ---- from js/task-status.js ----
+const missingSelahs = (deck) => STAGES.filter((s) => !deck.selah?.[s.id]);
+
+// Shared finish policy for the UI, local agent and both hub deployments.
+function finishTask(deck, { force = false, reason = '' } = {}) {
+  const missing = missingSelahs(deck);
+  const why = typeof reason === 'string' ? reason.trim() : '';
+  if (missing.length && !(force === true && why && why.length <= 240)) {
+    return `Selahs not passed: ${missing.map((s) => s.name).join(', ')}. To finish early, use force: true and a reason of 1–240 characters.`;
+  }
+  deck.finished = Date.now();
+  deck.finishedEarly = missing.length ? { skipped: missing.map((s) => s.id), reason: why } : null;
+  return null;
+}
+
+const isFinishedEarly = (deck) => !!deck.finished && (!!deck.finishedEarly || missingSelahs(deck).length > 0);
+
+function taskCheck(deck) {
+  const notes = [];
+  const missing = missingSelahs(deck);
+  if (deck.finished && missing.length) notes.push(`Finished with Selahs missing: ${missing.map((s) => s.name).join(', ')}`);
+  const slide = SLIDES[deck.slide];
+  if (!slide) { notes.push('Current slide is invalid'); return notes.join('; '); }
+  const current = slide.type === 'recap' ? STAGES.length : STAGES.indexOf(slide.stage);
+  const later = STAGES.filter((s, i) => deck.selah?.[s.id] && i > current);
+  if (later.length) notes.push(`Selahs passed beyond current stage: ${later.map((s) => s.name).join(', ')}`);
+  const ahead = STAGES.filter((s) => deck.selah?.[s.id] && deck.slide <= selahIndex(s.id));
+  if (ahead.length) notes.push(`Current slide is at or before passed Selahs: ${ahead.map((s) => s.name).join(', ')}`);
+  return notes.join('; ');
+}
+
 // ---- from js/ai/questions.js ----
 // One plain-language question for every step, in framework order. The interview asks these,
 // so it works even when the AI model is weak or offline. Key: "<slide key>#<step number>".
@@ -365,7 +396,10 @@ function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
     } else if (type === 'finish' || type === 'reopen') {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
-      deck.finished = type === 'finish' ? Date.now() : null;
+      if (type === 'finish') {
+        const error = finishTask(deck, { force: a.force, reason: a.reason });
+        if (error) { skipped.push(error); continue; }
+      } else { deck.finished = null; deck.finishedEarly = null; }
       db.save(deck);
       changes.push({ text: `${type === 'finish' ? 'Finished' : 'Reopened'} "${deck.title}"`, href: `#/d/${deck.id}` });
     } else if (type === 'delete_task' || type === 'delete_project') {
@@ -938,7 +972,7 @@ function whereIs(d) {
 function taskSummary(state, d) {
   const pr = progress(d);
   const p = state.projects.find((x) => x.id === d.projectId);
-  return { id: d.id, title: d.title, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah[s.id]).map((s) => s.name) };
+  return { id: d.id, title: d.title, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
 }
 
 const obj = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
@@ -956,7 +990,7 @@ const TOOLS = [
   { name: 'vesper_tick', description: 'Tick or untick one step.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer' }, done: { type: 'boolean' } }, ['task', 'slide', 'step']) },
   { name: 'vesper_pass_selah', description: 'Pass the next Selah of a task (stages go in order) and move the task on. Selah is the pause that ends each stage, with one question per stage (see vesper_framework). Give the answer to that question in the person\'s words; it is saved on the Selah slide and the stage is marked "passed by Claude". Only do this when the person has asked you to drive the task forward or you have asked and they agreed.', inputSchema: obj({ task: str('Task id or exact title'), answer: str('The answer to the stage pause question'), stage: str('Optional stage id; must be the next unpassed one') }, ['task', 'answer']) },
   { name: 'vesper_loop_back', description: 'Go back to an earlier stage on purpose (the loop in the framework). Clears the Selah passes from that stage on and starts another pass.', inputSchema: obj({ task: str('Task id or exact title'), stage: str('Stage id or name: vision, research, plan, execute or review') }, ['task', 'stage']) },
-  { name: 'vesper_finish', description: 'Mark a task finished, or reopen it.', inputSchema: obj({ task: str('Task id or exact title'), reopen: { type: 'boolean', description: 'true to reopen a finished task' } }, ['task']) },
+  { name: 'vesper_finish', description: 'Finish after all five Selahs, or reopen. Early finish requires force true and a short reason.', inputSchema: obj({ task: str('Task id or exact title'), reopen: { type: 'boolean', description: 'true to reopen a finished task' }, force: { type: 'boolean' }, reason: { type: 'string', minLength: 1, maxLength: 240 } }, ['task']) },
   { name: 'vesper_delete', description: 'Delete a task or a whole project with its tasks. Cannot be undone. Ask the person first and only pass confirm true after they say yes.', inputSchema: obj({ task: str('Task id or exact title (to delete one task)'), project: str('Project id or name (to delete a whole project)'), confirm: { type: 'boolean', description: 'Must be true' } }, ['confirm']) },
 ];
 
@@ -1007,7 +1041,7 @@ async function callTool(env, name, a) {
   }
   if (name === 'vesper_pass_selah') return run([{ type: 'pass_selah', task: a.task, answer: a.answer, stage: a.stage }]);
   if (name === 'vesper_loop_back') return run([{ type: 'loop_back', task: a.task, stage: a.stage }]);
-  if (name === 'vesper_finish') return run([{ type: a.reopen ? 'reopen' : 'finish', task: a.task }]);
+  if (name === 'vesper_finish') return run([{ type: a.reopen ? 'reopen' : 'finish', task: a.task, force: a.force, reason: a.reason }]);
   if (name === 'vesper_delete') {
     if (a.task) return run([{ type: 'delete_task', task: a.task, confirm: a.confirm === true }]);
     if (a.project) return run([{ type: 'delete_project', project: a.project, confirm: a.confirm === true }]);

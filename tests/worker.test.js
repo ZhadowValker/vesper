@@ -423,7 +423,7 @@ await test('connector: Claude can drive a task through a Selah, loop back, finis
   assert.match(r.changed[0], /Looped/);
   r = changed(await tool('vesper_pass_selah', { task: 'Drive task', answer: 'Second pass: still clear.' }));
   assert.match(r.changed[0], /Vision Selah/);   // vision is the next one again after the loop
-  assert.match(changed(await tool('vesper_finish', { task: 'Drive task' })).changed[0], /Finished/);
+  assert.match(changed(await tool('vesper_finish', { task: 'Drive task', force: true, reason: 'Requested early completion for this test.' })).changed[0], /Finished/);
   assert.match(changed(await tool('vesper_finish', { task: 'Drive task', reopen: true })).changed[0], /Reopened/);
   // delete needs a clear yes
   r = changed(await tool('vesper_delete', { task: 'Drive task', confirm: false }));
@@ -687,6 +687,42 @@ await test('Node server accepts authenticated hub calls and never serves data or
     await exited;
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+await test('finish: connector blocks missing Selahs and records a forced reason', async () => {
+  await tool('vesper_create_project', { name: 'Finish guard' });
+  await tool('vesper_create_task', { project: 'Finish guard', title: 'Finish checked task' });
+  for (const fields of [{}, { force: true }, { force: true, reason: '   ' }, { reason: 'Not enough alone' }]) {
+    const r = txt(await tool('vesper_finish', { task: 'Finish checked task', ...fields }));
+    assert.equal(r.changed.length, 0); assert.match(r.notApplied[0], /Vision.*Research.*Plan.*Execute.*Review/);
+  }
+  const r = txt(await tool('vesper_finish', { task: 'Finish checked task', force: true, reason: 'Approved reduced scope.' }));
+  assert.equal(r.changed.length, 1);
+  let d = txt(await tool('vesper_get_task', { task: 'Finish checked task' }));
+  assert.equal(d.finishedEarly.reason, 'Approved reduced scope.');
+  assert.deepEqual(d.finishedEarly.skipped, ['vision', 'research', 'plan', 'execute', 'review']);
+  let overview = txt(await tool('vesper_overview', {}));
+  assert.match(overview.find((p) => p.project === 'Finish guard').tasks[0].check, /Finished with Selahs missing/);
+  await tool('vesper_finish', { task: 'Finish checked task', reopen: true });
+  for (const stage of ['vision', 'research', 'plan', 'execute', 'review']) {
+    await tool('vesper_pass_selah', { task: 'Finish checked task', stage, answer: 'Checked and approved.' });
+  }
+  assert.equal(txt(await tool('vesper_finish', { task: 'Finish checked task' })).changed.length, 1);
+  d = txt(await tool('vesper_get_task', { task: 'Finish checked task' }));
+  assert.equal(d.finishedEarly, null);
+  overview = txt(await tool('vesper_overview', {}));
+  assert.equal(overview.find((p) => p.project === 'Finish guard').tasks[0].check, undefined);
+});
+
+await test('overview: reports passed stages beyond the current slide', async () => {
+  const state = { projects: [{ id: 'check-p', name: 'Checks', updated: 1 }], decks: [{
+    id: 'check-d', projectId: 'check-p', title: 'Inconsistent', updated: 1, slide: 1, reached: 1,
+    notes: {}, ticks: {}, selah: { research: true }, finished: null,
+  }] };
+  await call('/sync', { method: 'PUT', headers: app, body: { state } });
+  const task = txt(await tool('vesper_overview', {})).find((p) => p.id === 'check-p').tasks[0];
+  assert.match(task.check, /beyond current stage: Research/);
+  assert.match(task.check, /before passed Selahs: Research/);
 });
 
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);

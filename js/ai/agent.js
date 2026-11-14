@@ -47,6 +47,7 @@ Action types (use ids from the state, or exact names):
 {"type":"pass_selah","task":"...","answer":"their answer to the stage pause question"}   (the next unpassed stage only)
 {"type":"loop_back","task":"...","stage":"research"}   (go back on purpose; clears Selah passes from there)
 {"type":"finish","task":"..."}  or  {"type":"reopen","task":"..."}
+Finish requires all five Selahs. Only when the person explicitly chooses early finish use {"type":"finish","task":"...","force":true,"reason":"their short reason (1–240 characters)"}.
 {"type":"delete_task","task":"...","confirm":true}  or  {"type":"delete_project","project":"...","confirm":true}
 {"type":"focus","task":"<task id or title>"}   (switch which task you are working on)
 Use [] for actions when there is nothing to change.`;

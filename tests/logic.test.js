@@ -489,4 +489,62 @@ await testAsync('sync: edits made during a request survive its response', async 
   }
 });
 
+const { missingSelahs, finishTask, taskCheck, isFinishedEarly } = await import('../js/task-status.js');
+test('finish: agent blocks missing Selahs unless forced with a short reason', () => {
+  store.reset();
+  const p = store.addProject('Finish policy'), d = store.addDeck(p.id, 'Guarded');
+  for (const fields of [{}, { force: true }, { force: true, reason: ' ' }, { force: false, reason: 'No' }, { force: true, reason: 'x'.repeat(241) }]) {
+    const out = applyActions([{ type: 'finish', task: d.id, ...fields }]);
+    assert.equal(out.changes.length, 0); assert.match(out.skipped[0], /Vision.*Research.*Plan.*Execute.*Review/);
+    assert.equal(d.finished, null);
+  }
+  applyActions([{ type: 'finish', task: d.id, force: true, reason: '  Scope intentionally reduced.  ' }]);
+  assert.ok(d.finished); assert.equal(d.finishedEarly.reason, 'Scope intentionally reduced.');
+  assert.deepEqual(d.finishedEarly.skipped, STAGES.map((s) => s.id));
+  assert.ok(isFinishedEarly(d));
+  applyActions([{ type: 'reopen', task: d.id }]);
+  assert.equal(d.finished, null); assert.equal(d.finishedEarly, null);
+  STAGES.forEach((s) => { d.selah[s.id] = true; }); store.save(d);
+  assert.equal(applyActions([{ type: 'finish', task: d.id }]).skipped.length, 0);
+  assert.equal(d.finishedEarly, null);
+});
+
+await testAsync('finish: app confirmation lists missing stages; cancel never mutates', async () => {
+  const { finishInApp } = await import('../js/views/task-actions.js');
+  const d = { selah: { vision: true }, finished: null };
+  assert.equal(await finishInApp(d, async (title, text, options) => {
+    assert.match(title, /Finish/); assert.match(text, /Research, Plan, Execute, Review/);
+    assert.equal(options.ok, 'Finish anyway'); return false;
+  }), false);
+  assert.equal(d.finished, null); assert.equal(d.finishedEarly, undefined);
+  assert.ok(await finishInApp(d, async () => true));
+  assert.deepEqual(d.finishedEarly.skipped, ['research', 'plan', 'execute', 'review']);
+  const complete = { selah: Object.fromEntries(STAGES.map((s) => [s.id, true])) };
+  assert.ok(await finishInApp(complete, () => { throw new Error('No dialog expected'); }));
+  assert.equal(complete.finishedEarly, null);
+});
+
+test('finish: check notes flag inconsistent legacy and current task states', () => {
+  const d = { slide: 0, selah: {}, finished: 10 };
+  assert.match(taskCheck(d), /Finished with Selahs missing: Vision/);
+  assert.ok(isFinishedEarly(d));
+  d.finished = null; d.slide = firstSlideOf('vision'); d.selah.research = true;
+  assert.match(taskCheck(d), /beyond current stage: Research/);
+  assert.match(taskCheck(d), /before passed Selahs: Research/);
+  d.selah = Object.fromEntries(STAGES.map((s) => [s.id, true])); d.slide = SLIDES.length - 1;
+  assert.equal(taskCheck(d), '');
+  assert.equal(missingSelahs(d).length, 0);
+});
+
+test('finish: early-finish metadata merges independently of other task edits', () => {
+  const base = { id: 'd', projectId: 'p', title: 'T', updated: 1, selah: {}, notes: {}, ticks: {}, finished: null };
+  const a = structuredClone(base), b = structuredClone(base);
+  assert.equal(finishTask(a, { force: true, reason: 'Deliberate early finish.' }), null);
+  stampDeck(a, base, 20); b.title = 'Renamed elsewhere'; stampDeck(b, base, 30);
+  const state = (d) => ({ projects: [{ id: 'p' }], decks: [d] });
+  const merged = mergeStates(state(a), state(b)).decks[0];
+  assert.ok(merged.finished); assert.equal(merged.finishedEarly.reason, 'Deliberate early finish.');
+  assert.equal(merged.title, 'Renamed elsewhere');
+});
+
 console.log(`\n${passed} tests passed`);
