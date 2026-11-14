@@ -1,6 +1,7 @@
 import { sortFilterTasks, getTaskPrefs } from '../task-meta.js';
 import { orderedItems } from '../organize.js';
 import { orderButtons, bindOrganize } from './organize-ui.js';
+import { themeControlHTML, bindThemeControl } from '../theme.js';
 import { store } from '../store.js';
 import { STAGES, SLIDES, deckStatus, atSelah, slidePosition, slidesFor } from '../framework.js';
 import { esc, ask, confirmBox, notice, ICON, $ } from '../util.js';
@@ -84,6 +85,8 @@ export function home() {
         ${spread.map(({ s, n }) => `<button type="button" class="spread spread-btn" data-metric="stage:${s.id}" aria-label="${s.name}: ${n} task${n === 1 ? '' : 's'}"><span class="lab">${s.name}</span><div class="bar s-${s.id}"><i style="width:${Math.round((n / max) * 100)}%"></i></div><span class="num">${n}</span></button>`).join('')}
       </div>` : ''}
       <div class="o6 stack tight">
+        <h2 class="section">Settings</h2>
+        ${themeControlHTML()}
         <h2 class="section">Backup</h2>
         <div class="footer-tools">
           <button class="btn small" data-act="export">Export backup</button>
@@ -101,10 +104,11 @@ export function home() {
     root.addEventListener('click', onClick);
     const stopControls = bindTaskListControls(root);
     const stopOrganize = bindOrganize(root);
+    const stopThemeControl = bindThemeControl(root);
     maybeFirstLogin().then(() => { if (!guideSeen()) return showGuide().then((r) => { if (r === 'sample') openSample(); }); });
     const file = $('#import-file', root);
     if (file) file.addEventListener('change', onFile);
-    return () => { root.removeEventListener('click', onClick); stopControls(); stopOrganize(); };
+    return () => { root.removeEventListener('click', onClick); stopControls(); stopOrganize(); stopThemeControl(); };
 
     // Tap a number to see the tasks behind it.
     function showList(kind) {

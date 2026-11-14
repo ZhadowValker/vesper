@@ -1,0 +1,194 @@
+/* Vesper's daylight reading room: same dusk-glass geometry, softened into paper and ink.
+   Load after app.css. All rules are scoped so the existing dark theme stays untouched. */
+:root[data-theme="light"]{
+  color-scheme:light;
+  --night:#f4f1f8;
+  --ink:#29243d;
+  --muted:#59556c;
+  --faint:#716c81;
+  --glass:linear-gradient(145deg,rgba(255,255,255,.90),rgba(249,246,253,.76));
+  --glass-soft:linear-gradient(145deg,rgba(255,255,255,.78),rgba(239,235,246,.72));
+  --edge:rgba(67,56,92,.16);
+  --edge-strong:rgba(67,56,92,.27);
+  --shadow:0 12px 34px rgba(55,42,80,.10),inset 0 1px 0 rgba(255,255,255,.92);
+  --blur:blur(22px) saturate(125%);
+  --vision:#914500;
+  --research:#a32f52;
+  --plan:#70409c;
+  --execute:#3553a0;
+  --review:#087466;
+  --acc:#70409c;
+  --ok:#087466;
+  --warn:#875000;
+  --danger:#a52e48;
+}
+
+:root[data-theme="light"] body::before{
+  background:
+    radial-gradient(520px 520px at 100% -4%,rgba(216,128,145,.19),transparent 70%),
+    radial-gradient(560px 560px at -10% 46%,rgba(163,134,203,.16),transparent 70%),
+    radial-gradient(560px 560px at 105% 96%,rgba(117,150,194,.15),transparent 70%),
+    var(--night);
+}
+:root[data-theme="light"] a:focus-visible,
+:root[data-theme="light"] button:focus-visible,
+:root[data-theme="light"] input:focus-visible,
+:root[data-theme="light"] textarea:focus-visible,
+:root[data-theme="light"] select:focus-visible{outline-color:#5b438b}
+
+/* Fields, buttons, and status chips */
+:root[data-theme="light"] .task-controls select,
+:root[data-theme="light"] .task-meta-form select,
+:root[data-theme="light"] .task-meta-form input,
+:root[data-theme="light"] .step-note,
+:root[data-theme="light"] .notes textarea,
+:root[data-theme="light"] .timer input,
+:root[data-theme="light"] .modal input,
+:root[data-theme="light"] .ai-row textarea,
+:root[data-theme="light"] .iv-setup select,
+:root[data-theme="light"] .iv-in,
+:root[data-theme="light"] .ai-f select,
+:root[data-theme="light"] .ai-export{
+  background:#fbf9fd;
+  color:var(--ink);
+  border-color:var(--edge-strong);
+}
+:root[data-theme="light"] .task-controls select option,
+:root[data-theme="light"] .task-meta-form select option,
+:root[data-theme="light"] .iv-setup select option,
+:root[data-theme="light"] .ai-f select option{background:#fbf9fd;color:var(--ink)}
+:root[data-theme="light"] .step-note::placeholder,
+:root[data-theme="light"] .notes textarea::placeholder,
+:root[data-theme="light"] .modal input::placeholder,
+:root[data-theme="light"] .ai-row textarea::placeholder,
+:root[data-theme="light"] .composer textarea::placeholder{color:var(--faint)}
+:root[data-theme="light"] .btn.primary{color:#fff;background:#4b3b72;border-color:#4b3b72}
+:root[data-theme="light"] .btn.primary:hover{background:#3e315f}
+:root[data-theme="light"] .btn.danger-fill{color:#fff;background:#a52e48;border-color:#a52e48}
+:root[data-theme="light"] .theme-control{display:grid;gap:5px;min-width:130px;font-size:13px;color:var(--muted)}
+:root[data-theme="light"] .theme-select{min-height:42px;padding:8px 10px;border:1px solid var(--edge-strong);border-radius:10px;background:#fbf9fd;color:var(--ink)}
+:root[data-theme="light"] .chip{background:rgba(72,61,96,.07);border-color:rgba(72,61,96,.16);color:#514b65}
+:root[data-theme="light"] .chip[class*="s-"]{
+  color:var(--st);
+  background:color-mix(in srgb,var(--st) 11%,#fff);
+  border-color:color-mix(in srgb,var(--st) 30%,#fff);
+}
+:root[data-theme="light"] .chip.think{color:#70409c;background:#f0e8f7;border-color:#d3c0e4}
+:root[data-theme="light"] .chip.do{color:#087466;background:#e3f2ee;border-color:#b8dbd2}
+:root[data-theme="light"] .chip.warn{color:#875000;background:#f8eddc;border-color:#e8d0a8}
+:root[data-theme="light"] .chip.overdue{color:#922940;background:#f8e7eb;border-color:#d9a4af}
+:root[data-theme="light"] .chip.priority{color:#754400}
+:root[data-theme="light"] .bar{background:rgba(65,54,88,.12)}
+:root[data-theme="light"] .spread .lab{color:#4a455b}
+:root[data-theme="light"] .banner{
+  color:#332b40;
+  background:linear-gradient(145deg,rgba(239,184,111,.23),rgba(239,184,111,.08));
+  border-color:rgba(151,94,26,.30);
+}
+:root[data-theme="light"] .banner [aria-hidden]{
+  color:#875000;border-color:rgba(135,80,0,.35);box-shadow:none;
+}
+
+/* Stage mind maps: retain the branch colors, but give every text label solid contrast. */
+:root[data-theme="light"] .legend .d{background:#188a78}
+:root[data-theme="light"] .legend .n{background:#8053a8}
+:root[data-theme="light"] .legend .t{background:#aaa3b4}
+:root[data-theme="light"] .dt-links path{stroke:var(--st,#188a78);stroke-opacity:.78}
+:root[data-theme="light"] .dt-root{
+  color:#392d45;
+  background:radial-gradient(circle at 35% 30%,#fff6e8,#f2d3a8 60%,#d9c2e5);
+  box-shadow:0 6px 20px rgba(117,82,119,.13);
+}
+:root[data-theme="light"] .dt-node{
+  color:#464156;
+  background:#faf8fc;
+  border-color:rgba(67,56,92,.20);
+}
+:root[data-theme="light"] .dt-row.done .dt-node{
+  color:#08685d;background:#e1f1ed;border-color:#a9d3c9;
+}
+:root[data-theme="light"] .dt-row.now .dt-node{
+  color:var(--st);background:color-mix(in srgb,var(--st) 10%,#fff);
+  border-color:color-mix(in srgb,var(--st) 48%,#fff);box-shadow:none;
+}
+:root[data-theme="light"] .dt-sub{color:#5f5a6c}
+:root[data-theme="light"] .dt-row.deck.todo .dt-node{background:#f5f2f8}
+:root[data-theme="light"] .dt-chip{
+  color:#484357;background:#fbf9fd;border-color:rgba(67,56,92,.18);
+}
+:root[data-theme="light"] .dt-chip.done{color:#08685d;background:#e1f1ed;border-color:#a9d3c9}
+:root[data-theme="light"] .dt-chip.now{
+  color:var(--st);background:color-mix(in srgb,var(--st) 10%,#fff);
+  border-color:color-mix(in srgb,var(--st) 48%,#fff);
+}
+
+/* Writing stage, reflection guide, and shared glass surfaces */
+:root[data-theme="light"] .slide{
+  background:linear-gradient(150deg,rgba(255,255,255,.95),rgba(245,241,250,.88));
+  box-shadow:0 18px 48px rgba(55,42,80,.12),inset 0 1px 0 rgba(255,255,255,.95);
+}
+:root[data-theme="light"] .slide .lead{color:#514c61}
+:root[data-theme="light"] .progress>span{background:rgba(65,54,88,.15)}
+:root[data-theme="light"] .step-note,
+:root[data-theme="light"] .notes textarea,
+:root[data-theme="light"] .timer input,
+:root[data-theme="light"] .recap pre{background:rgba(255,255,255,.78)}
+:root[data-theme="light"] .hint,
+:root[data-theme="light"] .g-selah{color:#875000;background:#f8eddc;border-color:#e3c58f}
+:root[data-theme="light"] .selah-word{color:#875000}
+:root[data-theme="light"] .orb{box-shadow:0 0 0 1px rgba(135,80,0,.18),0 12px 40px rgba(135,80,0,.12)}
+:root[data-theme="light"] .modal{
+  background:linear-gradient(150deg,rgba(255,255,255,.98),rgba(244,240,249,.98));
+  box-shadow:0 24px 70px rgba(48,38,68,.24),inset 0 1px 0 rgba(255,255,255,.95);
+}
+:root[data-theme="light"] .modal::backdrop{background:rgba(41,36,61,.38)}
+:root[data-theme="light"] .g-art{background:#f0edf5;border-color:var(--edge)}
+:root[data-theme="light"] .g-level{background:#f8f6fa;border-color:rgba(67,56,92,.18)}
+:root[data-theme="light"] .g-note{background:#f1eef5}
+:root[data-theme="light"] .g-tick.off{background:#fbf9fd;border-color:#aaa3b4}
+:root[data-theme="light"] .g-dots i{background:rgba(67,56,92,.22)}
+:root[data-theme="light"] .g-dots i.on{background:#4b3b72}
+:root[data-theme="light"] .steps input[type=checkbox]{background:#fff;border-color:rgba(67,56,92,.38)}
+:root[data-theme="light"] .steps input[type=checkbox]::after,
+:root[data-theme="light"] .g-tick::after{border-color:#fff}
+
+/* AI conversation, interview controls, dialogs and navigation island */
+:root[data-theme="light"] .ai-status[data-kind=ok],
+:root[data-theme="light"] .ai-verdict[data-v=ready],
+:root[data-theme="light"] .chg li::before{color:#087466}
+:root[data-theme="light"] .ai-verdict[data-v=almost]{color:#875000;border-color:#d9bd8d}
+:root[data-theme="light"] .ai-verdict[data-v=not_yet]{color:#a32f52;border-color:#d9a4af}
+:root[data-theme="light"] .msg.u .bub{
+  color:#453248;background:linear-gradient(145deg,#f8e9d6,#eee4f3);border-color:#e1cdbd;
+}
+:root[data-theme="light"] .msg.b .bub{background:linear-gradient(150deg,#fff,#f3eff7)}
+:root[data-theme="light"] .msg.err .bub{color:#875000}
+:root[data-theme="light"] .chg{background:#f7f4fa}
+:root[data-theme="light"] .composer,
+:root[data-theme="light"] .pn-tabs{background:rgba(255,255,255,.82)}
+:root[data-theme="light"] .composer textarea{color:var(--ink)}
+:root[data-theme="light"] .send{background:#4b3b72;color:#fff}
+:root[data-theme="light"] .pn-tabs button[aria-selected=true]{background:#4b3b72;color:#fff}
+:root[data-theme="light"] .avatar,
+:root[data-theme="light"] .isl-av{background:linear-gradient(135deg,#705b9d,#237f77);color:#fff}
+:root[data-theme="light"] .island{
+  background:linear-gradient(145deg,rgba(255,255,255,.96),rgba(239,235,246,.96));
+  box-shadow:0 14px 36px rgba(55,42,80,.16),inset 0 1px 0 rgba(255,255,255,.95);
+}
+:root[data-theme="light"] .isl-b:hover{background:rgba(75,59,114,.08)}
+:root[data-theme="light"] .isl-b[aria-current=page]{color:#433461;background:rgba(112,64,156,.13)}
+:root[data-theme="light"] .avatar-btn.on{border-color:#705b9d}
+
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  :root[data-theme="light"] .card,
+  :root[data-theme="light"] .soft,
+  :root[data-theme="light"] .item,
+  :root[data-theme="light"] .metric,
+  :root[data-theme="light"] .back,
+  :root[data-theme="light"] .btn,
+  :root[data-theme="light"] .slide{background:var(--glass)}
+}
+
+@media print{
+  :root[data-theme="light"] .chip{color:#29243d;background:#eee;border-color:#aaa}
+}

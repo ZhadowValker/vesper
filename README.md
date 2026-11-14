@@ -15,7 +15,7 @@ Words used in the app: a **Project** holds **Tasks**. Each task is played as a *
 | Routing | Hash routes (`#/p/…`, `#/d/…/s/12`) | GitHub Pages has no server fallback, so path URLs would 404 on reload |
 | Storage | `localStorage`, one JSON document, behind `js/store.js` | Works offline with no backend. Swap to IndexedDB later by changing one file |
 | Offline and install | `sw.js` plus `manifest.webmanifest` | Makes it an installable PWA |
-| Look | Dusk glass: dark translucent panels, one colour per stage, fonts bundled in `fonts/` so it works offline | One stylesheet. Dark only for now |
+| Look | Dusk glass with Dark and Light themes, one colour per stage, fonts bundled in `fonts/` so it works offline | Auto follows the device; the appearance choice stays in this browser |
 
 ## Files
 
@@ -201,6 +201,15 @@ and notes render without an external font service, including offline. Both the
 font and `fonts/OFL-NotoSansTelugu.txt` are precached by the service worker.
 Source: [Google Fonts / Noto Sans Telugu](https://github.com/google/fonts/tree/main/ofl/notosanstelugu);
 copyright The Noto Project Authors, licensed under SIL Open Font License 1.1.
+
+## Appearance
+
+Home → **Settings → Appearance** offers **Auto / Dark / Light**. Auto is the
+default and follows the device's light/dark setting, including changes while the
+app is open. Choosing Dark or Light overrides the device setting and is remembered
+only in this browser, never synced with tasks. Both themes retain the dusk-glass
+layout; Light uses darker stage colors and readable chips, controls and mind maps.
+Both theme files and the preference helper are available offline.
 
 ## Optional AI helpers
 

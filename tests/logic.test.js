@@ -840,4 +840,51 @@ test('quick: mode and separate stage notes merge independently of another device
   assert.equal(mergeStates(state(merged), state(c)).decks[0].mode, 'full');
 });
 
+const theme = await import('../js/theme.js');
+test('theme: Auto defaults/fallbacks, explicit overrides and browser-only persistence', () => {
+  mem.delete('vesper.theme.v1');
+  const before = store.exportJSON();
+  assert.equal(theme.getThemePreference(), 'auto');
+  assert.equal(theme.resolveTheme('auto', true), 'light');
+  assert.equal(theme.resolveTheme('auto', false), 'dark');
+  assert.equal(theme.resolveTheme('dark', true), 'dark');
+  assert.equal(theme.resolveTheme('light', false), 'light');
+  assert.equal(theme.resolveTheme('bad', true), 'light');
+  for (const pref of ['light', 'dark', 'auto']) {
+    assert.equal(theme.setThemePreference(pref), pref);
+    assert.equal(theme.getThemePreference(), pref);
+  }
+  theme.setThemePreference('bad');
+  assert.equal(theme.getThemePreference(), 'auto');
+  assert.equal(store.exportJSON(), before);
+  assert.match(theme.themeControlHTML(), /Auto/);
+  assert.match(theme.themeControlHTML(), /data-theme-control/);
+});
+
+test('theme: init and controls follow system changes only in Auto and clean up listeners', () => {
+  const originalDocument = globalThis.document, originalMedia = globalThis.matchMedia;
+  const node = { dataset: {}, style: {} }; let systemChange;
+  const media = { matches: true, addEventListener: (type, fn) => { systemChange = fn; }, removeEventListener: (type, fn) => { assert.equal(fn, systemChange); systemChange = null; } };
+  globalThis.document = { documentElement: node };
+  globalThis.matchMedia = () => media;
+  let onChange;
+  const select = { value: '', addEventListener: (t, fn) => { onChange = fn; }, removeEventListener: (t, fn) => { assert.equal(fn, onChange); onChange = null; } };
+  try {
+    theme.setThemePreference('auto');
+    const stop = theme.initTheme();
+    assert.equal(node.dataset.theme, 'light');
+    media.matches = false; systemChange(); assert.equal(node.dataset.theme, 'dark');
+    const stopControl = theme.bindThemeControl({ addEventListener() {}, querySelector: () => select });
+    select.value = 'light'; onChange(); assert.equal(node.dataset.theme, 'light');
+    media.matches = false; systemChange(); assert.equal(node.dataset.theme, 'light');
+    select.value = 'auto'; onChange(); assert.equal(node.dataset.theme, 'dark');
+    assert.equal(node.style.colorScheme, 'dark');
+    stopControl(); assert.equal(onChange, null);
+    stop(); assert.equal(systemChange, null);
+  } finally {
+    globalThis.document = originalDocument; globalThis.matchMedia = originalMedia;
+    theme.setThemePreference('auto');
+  }
+});
+
 console.log(`\n${passed} tests passed`);
