@@ -756,4 +756,16 @@ test('overview: all filters combine, dates are exclusive and output is one task 
   assert.equal(filterOverview(many).flatMap((g) => g.decks).length, 25);
 });
 
+test('organize: two devices moving different ranked tasks keep both ordering edits', () => {
+  const projects = [{ id: 'p', name: 'P', updated: 1 }];
+  const decks = ['a', 'b', 'c', 'd'].map((id, order) => ({ id, projectId: 'p', title: id, order, updated: 1 }));
+  const a = { projects, decks: structuredClone(decks) }, b = structuredClone(a);
+  reorderItems(a.decks, { item: 'a', position: 3 });
+  reorderItems(b.decks, { item: 'd', position: 1 });
+  for (let i = 0; i < decks.length; i++) { stampDeck(a.decks[i], decks[i], 20); stampDeck(b.decks[i], decks[i], 30); }
+  const merged = mergeStates(a, b);
+  assert.deepEqual(orderedItems(merged.decks).map((d) => d.id), ['d', 'b', 'c', 'a']);
+  assert.ok(sameState(merged, mergeStates(b, a)));
+});
+
 console.log(`\n${passed} tests passed`);

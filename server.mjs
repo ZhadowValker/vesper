@@ -59,7 +59,9 @@ function serveFile(req, res, pathname) {
 
 const server = http.createServer(async (req, res) => {
   try {
-    const url = new URL(req.url, 'http://localhost');
+    const protocol = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim() === 'https' ? 'https' : 'http';
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost').split(',')[0].trim();
+    const url = new URL(req.url, `${protocol}://${host}`);
     if (HUB.test(url.pathname)) {
       const chunks = [];
       let size = 0;

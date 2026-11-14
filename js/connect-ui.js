@@ -1,3 +1,4 @@
+import { tokenManagerHTML, bindTokenManager } from './token-ui.js';
 // Dialogs for the hub (sync), exporting a task or project, and adding to a calendar.
 import { store } from './store.js';
 import { esc, confirmBox } from './util.js';
@@ -93,6 +94,7 @@ export function syncDialog({ onChange } = {}) {
       <button type="button" class="btn ghost" data-act="restore">Restore from Drive</button>
     </div>` : ''}
     ${advanced}
+    ${tokenManagerHTML()}
     <div class="modal-actions ai-actions">
       <button type="button" class="btn ghost" data-close>Close</button>
       ${google ? '<button type="button" class="btn ghost" data-act="signout">Sign out</button><button type="button" class="btn ghost danger" data-act="delete">Delete my data</button>' : (syncReady() ? '<button type="button" class="btn ghost" data-act="off">Turn off</button>' : '')}
@@ -102,7 +104,9 @@ export function syncDialog({ onChange } = {}) {
   const form = dlg.querySelector('form');
   const status = dlg.querySelector('.ai-status');
   const say = (text, bad) => { status.dataset.kind = bad ? 'bad' : ''; status.textContent = text; };
-  const done = () => { close(); rerender(); if (onChange) onChange(); };
+  const stopTokens = bindTokenManager(dlg);
+  const done = () => { stopTokens(); close(); rerender(); if (onChange) onChange(); };
+  dlg.addEventListener('close', stopTokens, { once: true });
 
   if (google) {
     const cell = (k) => dlg.querySelector(`[data-d=${k}]`);

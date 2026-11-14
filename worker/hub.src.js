@@ -196,12 +196,23 @@ async function sha(text) {
 }
 
 async function who(env, token) {
-  if (hasToken(env, token)) return { env: ownerEnv(env), owner: true, email: '', sessKey: '' };
+  const owner = await ownerAccess(env, token);
+  if (owner) return owner;
   if (!token || !env.VESPER) return null;
   const key = 'sess:' + (await sha(token));
   const sess = await env.VESPER.get(key, 'json');
   if (!sess || sess.exp < Date.now()) return null;
   return { env: sess.owner ? ownerEnv(env) : userEnv(env, sess.sub), owner: !!sess.owner, email: sess.email || '', sessKey: key };
+}
+
+async function ownerAccess(env, token) {
+  if (hasToken(env, token)) return { env: ownerEnv(env), owner: true, email: '', sessKey: '', tokenKind: 'master' };
+  if (/^vnt_[0-9a-f]{64}$/.test(String(token || ''))) {
+    try {
+      if (await accessOperation(env, 'check', { token })) return { env: ownerEnv(env), owner: true, email: '', sessKey: '', tokenKind: 'named' };
+    } catch (e) { return null; } // Fail closed if the authority/binding is unavailable.
+  }
+  return null;
 }
 
 const gAccessCache = new Map();   // short-lived Google access tokens, per person
@@ -679,11 +690,28 @@ function cleanSettings(x) {
 
 async function accountRoutes(request, ctx, origin, path) {
   const env = ctx.env;
+  if (path === '/me/tokens' || path.startsWith('/me/tokens/')) {
+    if (!ctx.owner || ctx.tokenKind === 'named') return json(403, { error: 'Use APP_TOKEN or the signed-in owner account to manage access tokens.' }, origin);
+    const respond = (code, body) => { const response = json(code, body, origin); response.headers.set('Cache-Control', 'no-store'); return response; };
+    try {
+      if (path === '/me/tokens' && request.method === 'GET') return respond(200, { tokens: await accessOperation(env, 'list') });
+      if (path === '/me/tokens' && request.method === 'POST') {
+        const text = await request.text();
+        if (text.length > 2000) return respond(413, { error: 'too large' });
+        let body; try { body = JSON.parse(text); } catch (e) { return respond(400, { error: 'invalid JSON' }); }
+        return respond(201, await accessOperation(env, 'create', { label: body?.label }));
+      }
+      const revoke = path.match(/^\/me\/tokens\/([0-9a-f]{64})\/revoke$/);
+      if (revoke && request.method === 'POST') return respond(await accessOperation(env, 'revoke', { id: revoke[1] }) ? 200 : 404, { revoked: true });
+      return respond(405, { error: 'Use GET/POST on /me/tokens, or POST /me/tokens/<id>/revoke.' });
+    } catch (e) { return respond(400, { error: e.message }); }
+  }
   if (path === '/me' && request.method === 'GET') {
     const drive = await env.VESPER.get('drive', 'json');
-    return json(200, { email: ctx.email, owner: ctx.owner, drive: { connected: !!(drive && drive.refresh), last: (drive && drive.last) || 0 } }, origin);
+    return json(200, { email: ctx.email, owner: ctx.owner, manageTokens: ctx.owner && ctx.tokenKind !== 'named', drive: { connected: !!(drive && drive.refresh), last: (drive && drive.last) || 0 } }, origin);
   }
   if (path === '/me/mcp-link') {
+    if (ctx.tokenKind === 'named' && request.method === 'POST') return json(403, { error: 'A named token cannot mint or replace access credentials.' }, origin);
     const old = await env.VESPER.get('mcplink', 'json');
     if (request.method === 'GET') return json(200, { exists: !!old }, origin);
     if (request.method !== 'POST') return json(405, { error: 'use GET or POST' }, origin);
@@ -758,9 +786,10 @@ export default {
     }
     const m = path.match(/^\/mcp(?:\/(.+))?$/);
     if (m) {
-      if (!hasToken(env, m[1] ? decodeURIComponent(m[1]) : bearer(request))) return json(401, { error: 'bad token' });
+      const ctx = await ownerAccess(env, m[1] ? decodeURIComponent(m[1]) : bearer(request));
+      if (!ctx) return json(401, { error: 'bad token' });
       if (!env.VESPER) return json(500, { error: 'KV binding VESPER is not set on the Worker' });
-      return mcp(request, ownerEnv(env));
+      return mcp(request, ctx.env);
     }
 
     // Google sends the person back here after sign-in. It carries no token; a one-time state in the address protects it.
@@ -772,7 +801,7 @@ export default {
     // The app: only from allowed origins.
     const origin = request.headers.get('Origin') || '';
     const extra = String(env.ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean);
-    const known = ALLOWED_ORIGINS.includes(origin) || extra.includes(origin);
+    const known = origin === url.origin || ALLOWED_ORIGINS.includes(origin) || extra.includes(origin);
     // Browsers leave the Origin header off for same-site GET requests; the token below still protects those.
     if (origin && !known) return json(403, { error: 'origin not allowed' });
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(origin) });

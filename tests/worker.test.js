@@ -661,6 +661,13 @@ await test('Node server accepts authenticated hub calls and never serves data or
     assert.equal((await request('/sync')).status, 401);
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
     assert.equal((await request('/sync', { headers })).status, 200);
+    const createdTokenResponse = await request('/me/tokens', { method: 'POST', headers: { ...headers, Origin: url }, body: JSON.stringify({ label: 'HTTP phone' }) });
+    assert.equal(createdTokenResponse.status, 201);
+    const createdToken = await createdTokenResponse.json();
+    const namedHeaders = { ...headers, Authorization: `Bearer ${createdToken.token}` };
+    assert.equal((await request('/sync', { headers: namedHeaders })).status, 200);
+    assert.equal((await request(`/me/tokens/${createdToken.id}/revoke`, { method: 'POST', headers, body: '{}' })).status, 200);
+    assert.equal((await request('/sync', { headers: namedHeaders })).status, 401);
     const rpc = (id, name) => request('/mcp', {
       method: 'POST', headers,
       body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'vesper_create_project', arguments: { name } } }),
@@ -806,6 +813,131 @@ await test('overview: connector filters, compact JSON and project counts', async
   assert.equal(raw.split('\n').filter((line) => line.startsWith('{"id"')).length, 2);
   const listed = txt(await tool('vesper_list_projects', {})).find((p) => p.id === project.id);
   assert.deepEqual(listed, { id: project.id, name: project.name, tasks: 2 });
+});
+
+await test('tokens: create once, hash storage, use all owner endpoints, last used and revoke', async () => {
+  const records = new Map();
+  const tokenEnv = {
+    APP_TOKEN: 'master-test-only', NVIDIA_API_KEY: 'proxy-test-only',
+    VESPER: {
+      dailyBackups: true,
+      get: async (k, t) => records.has(k) ? t === 'json' ? JSON.parse(records.get(k)) : records.get(k) : null,
+      put: async (k, v) => { records.set(k, v); },
+    },
+  };
+  const req = (path, { method = 'GET', token = 'master-test-only', body } = {}) => hub.fetch(new Request('https://hub.example' + path, {
+    method, headers: { Authorization: `Bearer ${token}`, Origin: 'https://hub.example', 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }), tokenEnv);
+  assert.equal((await req('/me/tokens', { token: '' })).status, 401);
+  assert.deepEqual((await (await req('/me/tokens')).json()).tokens, []);
+  for (const label of ['', ' '.repeat(3), 'x'.repeat(81)]) assert.equal((await req('/me/tokens', { method: 'POST', body: { label } })).status, 400);
+  const created = await req('/me/tokens', { method: 'POST', body: { label: 'Claude' } });
+  assert.equal(created.status, 201); assert.equal(created.headers.get('Cache-Control'), 'no-store');
+  const named = await created.json();
+  assert.equal(/^vnt_[0-9a-f]{64}$/.test(named.token), true);
+  assert.equal(named.lastUsed, null); assert.equal(named.label, 'Claude');
+  assert.equal(JSON.stringify([...records]).includes(named.token), false);
+  assert.equal((await req('/sync', { token: named.token })).status, 200);
+  const rpcBody = { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} };
+  assert.equal((await req(`/mcp/${named.token}`, { method: 'POST', token: '', body: rpcBody })).status, 200);
+  assert.equal((await req('/mcp', { method: 'POST', token: named.token, body: rpcBody })).status, 200);
+  assert.equal((await req('/me/tokens', { token: named.token })).status, 403);
+  assert.equal((await req('/me/tokens', { token: named.token, method: 'POST', body: { label: 'Bypass' } })).status, 403);
+  assert.equal((await req('/me/mcp-link', { token: named.token, method: 'POST', body: {} })).status, 403);
+  const listed = (await (await req('/me/tokens')).json()).tokens;
+  assert.equal(listed[0].label, 'Claude'); assert.ok(listed[0].lastUsed >= named.created);
+  assert.equal(JSON.stringify(listed).includes(named.token), false);
+  const originalFetch = globalThis.fetch;
+  let upstreams = 0;
+  globalThis.fetch = async () => { upstreams++; return new Response('{"choices":[]}'); };
+  try {
+    const ai = { model: 'test-model', messages: [{ role: 'user', content: 'Test' }] };
+    assert.equal((await req('/v1/chat/completions', { method: 'POST', token: named.token, body: ai })).status, 200);
+    assert.equal((await req('/chat/completions', { method: 'POST', token: named.token, body: ai })).status, 200);
+    assert.equal((await req(`/me/tokens/${named.id}/revoke`, { method: 'POST', body: {} })).status, 200);
+    for (const path of ['/sync', `/mcp/${named.token}`, '/mcp', '/v1/chat/completions', '/chat/completions']) {
+      assert.equal((await req(path, { method: path === '/sync' ? 'GET' : 'POST', token: named.token, body: path === '/sync' ? undefined : path.includes('completions') ? ai : rpcBody })).status, 401);
+    }
+    assert.equal((await req('/sync', { method: 'PUT', token: named.token, body: { state: { projects: [], decks: [] } } })).status, 401);
+    assert.equal(upstreams, 2);
+    assert.equal((await req('/sync')).status, 200);
+    assert.equal((await req('/mcp', { method: 'POST', body: rpcBody })).status, 200);
+    assert.equal((await req('/v1/chat/completions', { method: 'POST', body: ai })).status, 200);
+    assert.equal((await (await req('/me/tokens')).json()).tokens[0].revoked > 0, true);
+  } finally { globalThis.fetch = originalFetch; }
+  const parallel = await Promise.all(['Phone', 'Laptop'].map((label) => req('/me/tokens', { method: 'POST', body: { label } })));
+  assert.ok(parallel.every((r) => r.status === 201));
+  assert.equal((await (await req('/me/tokens')).json()).tokens.length, 3);
+});
+
+await test('tokens: last used advances and revocation cannot be undone by late usage writes', async () => {
+  const { createAccessToken, authenticateAccessToken, revokeAccessToken, listAccessTokens } = await import('../worker/access-tokens.js');
+  const records = new Map();
+  const kv = {
+    get: async (k, t) => records.has(k) ? t === 'json' ? JSON.parse(records.get(k)) : records.get(k) : null,
+    put: async (k, v) => { records.set(k, v); },
+  };
+  const token = await createAccessToken(kv, 'Race');
+  await authenticateAccessToken(kv, token.token);
+  const first = (await listAccessTokens(kv))[0].lastUsed;
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  await authenticateAccessToken(kv, token.token);
+  assert.ok((await listAccessTokens(kv))[0].lastUsed > first);
+  await Promise.all([authenticateAccessToken(kv, token.token), revokeAccessToken(kv, token.id), authenticateAccessToken(kv, token.token)]);
+  assert.equal(await authenticateAccessToken(kv, token.token), false);
+  const stale = JSON.parse(records.get(`access:${token.id}`)); stale.revoked = null;
+  records.set(`access:${token.id}`, JSON.stringify(stale));
+  assert.equal(await authenticateAccessToken(kv, token.token), false);
+});
+
+await test('tokens: Google users retain their isolated data and cannot administer owner tokens', async () => {
+  const token = 'google-isolation-fixture';
+  const hash = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))).toString('hex');
+  kv.set(`sess:${hash}`, JSON.stringify({ sub: 'isolation-fixture', email: 'fixture@example.invalid', owner: false, exp: Date.now() + 60000 }));
+  const response = await call('/me/tokens', { headers: as(token) });
+  assert.equal(response.status, 403);
+  const result = await call('/sync', { headers: as(token) });
+  assert.equal(result.status, 200);
+  assert.deepEqual((await result.json()).state.projects, []);
+});
+
+await test('tokens: separate Worker regions use one authority, including after its restart', async () => {
+  const { NamedAccessAuthority } = await import('../worker/vesper-hub.js');
+  const records = new Map();
+  const storage = { get: async (key) => records.get(key), put: async (key, value) => { records.set(key, value); } };
+  let authority = new NamedAccessAuthority({ storage });
+  const namespace = {
+    idFromName: (name) => { assert.equal(name, 'vesper-owner-access'); return name; },
+    get: () => ({ fetch: (req) => authority.fetch(req) }),
+  };
+  const staleKV = () => ({ get: async () => null, put: async () => {} });
+  const a = { APP_TOKEN: 'test-master', VESPER: staleKV(), ACCESS_TOKENS: namespace };
+  const b = { APP_TOKEN: 'test-master', VESPER: staleKV(), ACCESS_TOKENS: namespace };
+  const req = (env, route, token = 'test-master', body) => hub.fetch(new Request(`https://hub.example${route}`, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }), env);
+  const made = await req(a, '/me/tokens', 'test-master', { label: 'Multi-region' });
+  assert.equal(made.status, 201);
+  const named = await made.json();
+  assert.equal((await req(b, '/sync', named.token)).status, 200);
+  assert.ok((await (await req(a, '/me/tokens')).json()).tokens[0].lastUsed);
+  assert.equal((await req(a, `/me/tokens/${named.id}/revoke`, 'test-master', {})).status, 200);
+  assert.equal((await req(b, '/sync', named.token)).status, 401);
+  authority = new NamedAccessAuthority({ storage });
+  assert.equal((await req(b, '/sync', named.token)).status, 401);
+  assert.equal(JSON.stringify([...records]).includes(named.token), false);
+  const unbound = { APP_TOKEN: 'test-master', VESPER: staleKV() };
+  assert.equal((await req(unbound, '/sync', named.token)).status, 401);
+  assert.equal((await req(unbound, '/sync')).status, 200);
+  const setup = await req(unbound, '/me/tokens');
+  assert.equal(setup.status, 400);
+  assert.ok((await setup.json()).error.includes('ACCESS_TOKENS'));
+  b.ACCESS_TOKENS = { ...namespace, get: () => { throw new Error('Unavailable'); } };
+  assert.equal((await req(b, '/sync', named.token)).status, 401);
+  assert.equal((await req(b, '/sync')).status, 200);
 });
 
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);

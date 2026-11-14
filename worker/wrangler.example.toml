@@ -1,0 +1,17 @@
+# Example only: merge these bindings/migration into your existing Worker config.
+# Keep your existing namespace id, variables, routes and secrets.
+name = "vesper-hub"
+main = "vesper-hub.js"
+compatibility_date = "2026-11-01"
+
+[[kv_namespaces]]
+binding = "VESPER"
+id = "YOUR_EXISTING_KV_NAMESPACE_ID"
+
+[[durable_objects.bindings]]
+name = "ACCESS_TOKENS"
+class_name = "NamedAccessAuthority"
+
+[[migrations]]
+tag = "named-access-v1"
+new_sqlite_classes = ["NamedAccessAuthority"]

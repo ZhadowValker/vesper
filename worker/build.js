@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const parts = ['js/framework.js', 'js/task-status.js', 'js/task-meta.js', 'js/organize.js', 'js/overview.js', 'js/ai/questions.js', 'js/ai/steps.js', 'js/ai/apply.js', 'js/merge.js'];
+const parts = ['js/framework.js', 'js/task-status.js', 'js/task-meta.js', 'js/organize.js', 'js/overview.js', 'js/ai/questions.js', 'js/ai/steps.js', 'js/ai/apply.js', 'js/merge.js', 'worker/access-tokens.js'];
 
 const strip = (src) => src
   .split('\n')
@@ -22,6 +22,7 @@ const out = [
   ...parts.map((p) => `// ---- from ${p} ----\n${strip(fs.readFileSync(path.join(root, p), 'utf8')).trim()}\n`),
   '// ---- hub ----',
   `const ALLOWED_ORIGINS${rest.join('\nconst ALLOWED_ORIGINS')}`,
+  'export { NamedAccessAuthority };',
 ].join('\n');
 fs.writeFileSync(path.join(root, 'worker/vesper-hub.js'), out);
 console.log(`wrote worker/vesper-hub.js (${out.length} bytes)`);

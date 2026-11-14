@@ -98,3 +98,48 @@ A free Cloudflare Worker (`worker/vesper-hub.js`, setup in `worker/README.md`) a
 - **Send elsewhere**: copy, download or share any task or project as Markdown (Notion, Docs, GitHub, email).
 - **Add to calendar**: from a task, open Google Calendar with the entry filled in, or download an .ics file. With the optional Google link on the hub (`worker/README.md`), Vesper and Claude add and move events by themselves.
 - **Sign in with Google** (optional): each person gets a private space, with a copy saved in their own Google Drive. See `worker/README.md`.
+
+### Organizing tasks and connector tools
+
+Task dashboards now have **Rename task** and **Move task**. A project dashboard has
+**Rename project**, task **Up/Down** controls, and the main dashboard has project
+**Up/Down** controls. Choose **Manual order** to follow the saved order; priority,
+due-date and recently-changed sorting remain available as browser-only preferences.
+Names, project membership and each item's order have independent merge clocks.
+Older saved data still works. Concurrent equal ranks use the item id as a stable
+tie-breaker; no tasks are removed or duplicated to resolve an order conflict.
+
+The in-app AI supports `rename`, `move_task` and `reorder` actions. Claude has:
+
+- `vesper_rename`: exactly one `task` or `project`, plus `name`.
+- `vesper_move_task`: `task` and destination `project`.
+- `vesper_reorder`: `kind` (`projects` or `tasks`), and `project` for tasks.
+  Supply either every item id in `order`, or an `item` id and 1-based `position`.
+- `vesper_list_projects`: only project ids, names and task counts.
+- `vesper_overview`: optional `query` (project/task names), `project` (id or exact
+  name), `stage`, `status`, `priority`, `dueBefore` and `limit` (default 25).
+  Output stays valid grouped JSON for existing clients, with one compact JSON
+  line per task: name, project, stage, priority, due date, filled steps and any
+  check note. Filters combine. Active means started and unfinished; `not started`
+  and `finished` are separate statuses. `dueBefore` is an exclusive cutoff.
+
+### Separate tokens for devices and Claude
+
+Save the owner's `APP_TOKEN` in **Sync and Claude**, then reopen that screen and
+use **Named access tokens**. Give each token a label, create it, and copy its value
+before closing. It is shown only once. The list shows label, created time, last use
+and revoked status. **Revoke** ends that token's access without changing the
+master key or other tokens. Never share a token or connector address publicly.
+
+Use a named token anywhere you previously used `APP_TOKEN`: sync settings,
+`https://your-hub/mcp/<token>`, or the owner's AI proxy key. Storage contains only
+SHA-256 hashes and metadata, never recoverable raw token values. Named tokens
+cannot manage credentials or mint replacement Google-style connector links.
+Google users keep their existing private spaces and separate `/mcp/u/…` links.
+
+Node hosting needs no new setup. On Cloudflare, named tokens require the
+`ACCESS_TOKENS` Durable Object binding and migration described in
+[`worker/README.md`](worker/README.md). This provides immediate authoritative
+revocation across regions instead of relying on eventually consistent KV.
+Without the binding, master-key and Google access still work; named-token
+operations fail closed with a setup message. Nothing is deployed automatically.

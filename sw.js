@@ -12,6 +12,7 @@ const ASSETS = [
   'js/task-status.js',
   'js/task-meta.js',
   'js/organize.js',
+  'js/token-ui.js',
   'js/views/organize-ui.js',
   'js/views/task-actions.js',
   'js/store.js',
