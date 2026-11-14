@@ -729,4 +729,31 @@ test('organize: project rename/order and task move/note edits merge across devic
   assert.ok(sameState(merged, mergeStates(merged, a)));
 });
 
+const { filterOverview, compactOverview } = await import('../js/overview.js');
+test('overview: all filters combine, dates are exclusive and output is one task per line', () => {
+  const state = { projects: [{ id: 'p', name: 'House' }, { id: 'q', name: 'Office' }], decks: [
+    { id: 'a', projectId: 'p', title: 'Paint', priority: 'P1', due: '2027-01-01', reached: 1, slide: firstSlideOf('vision') },
+    { id: 'b', projectId: 'p', title: 'Read', reached: 0, slide: 0 },
+    { id: 'c', projectId: 'q', title: 'Write', priority: 'P2', due: '2027-02-01', reached: 2, slide: firstSlideOf('research'), finished: 1 },
+  ] };
+  const ids = (options) => filterOverview(state, options).flatMap((g) => g.decks.map((d) => d.id));
+  assert.deepEqual(ids({ query: 'HOUSE' }), ['a', 'b']);
+  assert.deepEqual(ids({ query: 'paint' }), ['a']);
+  assert.deepEqual(ids({ project: 'q' }), ['c']); assert.deepEqual(ids({ project: 'office' }), ['c']);
+  assert.deepEqual(ids({ stage: 'research' }), ['c']);
+  assert.deepEqual(ids({ status: 'active' }), ['a']);
+  assert.deepEqual(ids({ status: 'not started' }), ['b']);
+  assert.deepEqual(ids({ status: 'finished' }), ['c']);
+  assert.deepEqual(ids({ priority: 'none' }), ['b']);
+  assert.deepEqual(ids({ dueBefore: '2027-02-01' }), ['a']);
+  assert.deepEqual(ids({ project: 'p', stage: 'vision', priority: 'P1', status: 'active', query: 'Paint', dueBefore: '2027-01-02', limit: 1 }), ['a']);
+  assert.deepEqual(ids({ limit: 1 }), ['a']);
+  for (const bad of [{ limit: 0 }, { limit: 1.5 }, { status: 'bad' }, { stage: 'bad' }, { priority: 'bad' }, { dueBefore: '2027-02-29' }]) assert.throws(() => ids(bad));
+  const output = compactOverview(filterOverview(state), (d) => ({ title: d.title, project: d.projectId }));
+  assert.equal(output.split('\n').filter((line) => line.startsWith('{"title"')).length, 3);
+  assert.equal(JSON.parse(output).length, 2);
+  const many = { projects: [{ id: 'p', name: 'P' }], decks: Array.from({ length: 30 }, (_, i) => ({ id: String(i), projectId: 'p', title: String(i) })) };
+  assert.equal(filterOverview(many).flatMap((g) => g.decks).length, 25);
+});
+
 console.log(`\n${passed} tests passed`);

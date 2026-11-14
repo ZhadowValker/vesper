@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const parts = ['js/framework.js', 'js/task-status.js', 'js/task-meta.js', 'js/organize.js', 'js/ai/questions.js', 'js/ai/steps.js', 'js/ai/apply.js', 'js/merge.js'];
+const parts = ['js/framework.js', 'js/task-status.js', 'js/task-meta.js', 'js/organize.js', 'js/overview.js', 'js/ai/questions.js', 'js/ai/steps.js', 'js/ai/apply.js', 'js/merge.js'];
 
 const strip = (src) => src
   .split('\n')

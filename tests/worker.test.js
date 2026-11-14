@@ -787,5 +787,26 @@ await test('organize: connector renames, moves and orders projects and tasks', a
   assert.equal(txt(await tool('vesper_reorder', { kind: 'tasks', project: 'Organize A', order: [] })).changed.length, 0);
 });
 
+await test('overview: connector filters, compact JSON and project counts', async () => {
+  const project = { id: 'filter-p', name: 'Filter project', updated: 1 };
+  const state = { projects: [project], decks: [
+    { id: 'filter-a', projectId: project.id, title: 'Find me', updated: 1, reached: 1, slide: 1, notes: {}, ticks: {}, selah: {}, priority: 'P1', due: '2027-01-01' },
+    { id: 'filter-b', projectId: project.id, title: 'Other', updated: 1, reached: 0, slide: 0, notes: {}, ticks: {}, selah: {} },
+  ] };
+  await call('/sync', { method: 'PUT', headers: app, body: { state } });
+  for (const filters of [{ query: 'Find me' }, { query: 'FILTER PROJECT', priority: 'P1' }, { project: project.id, status: 'active' }, { project: 'Filter project', stage: 'vision', dueBefore: '2027-01-02' }]) {
+    const rows = txt(await tool('vesper_overview', filters)).flatMap((p) => p.tasks);
+    assert.equal(rows.length, 1); assert.equal(rows[0].id, 'filter-a');
+  }
+  assert.equal(txt(await tool('vesper_overview', { project: project.id, status: 'not started', priority: 'none' }))[0].tasks[0].id, 'filter-b');
+  assert.deepEqual(txt(await tool('vesper_overview', { project: project.id, dueBefore: '2027-01-01' })), []);
+  assert.equal(txt(await tool('vesper_overview', { project: project.id, limit: 1 }))[0].tasks.length, 1);
+  assert.equal((await tool('vesper_overview', { limit: -1 })).isError, true);
+  const raw = (await tool('vesper_overview', { project: project.id })).content[0].text;
+  assert.equal(raw.split('\n').filter((line) => line.startsWith('{"id"')).length, 2);
+  const listed = txt(await tool('vesper_list_projects', {})).find((p) => p.id === project.id);
+  assert.deepEqual(listed, { id: project.id, name: project.name, tasks: 2 });
+});
+
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);
 process.exit(failed ? 1 : 0);

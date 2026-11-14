@@ -493,7 +493,8 @@ const str = (description) => ({ type: 'string', description });
 
 const TOOLS = [
   { name: 'vesper_framework', description: 'The Vesper framework: five stages (Vision, Research, Plan, Execute, Review), their slides, steps, the question for each step, and the Selah pause question per stage. Read this first.', inputSchema: obj({}), annotations: { readOnlyHint: true } },
-  { name: 'vesper_overview', description: 'List all projects and tasks with where each task is, how many of its 34 steps are filled, and which Selah pauses the person has passed.', inputSchema: obj({}), annotations: { readOnlyHint: true } },
+  { name: 'vesper_overview', description: 'Compact JSON, one line per task. Filter by project/task names, project id/name, current stage, status, priority or an exclusive due-date cutoff. Default 25 tasks; active means started and unfinished.', inputSchema: obj({ query: str('Matches project or task names'), project: str('Project id or exact name'), stage: { type: 'string', enum: ['vision', 'research', 'plan', 'execute', 'review'] }, status: { type: 'string', enum: ['active', 'finished', 'not started'] }, priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4', 'none'] }, dueBefore: { type: 'string', format: 'date' }, limit: { type: 'integer', minimum: 1, maximum: 1000, default: 25 } }), annotations: { readOnlyHint: true } },
+  { name: 'vesper_list_projects', description: 'Only project ids, names and task counts, in manual order.', inputSchema: obj({}), annotations: { readOnlyHint: true } },
   { name: 'vesper_get_task', description: 'Everything written in one task: every step with its note and whether it is ticked.', inputSchema: obj({ task: str('Task id or exact title') }, ['task']), annotations: { readOnlyHint: true } },
   { name: 'vesper_next_questions', description: 'The next empty steps of a task, in order, each with the plain question to ask the person. Use this to interview them, then save each answer with vesper_set_note.', inputSchema: obj({ task: str('Task id or exact title'), limit: { type: 'integer', description: 'How many (default 5, max 20)' } }, ['task']), annotations: { readOnlyHint: true } },
   { name: 'vesper_create_project', description: 'Create a project (a group of tasks).', inputSchema: obj({ name: str('Project name') }, ['name']) },
@@ -529,8 +530,10 @@ async function callTool(env, name, a) {
     })));
   }
   if (name === 'vesper_overview') {
-    return text(state.projects.map((p) => ({ project: p.name, id: p.id, tasks: state.decks.filter((d) => d.projectId === p.id).map((d) => taskSummary(state, d)) })));
+    try { return text(compactOverview(filterOverview(state, a), (d) => taskSummary(state, d))); }
+    catch (e) { return fail(e.message); }
   }
+  if (name === 'vesper_list_projects') return text(orderedItems(state.projects).map((p) => ({ id: p.id, name: p.name, tasks: state.decks.filter((d) => d.projectId === p.id).length })));
   if (name === 'vesper_get_task' || name === 'vesper_next_questions') {
     const d = findTask(state, a.task);
     if (!d) return fail(`No task found for "${a.task}". Use vesper_overview to see the ids.`);

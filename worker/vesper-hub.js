@@ -267,6 +267,48 @@ function reorderItems(items, { order, item, position } = {}) {
 
 const appendOrder = (items) => Math.max(-1, ...items.map((x) => Number.isFinite(x.order) ? x.order : x.created || 0)) + 1;
 
+// ---- from js/overview.js ----
+// A compact, read-only view; never change data to satisfy a filter.
+function filterOverview(state, options = {}) {
+  const { query = '', project, stage, status, priority, dueBefore, limit = 25 } = options;
+  if (typeof query !== 'string') throw new Error('query must be text.');
+  if (project !== undefined && typeof project !== 'string') throw new Error('project must be an id or name.');
+  const stageMatch = stage === undefined ? null : STAGES.find((s) => s.id === String(stage).toLowerCase() || s.name.toLowerCase() === String(stage).toLowerCase());
+  if (stage !== undefined && !stageMatch) throw new Error('Unknown stage.');
+  if (status !== undefined && !['active', 'finished', 'not started'].includes(status)) throw new Error('Status must be active, finished, or not started.');
+  if (priority !== undefined && !['none', ...PRIORITIES].includes(priority)) throw new Error('Unknown priority.');
+  if (dueBefore !== undefined && !validDue(dueBefore)) throw new Error('dueBefore must be a calendar date YYYY-MM-DD.');
+  if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('limit must be an integer from 1 to 1000.');
+  const q = query.trim().toLowerCase();
+  let left = limit;
+  const groups = [];
+  for (const p of orderedItems(state.projects)) {
+    if (project !== undefined && p.id !== project && p.name.toLowerCase() !== project.toLowerCase()) continue;
+    const matchesProject = p.name.toLowerCase().includes(q);
+    const decks = orderedItems(state.decks.filter((d) => d.projectId === p.id)).filter((d) => {
+      if (q && !matchesProject && !d.title.toLowerCase().includes(q)) return false;
+      if (stageMatch && SLIDES[d.slide]?.stage?.id !== stageMatch.id) return false;
+      const taskStatus = d.finished ? 'finished' : (d.reached || 0) === 0 ? 'not started' : 'active';
+      if (status && status !== taskStatus) return false;
+      if (priority && (priority === 'none' ? !!d.priority : d.priority !== priority)) return false;
+      if (dueBefore && (!validDue(d.due) || d.due >= dueBefore)) return false;
+      return true;
+    }).slice(0, left);
+    left -= decks.length;
+    // Keep empty project groups for old clients when no task filters were given.
+    if (decks.length || (!q && !stage && !status && !priority && !dueBefore && left > 0)) groups.push({ project: p, decks });
+    if (left === 0) break;
+  }
+  return groups;
+}
+
+function compactOverview(groups, summarize) {
+  // Valid JSON for existing clients, with exactly one JSON line per task.
+  return '[\n' + groups.map(({ project, decks }) =>
+    `{"project":${JSON.stringify(project.name)},"id":${JSON.stringify(project.id)},"tasks":[\n${decks.map((d) => JSON.stringify(summarize(d))).join(',\n')}\n]}`
+  ).join(',\n') + '\n]';
+}
+
 // ---- from js/ai/questions.js ----
 // One plain-language question for every step, in framework order. The interview asks these,
 // so it works even when the AI model is weak or offline. Key: "<slide key>#<step number>".
@@ -1121,7 +1163,8 @@ const str = (description) => ({ type: 'string', description });
 
 const TOOLS = [
   { name: 'vesper_framework', description: 'The Vesper framework: five stages (Vision, Research, Plan, Execute, Review), their slides, steps, the question for each step, and the Selah pause question per stage. Read this first.', inputSchema: obj({}), annotations: { readOnlyHint: true } },
-  { name: 'vesper_overview', description: 'List all projects and tasks with where each task is, how many of its 34 steps are filled, and which Selah pauses the person has passed.', inputSchema: obj({}), annotations: { readOnlyHint: true } },
+  { name: 'vesper_overview', description: 'Compact JSON, one line per task. Filter by project/task names, project id/name, current stage, status, priority or an exclusive due-date cutoff. Default 25 tasks; active means started and unfinished.', inputSchema: obj({ query: str('Matches project or task names'), project: str('Project id or exact name'), stage: { type: 'string', enum: ['vision', 'research', 'plan', 'execute', 'review'] }, status: { type: 'string', enum: ['active', 'finished', 'not started'] }, priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4', 'none'] }, dueBefore: { type: 'string', format: 'date' }, limit: { type: 'integer', minimum: 1, maximum: 1000, default: 25 } }), annotations: { readOnlyHint: true } },
+  { name: 'vesper_list_projects', description: 'Only project ids, names and task counts, in manual order.', inputSchema: obj({}), annotations: { readOnlyHint: true } },
   { name: 'vesper_get_task', description: 'Everything written in one task: every step with its note and whether it is ticked.', inputSchema: obj({ task: str('Task id or exact title') }, ['task']), annotations: { readOnlyHint: true } },
   { name: 'vesper_next_questions', description: 'The next empty steps of a task, in order, each with the plain question to ask the person. Use this to interview them, then save each answer with vesper_set_note.', inputSchema: obj({ task: str('Task id or exact title'), limit: { type: 'integer', description: 'How many (default 5, max 20)' } }, ['task']), annotations: { readOnlyHint: true } },
   { name: 'vesper_create_project', description: 'Create a project (a group of tasks).', inputSchema: obj({ name: str('Project name') }, ['name']) },
@@ -1157,8 +1200,10 @@ async function callTool(env, name, a) {
     })));
   }
   if (name === 'vesper_overview') {
-    return text(state.projects.map((p) => ({ project: p.name, id: p.id, tasks: state.decks.filter((d) => d.projectId === p.id).map((d) => taskSummary(state, d)) })));
+    try { return text(compactOverview(filterOverview(state, a), (d) => taskSummary(state, d))); }
+    catch (e) { return fail(e.message); }
   }
+  if (name === 'vesper_list_projects') return text(orderedItems(state.projects).map((p) => ({ id: p.id, name: p.name, tasks: state.decks.filter((d) => d.projectId === p.id).length })));
   if (name === 'vesper_get_task' || name === 'vesper_next_questions') {
     const d = findTask(state, a.task);
     if (!d) return fail(`No task found for "${a.task}". Use vesper_overview to see the ids.`);
