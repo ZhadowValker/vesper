@@ -1,14 +1,17 @@
 // Take a task or project out of Vesper: as Markdown (for Notion, Drive, GitHub, email) and as calendar entries.
-import { STAGES, SLIDES, tickKey } from './framework.js';
+import { STAGES, slideFor, tickKey, quickKey, isQuick } from './framework.js';
 import { allSteps } from './ai/steps.js';
 
 export function taskMarkdown(deck, projectName = '') {
   const out = [`# ${deck.title}`];
   if (projectName) out.push(`Project: ${projectName}`);
+  if (isQuick(deck)) out.push('Mode: Quick');
   if (deck.priority) out.push(`Priority: ${deck.priority}`);
   if (deck.due) out.push(`Due: ${deck.due}`);
   for (const st of STAGES) {
     out.push('', `## ${st.name}`);
+    const quick = (deck.notes[quickKey(st)] || '').trim();
+    if (quick) out.push('', '### Quick notes', '', quick);
     for (const sub of st.subs) {
       const lines = [];
       sub.steps.forEach((text, i) => {
@@ -55,7 +58,7 @@ export function icsFile({ title, details = '', start, minutes = 30 }) {
 
 // What to suggest putting on the calendar for a task: its current slide.
 export function calendarSuggestion(deck) {
-  const sl = SLIDES[deck.slide];
+  const sl = slideFor(deck);
   const where = sl && sl.stage ? (sl.type === 'selah' ? `Selah: ${sl.stage.name}` : `${sl.stage.name}${sl.sub ? ' - ' + sl.sub.name : ''}`) : 'Work on it';
   return { title: `${deck.title}: ${where}`, details: `Vesper task "${deck.title}". ${sl && sl.type === 'selah' ? sl.stage.selah : ''}`.trim() };
 }

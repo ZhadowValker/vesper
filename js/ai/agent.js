@@ -2,7 +2,7 @@
 // and how its actions are applied to the task data. It can fill and tick steps, but it can
 // pass a Selah only with the person's answer, and delete only after they say yes.
 import { store } from '../store.js';
-import { STAGES, SLIDES } from '../framework.js';
+import { STAGES, SLIDES, slideFor, slidesFor, slidePosition, isQuick } from '../framework.js';
 import { applyActions as applyWith } from './apply.js';
 import { cleanReply, extractJSON } from './client.js';
 
@@ -38,7 +38,9 @@ REPLY FORMAT. Reply with one JSON object and nothing else:
 {"reply": "what you say to the person", "actions": [ ... ]}
 Action types (use ids from the state, or exact names):
 {"type":"create_project","name":"..."}
-{"type":"create_task","project":"<project id or name>","title":"..."}
+{"type":"create_task","project":"<project id or name>","title":"...","mode":"full"}
+Mode may be full (27 slides/34 steps) or quick (12 slides/5 stage notes). Omitted mode defaults full. Choose Quick only when the person asks for a small/quick task.
+Quick notes use slide keys vision.quick, research.quick, plan.quick, execute.quick, review.quick, with no step (or step:null). Each stage gets one notes box and still needs its Selah. Full-mode notes are retained when switching modes.
 {"type":"set_note","task":"<task id or title>","slide":"vision.why","step":0,"text":"...","mode":"append"}
   - "step" is the step number from the list above. Leave it out for the slide's general notes.
   - "mode" is "append" (default when something is already written) or "replace".
@@ -48,6 +50,7 @@ Action types (use ids from the state, or exact names):
 {"type":"loop_back","task":"...","stage":"research"}   (go back on purpose; clears Selah passes from there)
 {"type":"finish","task":"..."}  or  {"type":"reopen","task":"..."}
 {"type":"set_task","task":"...","priority":"P1","due":"2026-12-31"}
+{"type":"set_task","task":"...","mode":"quick"} switches mode without deleting any notes.
 {"type":"rename","task":"id","name":"New name"} or {"type":"rename","project":"id","name":"New name"}
 {"type":"move_task","task":"id","project":"destination id"}
 {"type":"reorder","kind":"projects","order":["project id","project id"]} or {"type":"reorder","kind":"tasks","project":"id","item":"task id","position":1}
@@ -66,17 +69,17 @@ export function stateText(focusId) {
   for (const p of projects) {
     lines.push(`- project ${p.id} "${p.name}"`);
     for (const d of store.decksOf(p.id)) {
-      const sl = SLIDES[d.slide];
-      const where = d.finished ? 'finished' : sl.stage ? `${sl.stage.name}, slide ${d.slide + 1} of ${SLIDES.length}` : 'not started';
-      lines.push(`  - task ${d.id} "${d.title}" (${where}; priority: ${d.priority || 'none'}; due: ${d.due || 'none'})${d.id === focusId ? '  <- working on this' : ''}`);
+      const sl = slideFor(d);
+      const where = d.finished ? 'finished' : sl.stage ? `${sl.stage.name}, slide ${slidePosition(d) + 1} of ${slidesFor(d).length}` : 'not started';
+      lines.push(`  - task ${d.id} "${d.title}" (${where}; mode: ${isQuick(d) ? 'quick' : 'full'}; priority: ${d.priority || 'none'}; due: ${d.due || 'none'})${d.id === focusId ? '  <- working on this' : ''}`);
     }
   }
   const f = focusId && store.deck(focusId);
   if (f) {
     lines.push('', `Notes in the task you are working on ("${f.title}"). Empty steps are marked (empty):`);
     let used = 0;
-    for (const sl of SLIDES) {
-      if (sl.type !== 'sub') continue;
+    for (const sl of slidesFor(f)) {
+      if (!['sub', 'quick'].includes(sl.type)) continue;
       const parts = sl.sub.steps.map((t, i) => {
         const v = (f.notes[`${sl.key}#${i}`] || '').trim();
         return `[${i}] ${v ? v.slice(0, 300) : '(empty)'}`;

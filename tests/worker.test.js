@@ -940,5 +940,34 @@ await test('tokens: separate Worker regions use one authority, including after i
   assert.equal((await req(b, '/sync')).status, 200);
 });
 
+await test('quick: connector creates, interviews, switches and finishes a Quick task safely', async () => {
+  await tool('vesper_create_project', { name: 'Quick connector' });
+  assert.equal(txt(await tool('vesper_create_task', { project: 'Quick connector', title: 'Quick test task', mode: 'quick' })).changed.length, 1);
+  let d = txt(await tool('vesper_get_task', { task: 'Quick test task' }));
+  assert.equal(d.mode, 'quick'); assert.equal(d.steps.length, 5); assert.equal(d.stepsFilled, '0/5');
+  const questions = txt(await tool('vesper_next_questions', { task: d.id, limit: 20 }));
+  assert.equal(questions.next.length, 5);
+  assert.equal(questions.next[0].slide, 'vision.quick'); assert.equal(questions.next[0].step, null);
+  assert.equal(txt(await tool('vesper_set_note', { task: d.id, slide: 'vision.quick', text: 'Small goal' })).changed.length, 1);
+  assert.equal(txt(await tool('vesper_get_task', { task: d.id })).stepsFilled, '1/5');
+  assert.equal(txt(await tool('vesper_next_questions', { task: d.id })).next[0].slide, 'research.quick');
+  assert.equal(txt(await tool('vesper_set_task', { task: d.id, mode: 'full' })).changed.length, 1);
+  await tool('vesper_set_note', { task: d.id, slide: 'vision.why', step: 0, text: 'Detailed reason' });
+  assert.equal(txt(await tool('vesper_get_task', { task: d.id })).steps.length, 34);
+  await tool('vesper_set_task', { task: d.id, mode: 'quick' });
+  d = txt(await tool('vesper_get_task', { task: d.id }));
+  assert.equal(d.steps[0].note, 'Small goal');
+  const overview = txt(await tool('vesper_overview', { project: 'Quick connector' }))[0].tasks[0];
+  assert.equal(overview.mode, 'quick'); assert.equal(overview.stepsFilled, '1/5'); assert.match(overview.where, /of 12/);
+  assert.equal(txt(await tool('vesper_finish', { task: d.id })).changed.length, 0);
+  for (const stage of ['vision', 'research', 'plan', 'execute', 'review']) {
+    assert.equal(txt(await tool('vesper_pass_selah', { task: d.id, stage, answer: 'Checked and ready' })).changed.length, 1);
+  }
+  assert.equal(txt(await tool('vesper_finish', { task: d.id })).changed.length, 1);
+  await tool('vesper_set_task', { task: d.id, mode: 'full' });
+  assert.equal(txt(await tool('vesper_get_task', { task: d.id })).steps[0].note, 'Detailed reason');
+  assert.equal(txt(await tool('vesper_create_task', { project: 'Quick connector', title: 'Invalid mode', mode: 'invalid' })).changed.length, 0);
+});
+
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);
 process.exit(failed ? 1 : 0);

@@ -100,6 +100,14 @@ Anyone signed in with Google can open the account dialog, press **Create my Clau
 
 ## Organization and compact connector tools
 
+Tasks also support `mode: "quick"` (12 slides, one notes box per stage) or
+`"full"` (default, original 27 slides/34 steps). Pass optional `mode` to
+`vesper_create_task`, or change it with `vesper_set_task`; switching preserves
+both formats' notes, ticks and Selahs. Overview/get-task report the mode and
+mode-specific progress. For Quick tasks, `vesper_next_questions` returns at most
+one question per stage; save the answer to the returned `<stage>.quick` slide
+with no step (or `step: null`). The same five Selahs and finish policy apply.
+
 All the original tools remain available. New tools:
 
 | Tool | Inputs |

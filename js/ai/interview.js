@@ -67,7 +67,7 @@ export function saveAnswer(deck, target, answer, reply, skipped = []) {
   const allowed = new Set([target.key, ...emptySteps(deck, skipped).map((s) => s.key)]);
   const notes = reply && Array.isArray(reply.notes) ? reply.notes : [];
   const actions = notes
-    .filter((n) => n && typeof n.text === 'string' && allowed.has(`${n.slide}#${n.step}`))
+    .filter((n) => n && typeof n.text === 'string' && allowed.has(n.step == null ? n.slide : `${n.slide}#${n.step}`))
     .map((n) => ({ type: 'set_note', task: deck.id, slide: n.slide, step: n.step, text: n.text }));
   const out = actions.length ? applyActions(actions, { focusId: deck.id }) : { changes: [], skipped: [] };
   let fallback = false;

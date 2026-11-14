@@ -768,4 +768,76 @@ test('organize: two devices moving different ranked tasks keep both ordering edi
   assert.ok(sameState(merged, mergeStates(b, a)));
 });
 
+const { slideView: quickSlideView } = await import('../js/views/slide.js');
+test('quick: 12 slides, canonical navigation and old full tasks remain unchanged', () => {
+  const full = { slide: 3, reached: 5, notes: {}, ticks: {}, selah: {} };
+  const quick = { ...full, mode: 'quick' };
+  assert.equal(fw.slidesFor(full).length, 27);
+  assert.equal(fw.slidesFor(quick).length, 12);
+  assert.equal(fw.slideFor(quick).key, 'vision.quick');
+  assert.equal(fw.adjacentSlide(quick, 1, 1), selahIndex('vision'));
+  assert.equal(fw.adjacentSlide(quick, selahIndex('vision'), -1), 1);
+  assert.equal(fw.adjacentSlide(quick, 0, -1), undefined);
+  assert.equal(fw.slidePosition(quick, 5), 2);
+  assert.equal(deckStatus(quick).pct, 18);
+  assert.equal(fw.stagePending(quick, STAGES[0]), 1);
+  quick.notes['vision.quick'] = 'One stage note';
+  assert.equal(fw.stagePending(quick, STAGES[0]), 0);
+  quick.selah.vision = true;
+  assert.equal(stageState(quick, STAGES[0]), 'done');
+  assert.equal(atSelah({ ...quick, slide: 10 }), true);
+});
+
+test('quick: agent creates and switches both ways without deleting full or Quick notes', () => {
+  store.reset(); const p = store.addProject('Quick tests');
+  const result = applyActions([{ type: 'create_task', project: p.id, title: 'Small task', mode: 'quick' }]);
+  assert.equal(result.skipped.length, 0);
+  const d = store.allDecks()[0];
+  assert.equal(d.mode, 'quick');
+  applyActions([{ type: 'set_note', task: d.id, slide: 'vision.quick', text: 'My stage summary' }]);
+  d.notes['vision.why#0'] = 'Full note'; d.ticks['vision.why:0'] = true; store.save(d);
+  const content = structuredClone({ notes: d.notes, ticks: d.ticks, selah: d.selah, slide: d.slide, reached: d.reached });
+  for (const mode of ['full', 'quick', 'full']) {
+    assert.equal(applyActions([{ type: 'set_task', task: d.id, mode }]).skipped.length, 0);
+    assert.equal(d.mode, mode);
+    assert.deepEqual({ notes: d.notes, ticks: d.ticks, selah: d.selah, slide: d.slide, reached: d.reached }, content);
+  }
+  assert.equal(applyActions([{ type: 'set_task', task: d.id, mode: 'invalid' }]).changes.length, 0);
+  assert.equal(applyActions([{ type: 'create_task', project: p.id, title: 'Invalid', mode: 'invalid' }]).changes.length, 0);
+  const html = quickSlideView(d.id, '1').html;
+  assert.match(html, /Quick notes · read only/);
+  assert.match(html, /My stage summary/);
+  assert.match(html, /Full note/);
+});
+
+test('quick: progress, interview, export and finish policy use five stage notes and all Selahs', () => {
+  store.reset(); const p = store.addProject('Quick'); const d = store.addDeck(p.id, 'Tiny', 'quick');
+  assert.deepEqual(iv.progress(d), { filled: 0, total: 5 });
+  const target = iv.emptySteps(d)[0];
+  assert.equal(target.key, 'vision.quick'); assert.equal(target.step, null);
+  const saved = iv.saveAnswer(d, target, 'My one small goal', null);
+  assert.equal(saved.fallback, true);
+  assert.deepEqual(iv.progress(d), { filled: 1, total: 5 });
+  assert.match(taskMarkdown(d, p.name), /Mode: Quick/);
+  assert.match(taskMarkdown(d), /My one small goal/);
+  assert.equal(applyActions([{ type: 'finish', task: d.id }]).changes.length, 0);
+  for (const stage of STAGES) applyActions([{ type: 'pass_selah', task: d.id, answer: 'I checked this stage', stage: stage.id }]);
+  assert.equal(d.slide, 26);
+  assert.equal(applyActions([{ type: 'finish', task: d.id }]).changes.length, 1);
+  assert.equal(deckStatus(d).pct, 100);
+});
+
+test('quick: mode and separate stage notes merge independently of another device’s Full notes', () => {
+  const base = { id: 'q', projectId: 'p', title: 'Q', mode: 'full', updated: 1, notes: {}, ticks: {}, selah: {}, slide: 3, reached: 3 };
+  const a = structuredClone(base), b = structuredClone(base);
+  a.mode = 'quick'; a.notes['vision.quick'] = 'Quick'; stampDeck(a, base, 10);
+  b.notes['vision.why#0'] = 'Full'; b.slide = 5; stampDeck(b, base, 20);
+  const state = (d) => ({ projects: [{ id: 'p', name: 'P', updated: 1 }], decks: [d] });
+  const merged = mergeStates(state(a), state(b)).decks[0];
+  assert.equal(merged.mode, 'quick'); assert.equal(merged.slide, 5);
+  assert.equal(merged.notes['vision.quick'], 'Quick'); assert.equal(merged.notes['vision.why#0'], 'Full');
+  const c = structuredClone(merged); c.mode = 'full'; stampDeck(c, merged, 30);
+  assert.equal(mergeStates(state(merged), state(c)).decks[0].mode, 'full');
+});
+
 console.log(`\n${passed} tests passed`);

@@ -2,7 +2,7 @@ import { sortFilterTasks, getTaskPrefs } from '../task-meta.js';
 import { orderedItems } from '../organize.js';
 import { orderButtons, bindOrganize } from './organize-ui.js';
 import { store } from '../store.js';
-import { STAGES, SLIDES, deckStatus, atSelah } from '../framework.js';
+import { STAGES, SLIDES, deckStatus, atSelah, slidePosition, slidesFor } from '../framework.js';
 import { esc, ask, confirmBox, notice, ICON, $ } from '../util.js';
 import { go, rerender } from '../nav.js';
 import { resumeButton, stageBar, projectBar, taskChips, taskListControls, bindTaskListControls } from './parts.js';
@@ -25,7 +25,7 @@ export function home() {
   const prefs = getTaskPrefs();
   const taskCards = sortFilterTasks(decks, prefs).map((d) => {
     const st = deckStatus(d), p = store.project(d.projectId);
-    return `<a class="item" href="#/d/${d.id}"><div class="row between"><span class="t">${esc(d.title)}</span><span class="chip ${st.stageId ? 's-' + st.stageId : st.tone}">${esc(st.label)}</span></div><span class="sub">${esc(p?.name || '')}</span>${taskChips(d)}${stageBar(d.finished ? SLIDES.length - 1 : d.reached)}</a>`;
+    return `<a class="item" href="#/d/${d.id}"><div class="row between"><span class="t">${esc(d.title)}</span><span class="chip ${st.stageId ? 's-' + st.stageId : st.tone}">${esc(st.label)}</span></div><span class="sub">${esc(p?.name || '')}</span>${taskChips(d)}${stageBar(d.finished ? SLIDES.length - 1 : d.reached, d)}</a>`;
   }).join('');
 
   const cont = last ? (() => {
@@ -35,8 +35,8 @@ export function home() {
       <p class="sub">${esc(project ? project.name : '')}</p>
       <p class="hero-t">${esc(last.title)}</p>
       ${taskChips(last)}
-      <p class="sub hero-s">${esc(st.label)}, slide ${last.slide + 1} of ${SLIDES.length}, ${st.pct}% done</p>
-      ${stageBar(last.slide)}
+      <p class="sub hero-s">${esc(st.label)}, slide ${slidePosition(last) + 1} of ${slidesFor(last).length}, ${st.pct}% done</p>
+      ${stageBar(last.slide, last)}
       ${resumeButton(last, project, 'block', 'tree')}
     </div>`;
   })() : '';

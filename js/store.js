@@ -60,9 +60,11 @@ export const store = {
     state.projects = state.projects.filter((p) => p.id !== id);
     write();
   },
-  addDeck(projectId, title) {
+  addDeck(projectId, title, mode = 'full') {
+    if (!['full', 'quick'].includes(mode)) throw new Error('Mode must be full or quick.');
     const d = {
       id: uid(), projectId, title,
+      mode,
       order: appendOrder(state.decks.filter((d) => d.projectId === projectId)),
       created: Date.now(), updated: Date.now(),
       slide: 0, reached: 0,

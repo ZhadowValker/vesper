@@ -1,5 +1,5 @@
 import { store } from '../store.js';
-import { SLIDES, deckStatus, atSelah } from '../framework.js';
+import { SLIDES, deckStatus, atSelah, slideFor, slidesFor, slidePosition, setTaskMode, isQuick } from '../framework.js';
 import { esc, confirmBox, notice, ICON } from '../util.js';
 import { deckMap, mapLegend, drawTree } from '../mindmaps.js';
 import { go, rerender } from '../nav.js';
@@ -17,14 +17,14 @@ export function deckView(id) {
   if (!deck) return { html: notFound() };
   const project = store.project(deck.projectId);
   const st = deckStatus(deck);
-  const slide = SLIDES[deck.slide];
+  const slide = slideFor(deck);
 
   let now;
   if (deck.finished) now = isFinishedEarly(deck) ? 'Finished early' : 'Finished';
   else if (slide.type === 'cover') now = deck.reached === 0 ? 'Not started' : 'At the cover';
   else if (slide.type === 'recap') now = 'Recap';
   else if (slide.type === 'selah') now = `${slide.stage.name}, Selah${atSelah(deck) ? ' (waiting)' : ''}`;
-  else now = `${slide.stage.name}, ${slide.sub.name}`;
+  else now = `${slide.stage.name}, ${slide.type === 'quick' ? 'Quick notes' : slide.sub.name}`;
 
   const html = `<div class="page stack">
     <div class="top">
@@ -33,6 +33,7 @@ export function deckView(id) {
     </div>
     ${taskChips(deck)}
     <form class="card task-meta-form" data-task-meta>
+      <label>Mode<select name="mode"><option value="full" ${!isQuick(deck) ? 'selected' : ''}>Full — 27 slides</option><option value="quick" ${isQuick(deck) ? 'selected' : ''}>Quick — 12 slides</option></select></label>
       <h2>Task details</h2>
       <div class="row wrap">
         <label>Priority<select name="priority"><option value="">No priority</option>${PRIORITIES.map((p) => `<option value="${p}" ${deck.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
@@ -46,7 +47,7 @@ export function deckView(id) {
       <div class="row wrap"><button class="btn small" type="submit">Move task</button><button class="btn small" type="button" data-organize="rename" data-kind="tasks" data-item="${esc(id)}" data-name="${esc(deck.title)}">Rename task</button></div>
     </form>
     <div class="card now-card">
-      <div class="now-text"><p class="sub">Now</p><p class="now-t">${esc(now)}</p><p class="sub">Slide ${deck.slide + 1} of ${SLIDES.length}</p>${stageBar(deck.slide)}</div>
+      <div class="now-text"><p class="sub">Now</p><p class="now-t">${esc(now)}</p><p class="sub">Slide ${slidePosition(deck) + 1} of ${slidesFor(deck).length}</p>${stageBar(deck.slide, deck)}</div>
       ${resumeButton(deck, project, 'block')}
     </div>
     <h2 class="section">Mind map</h2>
@@ -72,6 +73,7 @@ export function deckView(id) {
       const data = new FormData(form);
       const error = setTaskMeta(deck, { priority: data.get('priority') || null, due: data.get('due') || null });
       if (error) { notice('Could not save task details', error); return; }
+      setTaskMode(deck, data.get('mode'));
       store.save(deck); rerender();
     }
     const stopTree = drawTree(root);

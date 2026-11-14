@@ -1,7 +1,7 @@
 import { finishInApp } from './task-actions.js';
 import { store } from '../store.js';
 import {
-  CONFIG, STAGES, SLIDES, firstSlideOf, selahIndex, tickKey, stagePending, subDone, slideIndex,
+  CONFIG, STAGES, SLIDES, firstSlideOf, selahIndex, tickKey, stagePending, subDone, slideIndex, normalizedSlide, slideFor, slidesFor, adjacentSlide, isQuick, quickKey,
 } from '../framework.js';
 import { esc, $, formatDate, ICON } from '../util.js';
 import { go, rerender } from '../nav.js';
@@ -13,8 +13,8 @@ import { openChatPanel } from '../ai/panel.js';
 export function slideView(deckId, nStr) {
   const deck = store.deck(deckId);
   if (!deck) return { html: notFound() };
-  const n = Math.min(Math.max(parseInt(nStr, 10) || 0, 0), SLIDES.length - 1);
-  const slide = SLIDES[n];
+  const n = normalizedSlide(deck, parseInt(nStr, 10) || 0);
+  const slide = slideFor(deck, n);
   deck.slide = n;
   deck.reached = Math.max(deck.reached, n);
   store.save(deck);
@@ -26,7 +26,7 @@ export function slideView(deckId, nStr) {
       <a class="back" href="#/d/${deck.id}" aria-label="Back to task">${ICON.back}</a>
       <div class="meta">${esc(deck.title)}${project ? ', ' + esc(project.name) : ''}</div>
     </div>
-    ${stageBar(n)}
+    ${stageBar(n, deck)}
     ${body(deck, slide, project)}
   </div>`;
 
@@ -59,15 +59,15 @@ export function slideView(deckId, nStr) {
     };
 
     function goSlide(i) {
-      if (i < 0 || i > last) return;
+      if (i === undefined || i < 0 || i > last) return;
       go(`#/d/${deck.id}/s/${i}`);
     }
 
     function onKey(e) {
       const tag = (e.target && e.target.tagName) || '';
       if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return;
-      if (e.key === 'ArrowRight') goSlide(n + 1);
-      else if (e.key === 'ArrowLeft') goSlide(n - 1);
+      if (e.key === 'ArrowRight') goSlide(adjacentSlide(deck, n, 1));
+      else if (e.key === 'ArrowLeft') goSlide(adjacentSlide(deck, n, -1));
     }
 
     function onTouchStart(e) {
@@ -83,7 +83,7 @@ export function slideView(deckId, nStr) {
       const dy = t.clientY - touchY;
       touchX = null;
       if (e.target.closest('textarea, input, button, a')) return;
-      if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) goSlide(dx < 0 ? n + 1 : n - 1);
+      if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) goSlide(adjacentSlide(deck, n, dx < 0 ? 1 : -1));
     }
 
     function onChange(e) {
@@ -105,7 +105,7 @@ export function slideView(deckId, nStr) {
       const el = e.target.closest('[data-nav],[data-selah],[data-loop],[data-act]');
       if (!el) return;
       if (el.dataset.nav) {
-        goSlide(el.dataset.nav === 'next' ? n + 1 : n - 1);
+        goSlide(adjacentSlide(deck, n, el.dataset.nav === 'next' ? 1 : -1));
       } else if (el.dataset.selah) {
         onSelah(el.dataset.selah);
       } else if (el.dataset.loop) {
@@ -150,7 +150,7 @@ export function slideView(deckId, nStr) {
         return;
       }
       if (choice === 'not') {
-        const firstOpen = stage.subs.find((sub) => !subDone(deck, stage, sub));
+        const firstOpen = !isQuick(deck) && stage.subs.find((sub) => !subDone(deck, stage, sub));
         goSlide(firstOpen ? slideIndex(`${stage.id}.${firstOpen.id}`) : firstSlideOf(stage.id));
         return;
       }
@@ -165,7 +165,7 @@ export function slideView(deckId, nStr) {
       deck.selah[stage.id] = true;
       if (deck.selahBy) delete deck.selahBy[stage.id];
       store.save(deck);
-      goSlide(n + 1);
+      goSlide(adjacentSlide(deck, n, 1));
     }
 
     function onLoop(target) {
@@ -205,6 +205,7 @@ export function slideView(deckId, nStr) {
 
 function body(deck, slide, project) {
   if (slide.type === 'cover') return cover(deck, project);
+  if (slide.type === 'quick') return quickStage(deck, slide);
   if (slide.type === 'sub') return sub(deck, slide);
   if (slide.type === 'selah') return selah(deck, slide);
   return recap(deck, project);
@@ -215,9 +216,16 @@ function cover(deck, project) {
     <div class="orb" aria-hidden="true"><img src="img/selah.webp" alt="" width="168" height="168"></div>
     <h1 class="cover-t">${esc(deck.title)}</h1>
     <p class="lead">${esc(project ? project.name : '')}</p>
-    <p class="lead">Five stages, each ending in a Selah pause. ${SLIDES.length} slides.</p>
+    <p class="lead">Five stages, each ending in a Selah pause. ${slidesFor(deck).length} slides${isQuick(deck) ? ' in Quick mode' : ''}.</p>
     <div class="btns"><button class="btn primary" data-nav="next">Begin</button></div>
   </div>`;
+}
+
+function quickStage(deck, slide) {
+  return `<div class="slide has-scroll s-${slide.stage.id}"><div><span class="chip s-${slide.stage.id}">${esc(slide.stage.name)} · Quick</span></div>
+    <div><h1>${esc(slide.stage.name)}</h1><p class="lead">${slide.stage.subs.map((s) => esc(s.name)).join(' · ')}</p></div>
+    <div class="slide-scroll"><label class="notes">Stage notes<textarea data-note="${slide.key}" aria-label="${esc(slide.stage.name)} Quick notes" placeholder="One short note for this stage">${esc(deck.notes[slide.key] || '')}</textarea></label>
+    <div class="btns"><button class="btn" data-nav="prev">Back</button><button class="btn primary" data-nav="next">Selah</button></div></div></div>`;
 }
 
 function sub(deck, slide) {
@@ -250,6 +258,7 @@ function sub(deck, slide) {
     <div><span class="chip s-${stage.id}">${stage.name} ${slide.n} of ${stage.subs.length}</span></div>
     <div><h1>${esc(s.name)}</h1><p class="lead">${esc(s.what)}</p></div>
     <div class="slide-scroll">
+    ${(deck.notes[quickKey(stage)] || '').trim() ? `<section class="card quick-retained" aria-label="Quick notes, read only"><h3>Quick notes · read only</h3><pre style="white-space:pre-wrap">${esc(deck.notes[quickKey(stage)])}</pre><p class="sub">Switch to Quick mode on the task dashboard to edit these notes.</p></section>` : ''}
     <ul class="steps">${steps}</ul>
     ${aiReady() ? '<div class="no-print"><button class="btn small ai-btn" data-act="ai-draft">Help me with this</button></div>' : ''}
     ${extra}
@@ -267,7 +276,7 @@ function selah(deck, slide) {
     <p class="selah-word">Selah</p>
     <span class="chip s-${stage.id}">${stage.name}, pause and check</span>
     <p class="q">${esc(stage.selah)}</p>
-    ${pending > 0 ? `<p class="hint">${pending} step${pending === 1 ? '' : 's'} not ticked yet.</p>` : ''}
+    ${pending > 0 ? `<p class="hint">${isQuick(deck) ? 'Stage notes are still empty.' : `${pending} step${pending === 1 ? '' : 's'} not ticked yet.`}</p>` : ''}
     <p class="hint" id="selah-msg" hidden></p>
     ${passed ? `<p class="lead">${deck.selahBy && deck.selahBy[stage.id] ? `Passed by ${deck.selahBy[stage.id] === 'claude' ? 'Claude' : 'Vesper AI'}.` : 'You already continued from here.'}</p>${(deck.notes[`${stage.id}.selah`] || '').trim() ? `<p class="hint">${esc(deck.notes[`${stage.id}.selah`])}</p>` : ''}${deck.selahBy && deck.selahBy[stage.id] ? '<button class="btn small" data-selah="undo">Take this Selah back</button>' : ''}` : ''}
     <div class="btns">
@@ -289,7 +298,8 @@ function recap(deck, project) {
       }).join('');
       return v || stepNotes ? `<h3>${esc(s.name)}</h3>${stepNotes}${v ? `<pre>${esc(v)}</pre>` : ''}` : '';
     }).join('');
-    return parts ? `<div><span class="chip s-${st.id}">${st.name}</span>${parts}</div>` : '';
+    const quick = (deck.notes[quickKey(st)] || '').trim();
+    return parts || quick ? `<div><span class="chip s-${st.id}">${st.name}</span>${quick ? `<h3>Quick notes</h3><pre>${esc(quick)}</pre>` : ''}${parts}</div>` : '';
   }).join('');
 
   return `<div class="slide recap">

@@ -4,7 +4,7 @@ import { reorderItems, appendOrder } from '../organize.js';
 // Applies the assistant's actions to task data. It works on any "db" with the same small
 // interface as the app's store, so the app and the online connector share one set of rules:
 // it can fill and tick steps, pass a Selah (with the person's answer recorded and who passed it), loop back, finish or reopen a task, and delete a task or project when told to confirm.
-import { STAGES, SLIDES, slideIndex, selahIndex, firstSlideOf, tickKey } from '../framework.js';
+import { STAGES, SLIDES, slideIndex, selahIndex, firstSlideOf, tickKey, slideFor, setTaskMode } from '../framework.js';
 
 const MAX_TEXT = 2000;
 
@@ -66,10 +66,11 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
     } else if (type === 'create_task') {
       const title = String(a.title || '').trim().slice(0, 80);
       const project = findProject(a.project);
+      if (a.mode !== undefined && !['full', 'quick'].includes(a.mode)) { skipped.push('Mode must be full or quick.'); continue; }
       if (!title) { skipped.push('A task had no name.'); continue; }
       if (!project) { skipped.push(`No project found for "${title}".`); continue; }
       const have = db.decksOf(project.id).find((d) => norm(d.title) === norm(title));
-      const d = have || db.addDeck(project.id, title);
+      const d = have || db.addDeck(project.id, title, a.mode || 'full');
       made.decks[norm(title)] = d;
       focus = d.id;
       if (!have) changes.push({ text: `Created task "${d.title}" in ${project.name}`, href: `#/d/${d.id}` });
@@ -80,8 +81,8 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
       const idx = slideIndex(String(a.slide || ''));
-      const slide = SLIDES[idx];
-      if (!slide || slide.type !== 'sub') { skipped.push(`There is no slide "${a.slide}".`); continue; }
+      const slide = String(a.slide || '').endsWith('.quick') ? slideFor({ mode: 'quick', slide: idx }) : SLIDES[idx];
+      if (!slide || !['sub', 'quick'].includes(slide.type) || (slide.type === 'quick' && slide.key !== a.slide)) { skipped.push(`There is no slide "${a.slide}".`); continue; }
       const hasStep = a.step !== undefined && a.step !== null && a.step !== '';
       const step = hasStep ? Number(a.step) : null;
       if (hasStep && !(Number.isInteger(step) && step >= 0 && step < slide.sub.steps.length)) {
@@ -172,8 +173,10 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
     } else if (type === 'set_task') {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
-      const error = setTaskMeta(deck, a);
+      if (a.mode !== undefined && !['full', 'quick'].includes(a.mode)) { skipped.push('Mode must be full or quick.'); continue; }
+      const error = Object.hasOwn(a, 'priority') || Object.hasOwn(a, 'due') || a.mode === undefined ? setTaskMeta(deck, a) : null;
       if (error) { skipped.push(error); continue; }
+      if (a.mode !== undefined) setTaskMode(deck, a.mode);
       db.save(deck);
       changes.push({ text: `Updated task details for "${deck.title}"`, href: `#/d/${deck.id}` });
     } else if (type === 'finish' || type === 'reopen') {

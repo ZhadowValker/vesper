@@ -75,11 +75,46 @@ export const SLIDES = (() => {
   return out;
 })();
 
-export const slideIndex = (key) => SLIDES.findIndex((s) => s.key === key);
+export const slideIndex = (key) => {
+  const full = SLIDES.findIndex((s) => s.key === key);
+  return full >= 0 ? full : QUICK_SLIDES.find((s) => s.key === key)?.index ?? -1;
+};
 export const firstSlideOf = (stageId) => slideIndex(`${stageId}.${stageById(stageId).subs[0].id}`);
 export const selahIndex = (stageId) => slideIndex(`${stageId}.selah`);
 
 export const tickKey = (stage, sub, i) => `${stage.id}.${sub.id}:${i}`;
+
+// Keep stored slide/reached indexes in the original 27-slide coordinate system.
+// A mode change therefore cannot reinterpret a concurrently edited cursor.
+export const isQuick = (deck) => deck?.mode === 'quick';
+export const quickKey = (stage) => `${typeof stage === 'string' ? stage : stage.id}.quick`;
+export const QUICK_SLIDES = [
+  { ...SLIDES[0], index: 0 },
+  ...STAGES.flatMap((stage) => [
+    { type: 'quick', key: quickKey(stage), stage, index: firstSlideOf(stage.id), sub: { id: 'quick', name: 'Quick notes', steps: [], what: stage.subs.map((s) => s.name).join(' · ') } },
+    { ...SLIDES[selahIndex(stage.id)], index: selahIndex(stage.id) },
+  ]),
+  { ...SLIDES.at(-1), index: SLIDES.length - 1 },
+];
+export const slidesFor = (deck) => isQuick(deck) ? QUICK_SLIDES : SLIDES;
+export function normalizedSlide(deck, index = deck.slide || 0) {
+  const n = Math.max(0, Math.min(SLIDES.length - 1, Number(index) || 0));
+  return isQuick(deck) && SLIDES[n]?.type === 'sub' ? firstSlideOf(SLIDES[n].stage.id) : n;
+}
+export const slideFor = (deck, index = deck.slide || 0) => isQuick(deck)
+  ? QUICK_SLIDES.find((s) => s.index === normalizedSlide(deck, index)) : SLIDES[index];
+export const slidePosition = (deck, index = deck.slide || 0) => isQuick(deck)
+  ? QUICK_SLIDES.findIndex((s) => s.index === normalizedSlide(deck, index)) : index;
+export function adjacentSlide(deck, index, direction) {
+  const position = slidePosition(deck, index) + direction;
+  return isQuick(deck) ? QUICK_SLIDES[position]?.index : position >= 0 && position < SLIDES.length ? position : undefined;
+}
+export function setTaskMode(deck, mode) {
+  if (!['full', 'quick'].includes(mode)) return 'Mode must be full or quick.';
+  // Notes, ticks, Selahs and canonical cursors are intentionally untouched.
+  deck.mode = mode;
+  return null;
+}
 
 export function subProgress(deck, stage, sub) {
   let done = 0;
@@ -93,6 +128,7 @@ export function subDone(deck, stage, sub) {
 }
 
 export function stagePending(deck, stage) {
+  if (isQuick(deck)) return (deck.notes?.[quickKey(stage)] || '').trim() ? 0 : 1;
   let pending = 0;
   for (const sub of stage.subs) {
     const p = subProgress(deck, stage, sub);
@@ -103,28 +139,29 @@ export function stagePending(deck, stage) {
 
 // 'done' | 'now' | 'todo' for one slide chip.
 export function chipState(deck, slide, idx) {
-  const finishedChip = slide.type === 'sub' ? subDone(deck, slide.stage, slide.sub) : !!deck.selah[slide.stage.id];
+  const finishedChip = slide.type === 'quick' ? !!(deck.notes?.[slide.key] || '').trim()
+    : slide.type === 'sub' ? subDone(deck, slide.stage, slide.sub) : !!deck.selah[slide.stage.id];
   if (finishedChip) return 'done';
-  return deck.slide === idx ? 'now' : 'todo';
+  return normalizedSlide(deck) === idx ? 'now' : 'todo';
 }
 
 export function stageState(deck, stage) {
-  const idxs = [...stage.subs.map((s) => slideIndex(`${stage.id}.${s.id}`)), selahIndex(stage.id)];
-  const allDone = idxs.every((i) => chipState(deck, SLIDES[i], i) === 'done');
+  const idxs = [...(isQuick(deck) ? [firstSlideOf(stage.id)] : stage.subs.map((s) => slideIndex(`${stage.id}.${s.id}`))), selahIndex(stage.id)];
+  const allDone = idxs.every((i) => chipState(deck, slideFor(deck, i), i) === 'done');
   if (allDone) return 'done';
-  if (idxs.includes(deck.slide)) return 'now';
+  if (idxs.includes(normalizedSlide(deck))) return 'now';
   return 'todo';
 }
 
 export function atSelah(deck) {
-  const slide = SLIDES[deck.slide];
+  const slide = slideFor(deck);
   return !deck.finished && slide.type === 'selah' && !deck.selah[slide.stage.id];
 }
 
 export function deckStatus(deck) {
-  const pct = Math.round((deck.reached / (SLIDES.length - 1)) * 100);
+  const pct = Math.round((slidePosition(deck, deck.reached || 0) / (slidesFor(deck).length - 1)) * 100);
   if (deck.finished) return { label: 'Finished', stageId: null, pct: 100, tone: 'do', state: 'done' };
-  const slide = SLIDES[deck.slide];
+  const slide = slideFor(deck);
   if (slide.stage) return { label: slide.stage.name, stageId: slide.stage.id, pct, tone: slide.stage.tone, state: 'now' };
   if (slide.type === 'cover' && deck.reached === 0) return { label: 'Not started', stageId: null, pct: 0, tone: 'think', state: 'todo' };
   return { label: 'Recap', stageId: null, pct, tone: 'do', state: 'now' };

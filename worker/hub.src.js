@@ -114,9 +114,11 @@ function makeDb(state) {
       savedProjects.set(p.id, structuredClone(p));
       return p;
     },
-    addDeck(projectId, title) {
+    addDeck(projectId, title, mode = 'full') {
+      if (!['full', 'quick'].includes(mode)) throw new Error('Mode must be full or quick.');
       const d = {
         id: uid(), projectId, title, created: Date.now(), updated: Date.now(),
+        mode,
         order: appendOrder(state.decks.filter((d) => d.projectId === projectId)),
         slide: 0, reached: 0, ticks: {}, notes: {}, selah: {},
         passes: 1, loops: 0, finished: null, timer: null,
@@ -487,16 +489,16 @@ function findTask(state, ref) {
 }
 
 function whereIs(d) {
-  const sl = SLIDES[d.slide];
+  const sl = slideFor(d);
   if (d.finished) return 'finished';
-  if (sl.stage) return `${sl.stage.name}, slide ${d.slide + 1} of ${SLIDES.length}`;
+  if (sl.stage) return `${sl.stage.name}, slide ${slidePosition(d) + 1} of ${slidesFor(d).length}`;
   return d.reached === 0 ? 'not started' : 'recap';
 }
 
 function taskSummary(state, d) {
   const pr = progress(d);
   const p = state.projects.find((x) => x.id === d.projectId);
-  return { id: d.id, title: d.title, priority: d.priority || null, due: d.due || null, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
+  return { id: d.id, title: d.title, mode: isQuick(d) ? 'quick' : 'full', priority: d.priority || null, due: d.due || null, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
 }
 
 const obj = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
@@ -507,14 +509,14 @@ const TOOLS = [
   { name: 'vesper_overview', description: 'Compact JSON, one line per task. Filter by project/task names, project id/name, current stage, status, priority or an exclusive due-date cutoff. Default 25 tasks; active means started and unfinished.', inputSchema: obj({ query: str('Matches project or task names'), project: str('Project id or exact name'), stage: { type: 'string', enum: ['vision', 'research', 'plan', 'execute', 'review'] }, status: { type: 'string', enum: ['active', 'finished', 'not started'] }, priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4', 'none'] }, dueBefore: { type: 'string', format: 'date' }, limit: { type: 'integer', minimum: 1, maximum: 1000, default: 25 } }), annotations: { readOnlyHint: true } },
   { name: 'vesper_list_projects', description: 'Only project ids, names and task counts, in manual order.', inputSchema: obj({}), annotations: { readOnlyHint: true } },
   { name: 'vesper_get_task', description: 'Everything written in one task: every step with its note and whether it is ticked.', inputSchema: obj({ task: str('Task id or exact title') }, ['task']), annotations: { readOnlyHint: true } },
-  { name: 'vesper_next_questions', description: 'The next empty steps of a task, in order, each with the plain question to ask the person. Use this to interview them, then save each answer with vesper_set_note.', inputSchema: obj({ task: str('Task id or exact title'), limit: { type: 'integer', description: 'How many (default 5, max 20)' } }, ['task']), annotations: { readOnlyHint: true } },
+  { name: 'vesper_next_questions', description: 'The next empty steps in order. Quick tasks have one question per stage (slide <stage>.quick, step null). Save answers with vesper_set_note.', inputSchema: obj({ task: str('Task id or exact title'), limit: { type: 'integer', description: 'How many (default 5, max 20)' } }, ['task']), annotations: { readOnlyHint: true } },
   { name: 'vesper_create_project', description: 'Create a project (a group of tasks).', inputSchema: obj({ name: str('Project name') }, ['name']) },
-  { name: 'vesper_create_task', description: 'Create a task inside a project.', inputSchema: obj({ project: str('Project id or exact name'), title: str('Task name') }, ['project', 'title']) },
-  { name: 'vesper_set_task', description: 'Set task priority or calendar due date. Omit unchanged fields; pass null to clear a value.', inputSchema: obj({ task: str('Task id or exact title'), priority: { type: ['string', 'null'], enum: ['P1', 'P2', 'P3', 'P4', null] }, due: { type: ['string', 'null'], format: 'date' } }, ['task']) },
+  { name: 'vesper_create_task', description: 'Create a task inside a project. Optional mode: full (default, 27 slides) or quick (12 slides, one note per stage).', inputSchema: obj({ project: str('Project id or exact name'), title: str('Task name'), mode: { type: 'string', enum: ['full', 'quick'] } }, ['project', 'title']) },
+  { name: 'vesper_set_task', description: 'Set task mode, priority or calendar due date. Mode switching preserves all notes. Omit unchanged fields; pass null to clear priority/due.', inputSchema: obj({ task: str('Task id or exact title'), mode: { type: 'string', enum: ['full', 'quick'] }, priority: { type: ['string', 'null'], enum: ['P1', 'P2', 'P3', 'P4', null] }, due: { type: ['string', 'null'], format: 'date' } }, ['task']) },
   { name: 'vesper_rename', description: 'Rename exactly one task or project.', inputSchema: obj({ task: str('Task id or exact title'), project: str('Project id or exact name'), name: str('New name, 1–80 characters') }, ['name']) },
   { name: 'vesper_move_task', description: 'Move a task into another project.', inputSchema: obj({ task: str('Task id or exact title'), project: str('Destination project id or exact name') }, ['task', 'project']) },
   { name: 'vesper_reorder', description: 'Reorder projects or tasks in one project. Provide every id in order, or one item id and a 1-based position.', inputSchema: obj({ kind: { type: 'string', enum: ['projects', 'tasks'] }, project: str('Required for tasks'), order: { type: 'array', items: { type: 'string' } }, item: str('Item id to move'), position: { type: 'integer', minimum: 1 } }, ['kind']) },
-  { name: 'vesper_set_note', description: 'Write a note into one step (or the slide notes when step is left out). Filling a step also ticks it. Existing text is kept: new text is appended unless mode is "replace". Never overwrite what the person wrote unless they asked.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer', description: 'Step number on that slide, from vesper_framework. Omit for the slide notes.' }, text: str('The note, in the person\'s words, short'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked' } }, ['task', 'slide', 'text']) },
+  { name: 'vesper_set_note', description: 'Write a step or slide note. For Quick stages use <stage>.quick and omit step (or use null). Filling a Full step also ticks it. Existing text is kept unless mode is "replace".', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why or vision.quick'), step: { type: ['integer', 'null'], description: 'Full step number. Omit or use null for slide/Quick notes.' }, text: str('The note, in the person\'s words, short'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked' } }, ['task', 'slide', 'text']) },
   { name: 'vesper_schedule', description: 'Put a task on the person\'s Google Calendar (once they have connected it in Vesper). Use kind "work" for a work block and "selah" for the pause at the end of a stage. Scheduling the same task and kind again moves the existing event. Scheduling a Selah does not pass it; use vesper_pass_selah for that.', inputSchema: obj({ task: str('Task id or exact title'), when: str('Local start time like 2026-10-28T18:00'), minutes: { type: 'integer', description: 'Length, default 30' }, kind: { type: 'string', enum: ['work', 'selah'] }, title: str('Optional event title') }, ['task', 'when']) },
   { name: 'vesper_tick', description: 'Tick or untick one step.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer' }, done: { type: 'boolean' } }, ['task', 'slide', 'step']) },
   { name: 'vesper_pass_selah', description: 'Pass the next Selah of a task (stages go in order) and move the task on. Selah is the pause that ends each stage, with one question per stage (see vesper_framework). Give the answer to that question in the person\'s words; it is saved on the Selah slide and the stage is marked "passed by Claude". Only do this when the person has asked you to drive the task forward or you have asked and they agreed.', inputSchema: obj({ task: str('Task id or exact title'), answer: str('The answer to the stage pause question'), stage: str('Optional stage id; must be the next unpassed one') }, ['task', 'answer']) },
@@ -554,12 +556,12 @@ async function callTool(env, name, a) {
     }
     return text({
       ...taskSummary(state, d),
-      steps: allSteps().map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, note: d.notes[s.key] || '', ticked: !!d.ticks[tickKey(s.slide.stage, s.slide.sub, s.step)] })),
+      steps: allSteps(d).map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, note: d.notes[s.key] || '', ticked: isQuick(d) ? filled(d, s.key) : !!d.ticks[tickKey(s.slide.stage, s.slide.sub, s.step)] })),
       slideNotes: Object.fromEntries(Object.entries(d.notes).filter(([k, v]) => !k.includes('#') && String(v).trim())),
     });
   }
   if (name === 'vesper_create_project') return run([{ type: 'create_project', name: a.name }]);
-  if (name === 'vesper_create_task') return run([{ type: 'create_task', project: a.project, title: a.title }]);
+  if (name === 'vesper_create_task') return run([{ type: 'create_task', project: a.project, title: a.title, mode: a.mode }]);
   if (name === 'vesper_set_task') return run([{ ...a, type: 'set_task' }]);
   if (name === 'vesper_rename') return run([{ ...a, type: 'rename' }]);
   if (name === 'vesper_move_task') return run([{ ...a, type: 'move_task' }]);
@@ -587,7 +589,7 @@ async function callTool(env, name, a) {
     if (!d) return fail(`No task found for "${a.task}".`);
     if (!gConfigured(env)) return fail('Google Calendar is not set up on the hub yet.');
     const kind = a.kind === 'selah' ? 'selah' : 'work';
-    const stage = (SLIDES[d.slide] && SLIDES[d.slide].stage) || STAGES[0];
+    const stage = slideFor(d)?.stage || STAGES[0];
     const base = gBase(env);
     const title = a.title || (kind === 'selah' ? `Selah: ${d.title} (${stage.name})` : `${d.title}: ${whereIs(d)}`);
     const details = `Vesper task "${d.title}".${kind === 'selah' ? ` Pause and ask: ${stage.selah}` : ''}\n${base}/#/d/${d.id}`;

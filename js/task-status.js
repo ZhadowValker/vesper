@@ -1,4 +1,4 @@
-import { STAGES, SLIDES, selahIndex } from './framework.js';
+import { STAGES, slideFor, selahIndex } from './framework.js';
 
 export const missingSelahs = (deck) => STAGES.filter((s) => !deck.selah?.[s.id]);
 
@@ -20,7 +20,7 @@ export function taskCheck(deck) {
   const notes = [];
   const missing = missingSelahs(deck);
   if (deck.finished && missing.length) notes.push(`Finished with Selahs missing: ${missing.map((s) => s.name).join(', ')}`);
-  const slide = SLIDES[deck.slide];
+  const slide = slideFor(deck);
   if (!slide) { notes.push('Current slide is invalid'); return notes.join('; '); }
   const current = slide.type === 'recap' ? STAGES.length : STAGES.indexOf(slide.stage);
   const later = STAGES.filter((s, i) => deck.selah?.[s.id] && i > current);

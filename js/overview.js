@@ -1,4 +1,4 @@
-import { STAGES, SLIDES } from './framework.js';
+import { STAGES, slideFor } from './framework.js';
 import { PRIORITIES, validDue } from './task-meta.js';
 import { orderedItems } from './organize.js';
 
@@ -21,7 +21,7 @@ export function filterOverview(state, options = {}) {
     const matchesProject = p.name.toLowerCase().includes(q);
     const decks = orderedItems(state.decks.filter((d) => d.projectId === p.id)).filter((d) => {
       if (q && !matchesProject && !d.title.toLowerCase().includes(q)) return false;
-      if (stageMatch && SLIDES[d.slide]?.stage?.id !== stageMatch.id) return false;
+      if (stageMatch && slideFor(d)?.stage?.id !== stageMatch.id) return false;
       const taskStatus = d.finished ? 'finished' : (d.reached || 0) === 0 ? 'not started' : 'active';
       if (status && status !== taskStatus) return false;
       if (priority && (priority === 'none' ? !!d.priority : d.priority !== priority)) return false;

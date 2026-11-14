@@ -1,6 +1,6 @@
 // The floating navigation island: always at the bottom of every screen, slides included.
 import { store } from './store.js';
-import { SLIDES } from './framework.js';
+import { SLIDES, adjacentSlide, slidePosition, slidesFor } from './framework.js';
 import { go, rerender } from './nav.js';
 import { openChatPanel } from './ai/panel.js';
 import { syncDialog } from './connect-ui.js';
@@ -52,6 +52,7 @@ function paint(el) {
   const s = hash.match(/^#\/d\/(\w+)\/s\/(\d+)$/);
   const last = SLIDES.length - 1;
   const n = s ? Math.min(parseInt(s[2], 10) || 0, last) : 0;
+  const deck = s ? store.deck(s[1]) : null;
   const cfg = getSync();
   const letter = cfg.email && cfg.email !== 'owner' ? cfg.email[0].toUpperCase() : '';
   const home = !up && !s;
@@ -59,7 +60,7 @@ function paint(el) {
   document.body.classList.toggle('on-slide', !!s);
   el.innerHTML =
     (home ? btn('home', 'home', 'Home', 'aria-current="page"') : btn('home', 'home', 'Home') + btn('up', 'up', 'Back')) +
-    (s ? btn('prev', 'prev', 'Previous', n === 0 ? 'disabled' : '') + `<span class="isl-count" aria-live="off">${n + 1}/${SLIDES.length}</span>` + btn('next', 'next', 'Next', n === last ? 'disabled' : '') : '') +
+    (s ? btn('prev', 'prev', 'Previous', n === 0 ? 'disabled' : '') + `<span class="isl-count" aria-live="off">${slidePosition(deck || {}, n) + 1}/${slidesFor(deck).length}</span>` + btn('next', 'next', 'Next', n === last ? 'disabled' : '') : '') +
     (s ? '' : btn('new', 'plus', 'New')) +
     btn('ai', 'ai', 'AI') +
     (s ? '' : btn('help', 'help', 'Help')) +
@@ -76,8 +77,10 @@ function onClick(e) {
   else if (act === 'prev' || act === 'next') {
     const m = hash.match(/^#\/d\/(\w+)\/s\/(\d+)$/);
     if (!m) return;
-    const to = Math.min(Math.max(parseInt(m[2], 10) + (act === 'next' ? 1 : -1), 0), SLIDES.length - 1);
-    go(`#/d/${m[1]}/s/${to}`);
+    const deck = store.deck(m[1]);
+    if (!deck) return;
+    const to = adjacentSlide(deck, parseInt(m[2], 10), act === 'next' ? 1 : -1);
+    if (to !== undefined) go(`#/d/${m[1]}/s/${to}`);
   } else if (act === 'new') {
     ask('Name your project', { ok: 'Create project', placeholder: 'Office relocation' }).then((name) => { if (name) go(`#/p/${store.addProject(name).id}`); });
   } else if (act === 'help') {

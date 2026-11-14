@@ -1,14 +1,14 @@
 // Builds what the model is told. Pure functions: easy to test, no network.
-import { SLIDES } from '../framework.js';
+import { SLIDES, slidesFor, slideIndex, quickKey } from '../framework.js';
 
 const MAX_CONTEXT = 6000;
 
 // Everything the person has written so far in this task, before the given slide index.
 export function contextBefore(deck, upTo) {
   const lines = [];
-  for (let i = 0; i < upTo; i++) {
-    const sl = SLIDES[i];
-    if (sl.type !== 'sub') continue;
+  for (const sl of slidesFor(deck)) {
+    if (slideIndex(sl.key) >= upTo) continue;
+    if (!['sub', 'quick'].includes(sl.type)) continue;
     const got = [];
     sl.sub.steps.forEach((text, k) => {
       const v = (deck.notes[`${sl.key}#${k}`] || '').trim();
@@ -16,6 +16,7 @@ export function contextBefore(deck, upTo) {
     });
     const n = (deck.notes[sl.key] || '').trim();
     if (n) got.push(`  - Notes: ${n}`);
+    if (sl.type === 'sub' && (deck.notes[quickKey(sl.stage)] || '').trim()) got.push(`  - Retained Quick notes: ${deck.notes[quickKey(sl.stage)]}`);
     if (got.length) lines.push(`${sl.stage.name} / ${sl.sub.name}:\n${got.join('\n')}`);
   }
   let out = lines.join('\n');
@@ -48,8 +49,8 @@ Reply as JSON: {"steps": ["text for step 1", "text for step 2", ...]} with exact
 export function reviewMessages(deck, project, stage) {
   const end = SLIDES.findIndex((s) => s.key === `${stage.id}.selah`);
   const here = [];
-  for (const sl of SLIDES) {
-    if (sl.type !== 'sub' || sl.stage.id !== stage.id) continue;
+  for (const sl of slidesFor(deck)) {
+    if (!['sub', 'quick'].includes(sl.type) || sl.stage.id !== stage.id) continue;
     sl.sub.steps.forEach((text, k) => {
       const v = (deck.notes[`${sl.key}#${k}`] || '').trim();
       const ticked = !!deck.ticks[`${stage.id}.${sl.sub.id}:${k}`];

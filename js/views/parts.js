@@ -1,4 +1,4 @@
-import { STAGES, SLIDES, firstSlideOf, selahIndex } from '../framework.js';
+import { STAGES, SLIDES, firstSlideOf, selahIndex, slideFor, slidePosition, slidesFor, isQuick } from '../framework.js';
 import { esc } from '../util.js';
 import { PRIORITIES, validDue, isOverdue, saveTaskPrefs, getTaskPrefs } from '../task-meta.js';
 import { isFinishedEarly } from '../task-status.js';
@@ -8,7 +8,8 @@ export function taskChips(deck) {
   const priority = PRIORITIES.includes(deck.priority) ? `<span class="chip priority">${esc(deck.priority)}</span>` : '';
   const due = validDue(deck.due) ? `<span class="chip ${isOverdue(deck) ? 'overdue' : ''}">${isOverdue(deck) ? 'Overdue' : 'Due'} <time datetime="${deck.due}">${deck.due}</time></span>` : '';
   const early = isFinishedEarly(deck) ? '<span class="chip think">finished early</span>' : '';
-  return priority || due || early ? `<div class="row wrap task-chips">${priority}${due}${early}</div>` : '';
+  const mode = isQuick(deck) ? '<span class="chip">Quick</span>' : '';
+  return priority || due || early || mode ? `<div class="row wrap task-chips">${mode}${priority}${due}${early}</div>` : '';
 }
 
 export function taskListControls(prefs) {
@@ -38,6 +39,7 @@ export function slideName(slide) {
   if (slide.type === 'cover') return 'Cover';
   if (slide.type === 'recap') return 'Recap';
   if (slide.type === 'selah') return 'Selah';
+  if (slide.type === 'quick') return 'Quick notes';
   return slide.sub.name;
 }
 
@@ -45,19 +47,23 @@ export function slideName(slide) {
 // target 'tree' opens the deck's mind map; 'slide' opens the slide you were on.
 export function resumeButton(deck, project, extraClass = '', target = 'slide') {
   const verb = deck.finished ? 'Open recap' : deck.reached === 0 ? 'Begin' : 'Resume';
-  const path = [project ? project.name : '', deck.title, slideName(SLIDES[deck.slide])].filter(Boolean).map(esc).join(CHEVRON);
+  const path = [project ? project.name : '', deck.title, slideName(slideFor(deck))].filter(Boolean).map(esc).join(CHEVRON);
   return `<a class="btn primary resume ${extraClass}" href="${target === 'tree' ? `#/d/${deck.id}` : `#/d/${deck.id}/s/${deck.slide}`}"><span class="resume-v">${verb}</span><span class="resume-p">${path}</span></a>`;
 }
 
 // Five segments, one per stage, filled as you move through that stage's slides.
-export function stageBar(n) {
+export function stageBar(n, deck = {}) {
   const segs = STAGES.map((st) => {
     const from = firstSlideOf(st.id);
     const to = selahIndex(st.id);
-    const w = Math.max(0, Math.min(1, (n - from + 1) / (to - from + 1)));
+    const w = stageFraction(deck, n, from, to);
     return `<span class="s-${st.id}"><i style="width:${Math.round(w * 100)}%"></i></span>`;
   }).join('');
-  return `<div class="progress" role="img" aria-label="Slide ${n + 1} of ${SLIDES.length}">${segs}</div>`;
+  return `<div class="progress" role="img" aria-label="Slide ${slidePosition(deck, n) + 1} of ${slidesFor(deck).length}">${segs}</div>`;
+}
+
+function stageFraction(deck, n, from, to) {
+  return Math.max(0, Math.min(1, isQuick(deck) ? n < from ? 0 : n < to ? 0.5 : 1 : (n - from + 1) / (to - from + 1)));
 }
 
 // One bar for many tasks: each stage's segment shows how far the tasks have got through that stage, on average.
@@ -68,7 +74,7 @@ export function projectBar(decks) {
     const to = selahIndex(st.id);
     const total = decks.reduce((sum, d) => {
       const n = d.finished ? SLIDES.length : d.reached;
-      return sum + Math.max(0, Math.min(1, (n - from + 1) / (to - from + 1)));
+      return sum + stageFraction(d, n, from, to);
     }, 0);
     return `<span class="s-${st.id}"><i style="width:${Math.round((total / decks.length) * 100)}%"></i></span>`;
   }).join('');

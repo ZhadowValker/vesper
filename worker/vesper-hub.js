@@ -97,11 +97,46 @@ const SLIDES = (() => {
   return out;
 })();
 
-const slideIndex = (key) => SLIDES.findIndex((s) => s.key === key);
+const slideIndex = (key) => {
+  const full = SLIDES.findIndex((s) => s.key === key);
+  return full >= 0 ? full : QUICK_SLIDES.find((s) => s.key === key)?.index ?? -1;
+};
 const firstSlideOf = (stageId) => slideIndex(`${stageId}.${stageById(stageId).subs[0].id}`);
 const selahIndex = (stageId) => slideIndex(`${stageId}.selah`);
 
 const tickKey = (stage, sub, i) => `${stage.id}.${sub.id}:${i}`;
+
+// Keep stored slide/reached indexes in the original 27-slide coordinate system.
+// A mode change therefore cannot reinterpret a concurrently edited cursor.
+const isQuick = (deck) => deck?.mode === 'quick';
+const quickKey = (stage) => `${typeof stage === 'string' ? stage : stage.id}.quick`;
+const QUICK_SLIDES = [
+  { ...SLIDES[0], index: 0 },
+  ...STAGES.flatMap((stage) => [
+    { type: 'quick', key: quickKey(stage), stage, index: firstSlideOf(stage.id), sub: { id: 'quick', name: 'Quick notes', steps: [], what: stage.subs.map((s) => s.name).join(' · ') } },
+    { ...SLIDES[selahIndex(stage.id)], index: selahIndex(stage.id) },
+  ]),
+  { ...SLIDES.at(-1), index: SLIDES.length - 1 },
+];
+const slidesFor = (deck) => isQuick(deck) ? QUICK_SLIDES : SLIDES;
+function normalizedSlide(deck, index = deck.slide || 0) {
+  const n = Math.max(0, Math.min(SLIDES.length - 1, Number(index) || 0));
+  return isQuick(deck) && SLIDES[n]?.type === 'sub' ? firstSlideOf(SLIDES[n].stage.id) : n;
+}
+const slideFor = (deck, index = deck.slide || 0) => isQuick(deck)
+  ? QUICK_SLIDES.find((s) => s.index === normalizedSlide(deck, index)) : SLIDES[index];
+const slidePosition = (deck, index = deck.slide || 0) => isQuick(deck)
+  ? QUICK_SLIDES.findIndex((s) => s.index === normalizedSlide(deck, index)) : index;
+function adjacentSlide(deck, index, direction) {
+  const position = slidePosition(deck, index) + direction;
+  return isQuick(deck) ? QUICK_SLIDES[position]?.index : position >= 0 && position < SLIDES.length ? position : undefined;
+}
+function setTaskMode(deck, mode) {
+  if (!['full', 'quick'].includes(mode)) return 'Mode must be full or quick.';
+  // Notes, ticks, Selahs and canonical cursors are intentionally untouched.
+  deck.mode = mode;
+  return null;
+}
 
 function subProgress(deck, stage, sub) {
   let done = 0;
@@ -115,6 +150,7 @@ function subDone(deck, stage, sub) {
 }
 
 function stagePending(deck, stage) {
+  if (isQuick(deck)) return (deck.notes?.[quickKey(stage)] || '').trim() ? 0 : 1;
   let pending = 0;
   for (const sub of stage.subs) {
     const p = subProgress(deck, stage, sub);
@@ -125,28 +161,29 @@ function stagePending(deck, stage) {
 
 // 'done' | 'now' | 'todo' for one slide chip.
 function chipState(deck, slide, idx) {
-  const finishedChip = slide.type === 'sub' ? subDone(deck, slide.stage, slide.sub) : !!deck.selah[slide.stage.id];
+  const finishedChip = slide.type === 'quick' ? !!(deck.notes?.[slide.key] || '').trim()
+    : slide.type === 'sub' ? subDone(deck, slide.stage, slide.sub) : !!deck.selah[slide.stage.id];
   if (finishedChip) return 'done';
-  return deck.slide === idx ? 'now' : 'todo';
+  return normalizedSlide(deck) === idx ? 'now' : 'todo';
 }
 
 function stageState(deck, stage) {
-  const idxs = [...stage.subs.map((s) => slideIndex(`${stage.id}.${s.id}`)), selahIndex(stage.id)];
-  const allDone = idxs.every((i) => chipState(deck, SLIDES[i], i) === 'done');
+  const idxs = [...(isQuick(deck) ? [firstSlideOf(stage.id)] : stage.subs.map((s) => slideIndex(`${stage.id}.${s.id}`))), selahIndex(stage.id)];
+  const allDone = idxs.every((i) => chipState(deck, slideFor(deck, i), i) === 'done');
   if (allDone) return 'done';
-  if (idxs.includes(deck.slide)) return 'now';
+  if (idxs.includes(normalizedSlide(deck))) return 'now';
   return 'todo';
 }
 
 function atSelah(deck) {
-  const slide = SLIDES[deck.slide];
+  const slide = slideFor(deck);
   return !deck.finished && slide.type === 'selah' && !deck.selah[slide.stage.id];
 }
 
 function deckStatus(deck) {
-  const pct = Math.round((deck.reached / (SLIDES.length - 1)) * 100);
+  const pct = Math.round((slidePosition(deck, deck.reached || 0) / (slidesFor(deck).length - 1)) * 100);
   if (deck.finished) return { label: 'Finished', stageId: null, pct: 100, tone: 'do', state: 'done' };
-  const slide = SLIDES[deck.slide];
+  const slide = slideFor(deck);
   if (slide.stage) return { label: slide.stage.name, stageId: slide.stage.id, pct, tone: slide.stage.tone, state: 'now' };
   if (slide.type === 'cover' && deck.reached === 0) return { label: 'Not started', stageId: null, pct: 0, tone: 'think', state: 'todo' };
   return { label: 'Recap', stageId: null, pct, tone: 'do', state: 'now' };
@@ -173,7 +210,7 @@ function taskCheck(deck) {
   const notes = [];
   const missing = missingSelahs(deck);
   if (deck.finished && missing.length) notes.push(`Finished with Selahs missing: ${missing.map((s) => s.name).join(', ')}`);
-  const slide = SLIDES[deck.slide];
+  const slide = slideFor(deck);
   if (!slide) { notes.push('Current slide is invalid'); return notes.join('; '); }
   const current = slide.type === 'recap' ? STAGES.length : STAGES.indexOf(slide.stage);
   const later = STAGES.filter((s, i) => deck.selah?.[s.id] && i > current);
@@ -287,7 +324,7 @@ function filterOverview(state, options = {}) {
     const matchesProject = p.name.toLowerCase().includes(q);
     const decks = orderedItems(state.decks.filter((d) => d.projectId === p.id)).filter((d) => {
       if (q && !matchesProject && !d.title.toLowerCase().includes(q)) return false;
-      if (stageMatch && SLIDES[d.slide]?.stage?.id !== stageMatch.id) return false;
+      if (stageMatch && slideFor(d)?.stage?.id !== stageMatch.id) return false;
       const taskStatus = d.finished ? 'finished' : (d.reached || 0) === 0 ? 'not started' : 'active';
       if (status && status !== taskStatus) return false;
       if (priority && (priority === 'none' ? !!d.priority : d.priority !== priority)) return false;
@@ -357,7 +394,11 @@ const stepKey = (slide, i) => `${slide.key}#${i}`;
 const filled = (deck, key) => !!(deck.notes[key] || '').trim();
 
 // Every step of the task in framework order, with its question.
-function allSteps() {
+function allSteps(deck) {
+  if (isQuick(deck)) return QUICK_SLIDES.filter((s) => s.type === 'quick').map((slide) => ({
+    key: slide.key, slide, step: null, text: `${slide.stage.name} notes`,
+    question: `What do you need for ${slide.stage.name.toLowerCase()} on this task? Consider: ${slide.stage.subs.map((s) => s.name).join(', ')}.`,
+  }));
   const out = [];
   for (const slide of SLIDES) {
     if (slide.type !== 'sub') continue;
@@ -368,11 +409,11 @@ function allSteps() {
 
 // Steps still to ask, in order. `skipped` is a list of step keys the person passed on.
 function emptySteps(deck, skipped = []) {
-  return allSteps().filter((s) => !filled(deck, s.key) && !skipped.includes(s.key));
+  return allSteps(deck).filter((s) => !filled(deck, s.key) && !skipped.includes(s.key));
 }
 
 function progress(deck) {
-  const steps = allSteps();
+  const steps = allSteps(deck);
   return { filled: steps.filter((s) => filled(deck, s.key)).length, total: steps.length };
 }
 
@@ -441,10 +482,11 @@ function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
     } else if (type === 'create_task') {
       const title = String(a.title || '').trim().slice(0, 80);
       const project = findProject(a.project);
+      if (a.mode !== undefined && !['full', 'quick'].includes(a.mode)) { skipped.push('Mode must be full or quick.'); continue; }
       if (!title) { skipped.push('A task had no name.'); continue; }
       if (!project) { skipped.push(`No project found for "${title}".`); continue; }
       const have = db.decksOf(project.id).find((d) => norm(d.title) === norm(title));
-      const d = have || db.addDeck(project.id, title);
+      const d = have || db.addDeck(project.id, title, a.mode || 'full');
       made.decks[norm(title)] = d;
       focus = d.id;
       if (!have) changes.push({ text: `Created task "${d.title}" in ${project.name}`, href: `#/d/${d.id}` });
@@ -455,8 +497,8 @@ function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
       const idx = slideIndex(String(a.slide || ''));
-      const slide = SLIDES[idx];
-      if (!slide || slide.type !== 'sub') { skipped.push(`There is no slide "${a.slide}".`); continue; }
+      const slide = String(a.slide || '').endsWith('.quick') ? slideFor({ mode: 'quick', slide: idx }) : SLIDES[idx];
+      if (!slide || !['sub', 'quick'].includes(slide.type) || (slide.type === 'quick' && slide.key !== a.slide)) { skipped.push(`There is no slide "${a.slide}".`); continue; }
       const hasStep = a.step !== undefined && a.step !== null && a.step !== '';
       const step = hasStep ? Number(a.step) : null;
       if (hasStep && !(Number.isInteger(step) && step >= 0 && step < slide.sub.steps.length)) {
@@ -547,8 +589,10 @@ function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
     } else if (type === 'set_task') {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
-      const error = setTaskMeta(deck, a);
+      if (a.mode !== undefined && !['full', 'quick'].includes(a.mode)) { skipped.push('Mode must be full or quick.'); continue; }
+      const error = Object.hasOwn(a, 'priority') || Object.hasOwn(a, 'due') || a.mode === undefined ? setTaskMeta(deck, a) : null;
       if (error) { skipped.push(error); continue; }
+      if (a.mode !== undefined) setTaskMode(deck, a.mode);
       db.save(deck);
       changes.push({ text: `Updated task details for "${deck.title}"`, href: `#/d/${deck.id}` });
     } else if (type === 'finish' || type === 'reopen') {
@@ -897,9 +941,11 @@ function makeDb(state) {
       savedProjects.set(p.id, structuredClone(p));
       return p;
     },
-    addDeck(projectId, title) {
+    addDeck(projectId, title, mode = 'full') {
+      if (!['full', 'quick'].includes(mode)) throw new Error('Mode must be full or quick.');
       const d = {
         id: uid(), projectId, title, created: Date.now(), updated: Date.now(),
+        mode,
         order: appendOrder(state.decks.filter((d) => d.projectId === projectId)),
         slide: 0, reached: 0, ticks: {}, notes: {}, selah: {},
         passes: 1, loops: 0, finished: null, timer: null,
@@ -1270,16 +1316,16 @@ function findTask(state, ref) {
 }
 
 function whereIs(d) {
-  const sl = SLIDES[d.slide];
+  const sl = slideFor(d);
   if (d.finished) return 'finished';
-  if (sl.stage) return `${sl.stage.name}, slide ${d.slide + 1} of ${SLIDES.length}`;
+  if (sl.stage) return `${sl.stage.name}, slide ${slidePosition(d) + 1} of ${slidesFor(d).length}`;
   return d.reached === 0 ? 'not started' : 'recap';
 }
 
 function taskSummary(state, d) {
   const pr = progress(d);
   const p = state.projects.find((x) => x.id === d.projectId);
-  return { id: d.id, title: d.title, priority: d.priority || null, due: d.due || null, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
+  return { id: d.id, title: d.title, mode: isQuick(d) ? 'quick' : 'full', priority: d.priority || null, due: d.due || null, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
 }
 
 const obj = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
@@ -1290,14 +1336,14 @@ const TOOLS = [
   { name: 'vesper_overview', description: 'Compact JSON, one line per task. Filter by project/task names, project id/name, current stage, status, priority or an exclusive due-date cutoff. Default 25 tasks; active means started and unfinished.', inputSchema: obj({ query: str('Matches project or task names'), project: str('Project id or exact name'), stage: { type: 'string', enum: ['vision', 'research', 'plan', 'execute', 'review'] }, status: { type: 'string', enum: ['active', 'finished', 'not started'] }, priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4', 'none'] }, dueBefore: { type: 'string', format: 'date' }, limit: { type: 'integer', minimum: 1, maximum: 1000, default: 25 } }), annotations: { readOnlyHint: true } },
   { name: 'vesper_list_projects', description: 'Only project ids, names and task counts, in manual order.', inputSchema: obj({}), annotations: { readOnlyHint: true } },
   { name: 'vesper_get_task', description: 'Everything written in one task: every step with its note and whether it is ticked.', inputSchema: obj({ task: str('Task id or exact title') }, ['task']), annotations: { readOnlyHint: true } },
-  { name: 'vesper_next_questions', description: 'The next empty steps of a task, in order, each with the plain question to ask the person. Use this to interview them, then save each answer with vesper_set_note.', inputSchema: obj({ task: str('Task id or exact title'), limit: { type: 'integer', description: 'How many (default 5, max 20)' } }, ['task']), annotations: { readOnlyHint: true } },
+  { name: 'vesper_next_questions', description: 'The next empty steps in order. Quick tasks have one question per stage (slide <stage>.quick, step null). Save answers with vesper_set_note.', inputSchema: obj({ task: str('Task id or exact title'), limit: { type: 'integer', description: 'How many (default 5, max 20)' } }, ['task']), annotations: { readOnlyHint: true } },
   { name: 'vesper_create_project', description: 'Create a project (a group of tasks).', inputSchema: obj({ name: str('Project name') }, ['name']) },
-  { name: 'vesper_create_task', description: 'Create a task inside a project.', inputSchema: obj({ project: str('Project id or exact name'), title: str('Task name') }, ['project', 'title']) },
-  { name: 'vesper_set_task', description: 'Set task priority or calendar due date. Omit unchanged fields; pass null to clear a value.', inputSchema: obj({ task: str('Task id or exact title'), priority: { type: ['string', 'null'], enum: ['P1', 'P2', 'P3', 'P4', null] }, due: { type: ['string', 'null'], format: 'date' } }, ['task']) },
+  { name: 'vesper_create_task', description: 'Create a task inside a project. Optional mode: full (default, 27 slides) or quick (12 slides, one note per stage).', inputSchema: obj({ project: str('Project id or exact name'), title: str('Task name'), mode: { type: 'string', enum: ['full', 'quick'] } }, ['project', 'title']) },
+  { name: 'vesper_set_task', description: 'Set task mode, priority or calendar due date. Mode switching preserves all notes. Omit unchanged fields; pass null to clear priority/due.', inputSchema: obj({ task: str('Task id or exact title'), mode: { type: 'string', enum: ['full', 'quick'] }, priority: { type: ['string', 'null'], enum: ['P1', 'P2', 'P3', 'P4', null] }, due: { type: ['string', 'null'], format: 'date' } }, ['task']) },
   { name: 'vesper_rename', description: 'Rename exactly one task or project.', inputSchema: obj({ task: str('Task id or exact title'), project: str('Project id or exact name'), name: str('New name, 1–80 characters') }, ['name']) },
   { name: 'vesper_move_task', description: 'Move a task into another project.', inputSchema: obj({ task: str('Task id or exact title'), project: str('Destination project id or exact name') }, ['task', 'project']) },
   { name: 'vesper_reorder', description: 'Reorder projects or tasks in one project. Provide every id in order, or one item id and a 1-based position.', inputSchema: obj({ kind: { type: 'string', enum: ['projects', 'tasks'] }, project: str('Required for tasks'), order: { type: 'array', items: { type: 'string' } }, item: str('Item id to move'), position: { type: 'integer', minimum: 1 } }, ['kind']) },
-  { name: 'vesper_set_note', description: 'Write a note into one step (or the slide notes when step is left out). Filling a step also ticks it. Existing text is kept: new text is appended unless mode is "replace". Never overwrite what the person wrote unless they asked.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer', description: 'Step number on that slide, from vesper_framework. Omit for the slide notes.' }, text: str('The note, in the person\'s words, short'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked' } }, ['task', 'slide', 'text']) },
+  { name: 'vesper_set_note', description: 'Write a step or slide note. For Quick stages use <stage>.quick and omit step (or use null). Filling a Full step also ticks it. Existing text is kept unless mode is "replace".', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why or vision.quick'), step: { type: ['integer', 'null'], description: 'Full step number. Omit or use null for slide/Quick notes.' }, text: str('The note, in the person\'s words, short'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked' } }, ['task', 'slide', 'text']) },
   { name: 'vesper_schedule', description: 'Put a task on the person\'s Google Calendar (once they have connected it in Vesper). Use kind "work" for a work block and "selah" for the pause at the end of a stage. Scheduling the same task and kind again moves the existing event. Scheduling a Selah does not pass it; use vesper_pass_selah for that.', inputSchema: obj({ task: str('Task id or exact title'), when: str('Local start time like 2026-10-28T18:00'), minutes: { type: 'integer', description: 'Length, default 30' }, kind: { type: 'string', enum: ['work', 'selah'] }, title: str('Optional event title') }, ['task', 'when']) },
   { name: 'vesper_tick', description: 'Tick or untick one step.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer' }, done: { type: 'boolean' } }, ['task', 'slide', 'step']) },
   { name: 'vesper_pass_selah', description: 'Pass the next Selah of a task (stages go in order) and move the task on. Selah is the pause that ends each stage, with one question per stage (see vesper_framework). Give the answer to that question in the person\'s words; it is saved on the Selah slide and the stage is marked "passed by Claude". Only do this when the person has asked you to drive the task forward or you have asked and they agreed.', inputSchema: obj({ task: str('Task id or exact title'), answer: str('The answer to the stage pause question'), stage: str('Optional stage id; must be the next unpassed one') }, ['task', 'answer']) },
@@ -1337,12 +1383,12 @@ async function callTool(env, name, a) {
     }
     return text({
       ...taskSummary(state, d),
-      steps: allSteps().map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, note: d.notes[s.key] || '', ticked: !!d.ticks[tickKey(s.slide.stage, s.slide.sub, s.step)] })),
+      steps: allSteps(d).map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, note: d.notes[s.key] || '', ticked: isQuick(d) ? filled(d, s.key) : !!d.ticks[tickKey(s.slide.stage, s.slide.sub, s.step)] })),
       slideNotes: Object.fromEntries(Object.entries(d.notes).filter(([k, v]) => !k.includes('#') && String(v).trim())),
     });
   }
   if (name === 'vesper_create_project') return run([{ type: 'create_project', name: a.name }]);
-  if (name === 'vesper_create_task') return run([{ type: 'create_task', project: a.project, title: a.title }]);
+  if (name === 'vesper_create_task') return run([{ type: 'create_task', project: a.project, title: a.title, mode: a.mode }]);
   if (name === 'vesper_set_task') return run([{ ...a, type: 'set_task' }]);
   if (name === 'vesper_rename') return run([{ ...a, type: 'rename' }]);
   if (name === 'vesper_move_task') return run([{ ...a, type: 'move_task' }]);
@@ -1370,7 +1416,7 @@ async function callTool(env, name, a) {
     if (!d) return fail(`No task found for "${a.task}".`);
     if (!gConfigured(env)) return fail('Google Calendar is not set up on the hub yet.');
     const kind = a.kind === 'selah' ? 'selah' : 'work';
-    const stage = (SLIDES[d.slide] && SLIDES[d.slide].stage) || STAGES[0];
+    const stage = slideFor(d)?.stage || STAGES[0];
     const base = gBase(env);
     const title = a.title || (kind === 'selah' ? `Selah: ${d.title} (${stage.name})` : `${d.title}: ${whereIs(d)}`);
     const details = `Vesper task "${d.title}".${kind === 'selah' ? ` Pause and ask: ${stage.selah}` : ''}\n${base}/#/d/${d.id}`;

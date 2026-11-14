@@ -169,7 +169,29 @@ Edit `js/framework.js` only. Stage names, sub-stages, steps and Selah questions 
 ## Known limits of this first version
 
 - Data is stored per browser on one device. Use Export backup and Import backup to move it.
-- The quick mode and a slide sorter are not built yet.
+- The slide sorter is still not built.
+
+## Full and Quick tasks
+
+Choose **Full** or **Quick** when creating a task (also in the AI interview setup),
+or change **Mode** on its task dashboard and save. Full keeps the original 27
+slides and 34 steps. Quick has 12 slides: cover, one notes slide and one Selah
+per stage, then recap. Sub-stage names act as short prompts for each stage note.
+All five Selahs are still required for normal Finish; early-finish rules are
+unchanged. Progress, maps, overview, interview and Markdown understand both modes.
+
+Switching modes never deletes notes, ticks or Selahs. Quick notes use separate
+`<stage>.quick` keys; Full-mode step notes remain stored and return when switching
+back. Retained Quick notes appear read-only on that stage's Full slides and are
+included in recap/export. Older tasks without a mode remain Full. Mode merges as
+its own field, and each Quick note uses the existing independent note clock.
+Stored slide indexes retain their original Full coordinates to avoid reinterpreting
+a cursor edited on another device; the UI shows the correct 12-slide positions.
+
+The in-app AI and `vesper_create_task` accept optional `mode: "full" | "quick"`.
+`vesper_set_task` can change mode later. `vesper_next_questions` asks one question
+per stage for Quick tasks; save its answer with `vesper_set_note`, slide such as
+`vision.quick`, and no step (or `step: null`). Full questions are unchanged.
 
 ## Optional AI helpers
 

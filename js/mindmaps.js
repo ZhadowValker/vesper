@@ -1,4 +1,4 @@
-import { STAGES, SLIDES, slideIndex, selahIndex, chipState, stageState, deckStatus, atSelah } from './framework.js';
+import { STAGES, SLIDES, slideIndex, selahIndex, chipState, stageState, deckStatus, atSelah, isQuick, quickKey, slideFor, firstSlideOf } from './framework.js';
 import { esc } from './util.js';
 
 // Project dashboard: the same tree as the deck map. The project on the left, a branch to each deck.
@@ -28,10 +28,10 @@ export function deckMap(deck) {
   const rows = STAGES.map((stage) => {
     const state = stageState(deck, stage);
     const chips = [
-      ...stage.subs.map((sub) => ({ idx: slideIndex(`${stage.id}.${sub.id}`), label: esc(sub.name), title: sub.name })),
+      ...(isQuick(deck) ? [{ idx: firstSlideOf(stage.id), label: 'Quick notes', title: 'Quick notes' }] : stage.subs.map((sub) => ({ idx: slideIndex(`${stage.id}.${sub.id}`), label: esc(sub.name), title: sub.name }))),
       { idx: selahIndex(stage.id), label: `${star}Selah`, title: 'Selah' },
     ].map((chip) => {
-      const cs = chipState(deck, SLIDES[chip.idx], chip.idx);
+      const cs = chipState(deck, slideFor(deck, chip.idx), chip.idx);
       return `<a class="dt-chip ${cs}" href="#/d/${deck.id}/s/${chip.idx}" title="${esc(stage.name)}: ${esc(chip.title)}">${chip.label}</a>`;
     }).join('');
     const first = slideIndex(`${stage.id}.${stage.subs[0].id}`);

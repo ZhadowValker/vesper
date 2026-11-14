@@ -4,7 +4,7 @@ import { orderButtons, bindOrganize } from './organize-ui.js';
 import { store } from '../store.js';
 import { deckStatus, atSelah, SLIDES } from '../framework.js';
 import { stageBar, taskChips, taskListControls, bindTaskListControls } from './parts.js';
-import { esc, ask, confirmBox, ICON } from '../util.js';
+import { esc, askTask, confirmBox, ICON } from '../util.js';
 import { projectMap, mapLegend, drawTree } from '../mindmaps.js';
 import { go } from '../nav.js';
 import { exportDialog } from '../connect-ui.js';
@@ -22,7 +22,7 @@ export function projectView(id) {
     return `<div class="item"><a href="#/d/${d.id}">
       <div class="row between"><span class="t">${esc(d.title)}</span><span class="chip ${st.stageId ? 's-' + st.stageId : st.tone}">${esc(st.label)}</span></div>
       ${taskChips(d)}
-      ${stageBar(d.finished ? SLIDES.length - 1 : d.reached)}
+      ${stageBar(d.finished ? SLIDES.length - 1 : d.reached, d)}
     </a>${orderButtons(d, decks, 'tasks', id)}</div>`;
   }).join('');
 
@@ -52,8 +52,8 @@ export function projectView(id) {
       const btn = e.target.closest('[data-act]');
       if (!btn) return;
       if (btn.dataset.act === 'new-deck') {
-        const title = await ask('Name this task', { ok: 'Create task', placeholder: 'Plan the move' });
-        if (title) go(`#/d/${store.addDeck(id, title).id}`);
+        const task = await askTask();
+        if (task?.title) go(`#/d/${store.addDeck(id, task.title, task.mode).id}`);
       } else if (btn.dataset.act === 'export') {
         exportDialog({ project, decks });
       } else if (btn.dataset.act === 'delete-project') {
