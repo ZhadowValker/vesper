@@ -45,8 +45,11 @@ function serveFile(req, res, pathname) {
   let rel = decodeURIComponent(pathname).replace(/^\/+/, '') || 'index.html';
   if (rel.endsWith('/')) rel += 'index.html';
   const full = path.resolve(root, rel);
-  const top = rel.split('/')[0];
-  const ok = (PUBLIC_FILES.has(rel) || PUBLIC_DIRS.includes(top)) && full.startsWith(root + path.sep);
+  // Check the normalized path, not the raw first segment: an encoded slash in
+  // "css/../data/..." must never turn the public CSS directory into data access.
+  const publicRel = path.relative(root, full).split(path.sep).join('/');
+  const top = publicRel.split('/')[0];
+  const ok = (PUBLIC_FILES.has(publicRel) || PUBLIC_DIRS.includes(top)) && full.startsWith(root + path.sep);
   if (!ok || !fs.existsSync(full) || !fs.statSync(full).isFile()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('Not found'); return; }
   const type = TYPES[path.extname(full).toLowerCase()] || 'application/octet-stream';
   res.writeHead(200, { 'Content-Type': type, 'Cache-Control': rel === 'sw.js' || rel === 'index.html' ? 'no-cache' : 'public, max-age=300' });

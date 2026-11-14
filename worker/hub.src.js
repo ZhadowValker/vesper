@@ -62,13 +62,31 @@ async function loadState(env) {
 // Scope the save queue to the backing store and user, not the per-request env wrapper.
 // KV has no cross-isolate transaction: this queue protects one running hub instance.
 const stateWrites = new WeakMap();
+const dailySnapshots = new WeakMap();
+async function backupState(env, state) {
+  const backing = env.RAW || env.VESPER;
+  if (backing.dailyBackups) return; // server-store snapshots the complete file itself.
+  let days = dailySnapshots.get(backing);
+  if (!days) { days = new Map(); dailySnapshots.set(backing, days); }
+  const day = new Date().toISOString().slice(0, 10);
+  const user = env.UID || 'owner';
+  if (days.get(user) === day) return;
+  const key = `backup:${day}`;
+  // The key is inside the same user namespace as state, never a public endpoint.
+  if (!(await env.VESPER.get(key))) {
+    await env.VESPER.put(key, JSON.stringify(state), { expirationTtl: 14 * 86400 });
+  }
+  days.set(user, day);
+}
 function saveState(env, changed) {
   const backing = env.RAW || env.VESPER;
   let queues = stateWrites.get(backing);
   if (!queues) { queues = new Map(); stateWrites.set(backing, queues); }
   const key = env.UID || 'owner';
   const write = (queues.get(key) || Promise.resolve()).then(async () => {
-    const merged = mergeStates(await loadState(env), changed);
+    const latest = await loadState(env);
+    const merged = mergeStates(latest, changed);
+    await backupState(env, latest.projects.length || latest.decks.length || Object.keys(latest.deleted).length ? latest : merged);
     await env.VESPER.put('state', JSON.stringify(merged));
     return merged;
   });
@@ -150,7 +168,7 @@ const gPage = (title, text, env) => new Response(
 // Every person gets their own space: the same code runs on a view of storage that adds a prefix to every key.
 const ownerEnv = (env) => ({ ...env, RAW: env.VESPER, UID: 'owner', OWNER: true });
 function scopedKV(kv, prefix) {
-  return { get: (k, t) => kv.get(prefix + k, t), put: (k, v) => kv.put(prefix + k, v), delete: (k) => kv.delete(prefix + k) };
+  return { get: (k, t) => kv.get(prefix + k, t), put: (k, v, options) => kv.put(prefix + k, v, options), delete: (k) => kv.delete(prefix + k) };
 }
 const userEnv = (env, sub) => ({ ...env, RAW: env.VESPER, VESPER: scopedKV(env.VESPER, `u:${sub}:`), UID: sub, OWNER: false });
 

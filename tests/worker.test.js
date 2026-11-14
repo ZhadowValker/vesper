@@ -509,7 +509,7 @@ await test('file KV queues puts and deletes and leaves atomic JSON', async () =>
     assert.equal(Object.keys(saved).length, 29);
     assert.equal(await disk.get('extra', 'json'), 'kept');
     assert.equal(await disk.get('key0'), null);
-    assert.deepEqual(await fs.readdir(dir), ['vesper-data.json']);
+    assert.deepEqual((await fs.readdir(dir)).sort(), ['backups', 'vesper-data.json']);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
@@ -525,6 +525,168 @@ await test('file KV never overwrites corrupt data with an empty state', async ()
     await assert.rejects(createFileStore(dir).put('state', '{}'));
     assert.equal(await fs.readFile(file, 'utf8'), 'broken JSON');
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+await test('file backups keep one immutable daily snapshot and rotate after 14 days', async () => {
+  const { createFileStore } = await import('../server-store.mjs');
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vesper-backups-'));
+  let clock = Date.parse('2026-01-01T12:00:00Z');
+  const disk = createFileStore(dir, { now: () => clock });
+  try {
+    await disk.put('state', '{"first":true}');
+    const backup = path.join(dir, 'backups', '2026-01-01.json');
+    const original = await fs.readFile(backup, 'utf8');
+    await Promise.all([disk.put('state', '{"second":true}'), disk.put('other', '"kept"')]);
+    assert.equal(await fs.readFile(backup, 'utf8'), original);
+    assert.equal(JSON.parse(JSON.parse(original).state).first, true);
+    await fs.writeFile(path.join(dir, 'backups', 'keep-me.txt'), 'not a snapshot');
+    for (let day = 2; day <= 16; day++) {
+      clock = Date.parse(`2026-01-${String(day).padStart(2, '0')}T12:00:00Z`);
+      await disk.put('state', JSON.stringify({ day }));
+    }
+    const files = await fs.readdir(path.join(dir, 'backups'));
+    const dates = files.filter((f) => f.endsWith('.json')).sort();
+    assert.equal(dates.length, 14); assert.equal(dates[0], '2026-01-03.json');
+    assert.equal(dates.at(-1), '2026-01-16.json'); assert.ok(files.includes('keep-me.txt'));
+    // Rotation and same-day immutability also work after restarting the store.
+    await createFileStore(dir, { now: () => clock }).put('after-restart', '"yes"');
+    assert.equal((await fs.readdir(path.join(dir, 'backups'))).length, 15);
+    assert.equal((await disk.get('state', 'json')).day, 16);
+    assert.equal((await fs.readdir(dir)).some((f) => f.endsWith('.tmp')), false);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+await test('Worker snapshots are daily, immutable, expire in 14 days and isolate users', async () => {
+  const values = new Map(), options = new Map();
+  const disk = {
+    get: async (key, type) => values.has(key) ? type === 'json' ? JSON.parse(values.get(key)) : values.get(key) : null,
+    put: async (key, value, opts) => { values.set(key, value); options.set(key, opts); },
+    delete: async (key) => values.delete(key),
+  };
+  const testEnv = { APP_TOKEN: 'snapshot-test', VESPER: disk };
+  const request = (path, body, token = 'snapshot-test') => hub.fetch(new Request(`https://hub.example${path}`, {
+    method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }), testEnv);
+  const state = { projects: [{ id: 'p', name: 'First', updated: 1 }], decks: [], deleted: {} };
+  assert.equal((await request('/sync', { state })).status, 200);
+  const key = `backup:${new Date().toISOString().slice(0, 10)}`;
+  const first = values.get(key);
+  assert.equal(JSON.parse(first).projects[0].name, 'First');
+  assert.equal(options.get(key).expirationTtl, 14 * 86400);
+  state.projects[0] = { ...state.projects[0], name: 'Second', updated: 2 };
+  await request('/sync', { state });
+  assert.equal(values.get(key), first);
+  // A real scoped user exercises namespace isolation and KV option forwarding.
+  const token = 'scoped-snapshot-test';
+  const hash = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))).toString('hex');
+  values.set(`sess:${hash}`, JSON.stringify({ sub: 'backup-user', email: 'test@example.invalid', owner: false, exp: Date.now() + 60000 }));
+  assert.equal((await request('/sync', { state }, token)).status, 200);
+  const scoped = `u:backup-user:${key}`;
+  assert.ok(values.has(scoped));
+  assert.equal(options.get(scoped).expirationTtl, 14 * 86400);
+  assert.equal(values.get(key), first);
+});
+
+await test('Worker daily snapshot TTL rotates storage across fifteen days', async () => {
+  const RealDate = Date;
+  let clock = RealDate.parse('2026-02-01T12:00:00Z');
+  const values = new Map(), expires = new Map();
+  const disk = {
+    async get(key, type) {
+      if (expires.has(key) && expires.get(key) <= clock) { values.delete(key); expires.delete(key); }
+      return values.has(key) ? type === 'json' ? JSON.parse(values.get(key)) : values.get(key) : null;
+    },
+    async put(key, value, opts) {
+      values.set(key, value);
+      if (opts?.expirationTtl) expires.set(key, clock + opts.expirationTtl * 1000);
+    },
+  };
+  globalThis.Date = class extends RealDate {
+    constructor(...args) { super(...(args.length ? args : [clock])); }
+    static now() { return clock; }
+  };
+  try {
+    for (let day = 1; day <= 15; day++) {
+      clock = RealDate.parse(`2026-02-${String(day).padStart(2, '0')}T12:00:00Z`);
+      const state = { projects: [{ id: 'p', name: `Day ${day}`, updated: day }], decks: [], deleted: {} };
+      const res = await hub.fetch(new Request('https://hub.example/sync', {
+        method: 'PUT', headers: { Authorization: 'Bearer rotation-test' }, body: JSON.stringify({ state }),
+      }), { APP_TOKEN: 'rotation-test', VESPER: disk });
+      assert.equal(res.status, 200);
+    }
+    for (const key of [...values.keys()]) await disk.get(key);
+    assert.equal(await disk.get('backup:2026-02-01'), null);
+    assert.equal([...values.keys()].filter((k) => k.startsWith('backup:')).length, 14);
+    assert.equal(JSON.parse(await disk.get('state')).projects[0].name, 'Day 15');
+  } finally { globalThis.Date = RealDate; }
+});
+
+await test('Node server accepts authenticated hub calls and never serves data or backups', async () => {
+  const { spawn } = await import('node:child_process');
+  const { randomBytes } = await import('node:crypto');
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { once } = await import('node:events');
+  const { fileURLToPath } = await import('node:url');
+  // Use an isolated subfolder under the app's private data tree so traversal
+  // attempts exercise the real default layout without touching the running data.
+  const privateRoot = fileURLToPath(new URL('../data/', import.meta.url));
+  await fs.mkdir(privateRoot, { recursive: true });
+  const dir = await fs.mkdtemp(path.join(privateRoot, 'http-test-'));
+  // Disposable token exists only in memory/child environment, never in test output
+  // or a file. This is NOT the running Replit copy's APP_TOKEN Secret.
+  const token = randomBytes(32).toString('hex');
+  const boot = `
+    import http from 'node:http';
+    const listen = http.Server.prototype.listen;
+    http.Server.prototype.listen = function (...args) {
+      this.once('listening', () => process.send({ port: this.address().port }));
+      return listen.apply(this, args);
+    };
+    await import('./server.mjs');
+  `;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', boot], {
+    cwd: new URL('../', import.meta.url),
+    env: { APP_TOKEN: token, DATA_DIR: dir, PORT: '0' },
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  });
+  try {
+    const [{ port }] = await once(child, 'message', { signal: AbortSignal.timeout(10000) });
+    const url = `http://127.0.0.1:${port}`;
+    const request = (route, init = {}) => fetch(url + route, { ...init, signal: AbortSignal.timeout(5000) });
+    assert.equal((await request('/')).status, 200);
+    assert.equal((await request('/sync')).status, 401);
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    assert.equal((await request('/sync', { headers })).status, 200);
+    const rpc = (id, name) => request('/mcp', {
+      method: 'POST', headers,
+      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'vesper_create_project', arguments: { name } } }),
+    });
+    const responses = await Promise.all([rpc(1, 'HTTP A'), rpc(2, 'HTTP B')]);
+    for (const r of responses) {
+      assert.equal(r.status, 200);
+      assert.ok(!(await r.json()).result.isError);
+    }
+    const saved = await (await request('/sync', { headers })).json();
+    for (const name of ['HTTP A', 'HTTP B']) assert.ok(saved.state.projects.some((p) => p.name === name));
+    assert.ok((await fs.readdir(path.join(dir, 'backups'))).some((f) => f.endsWith('.json')));
+    const privatePath = `data%2f${path.basename(dir)}%2f`;
+    const day = new Date().toISOString().slice(0, 10);
+    for (const route of [
+      '/data/vesper-data.json', '/data/backups/', '/backups/', '/server-store.mjs', '/worker/hub.src.js',
+      `/css/..%2f${privatePath}vesper-data.json`, `/css/..%2f${privatePath}backups%2f${day}.json`,
+    ]) {
+      assert.equal((await request(route)).status, 404);
+    }
+  } finally {
+    const exited = once(child, 'exit');
+    child.kill();
+    await exited;
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);

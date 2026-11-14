@@ -27,8 +27,17 @@ One Cloudflare Worker that gives Vesper three extras. The app works fine without
 ## Notes
 
 - `worker/vesper-hub.js` is generated from the app's own code. After changing app logic run `node worker/build.js`, then paste the new file.
-- Sync merges by newest edit per task, and deletions are remembered. Edits made on two devices at the same moment to the same task keep the newest one.
+- Sync merges each step note, tick, Selah answer/pass and task field independently; the newest edit to that item wins. Cleared items and task/project deletions are remembered. Old backups without item timestamps still load, using the task's `updated` time as the fallback.
+- Hub saves re-read and merge the latest state inside a per-user, in-process queue. Node file writes (including non-state keys and deletes) also share one atomic-write queue. Run only one Node process per `DATA_DIR`.
+- **Cloudflare limitation:** KV is eventually consistent and has no transactional compare-and-swap. The queue prevents overlapping saves inside one Worker isolate, but it cannot serialize different isolates/regions. Strict global write safety needs a single writer such as a Durable Object; this change intentionally does not add that deployment requirement.
 - Run `node tests/worker.test.js` to test the hub locally.
+
+## Automatic daily snapshots
+
+- Node: the first write on each UTC date snapshots the previous good file under `DATA_DIR/backups/YYYY-MM-DD.json`. On a new install, it snapshots the first value instead. Snapshots include the entire private KV file. They are written atomically, never replaced during that day, and pruned to today plus the previous thirteen UTC dates. Rotation runs on writes; no new snapshot is needed while the data is idle.
+- Worker: the first state save each UTC day stores the previous state (or first state on a new account) at `backup:YYYY-MM-DD`, in that person's KV namespace, with a 14-day `expirationTtl`. This also runs on writes, not a scheduled trigger.
+- Snapshots are private: there is no HTTP download endpoint. Node's public-file allowlist also rejects encoded traversal paths into data or backups. Keep `DATA_DIR` outside the public asset folders, and protect snapshots as carefully as the primary data.
+- These snapshots supplement, rather than replace, device exports and the optional Google Drive backup. They do not provide a cross-region KV transaction or an automatic restore.
 
 ## Run it on your own Node.js hosting (Hostinger) instead of Cloudflare
 
