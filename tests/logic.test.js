@@ -14,6 +14,7 @@ const { projectMap, deckMap } = await import('../js/mindmaps.js');
 const { STAGES, SLIDES, tickKey, subDone, stageState, chipState, deckStatus, atSelah, firstSlideOf, selahIndex } = fw;
 let passed = 0;
 const test = (name, fn) => { fn(); passed++; console.log('ok', name); };
+const testAsync = async (name, fn) => { await fn(); passed++; console.log('ok', name); };
 
 test('framework has 5 stages, 20 sub-stages, 34 steps', () => {
   assert.equal(STAGES.length, 5);
@@ -352,7 +353,7 @@ test('Interview: skip and stop are understood without the AI; everything fills t
 
 
 // ---- merge and sync ----
-import { mergeStates, sameState, emptyState } from '../js/merge.js';
+import { mergeStates, sameState, emptyState, stampDeck } from '../js/merge.js';
 test('merge: newest wins, deletions stick, orphans dropped', () => {
   const p = { id: 'p', name: 'P', created: 1, updated: 1 };
   const d = (t, u) => ({ id: 'd', projectId: 'p', title: t, updated: u, created: 1, notes: {}, ticks: {}, selah: {} });
@@ -377,4 +378,115 @@ test('export: markdown keeps notes and ticks; calendar formats', () => {
   assert.match(googleCalendarLink({ title: 'a b', start }), /dates=20261027T090000%2F20261027T093000/);
   assert.match(icsFile({ title: 'a,b', start }), /SUMMARY:a\\,b\r\nDESCRIPTION:/);
 });
+test('merge: independent step notes and ticks survive two-device edits', () => {
+  const p = { id: 'p', name: 'P', created: 1, updated: 1 };
+  const base = { id: 'd', projectId: 'p', title: 'T', updated: 10, notes: {}, ticks: {}, selah: {}, slide: 0 };
+  const a = structuredClone(base), b = structuredClone(base);
+  a.notes['vision.why#0'] = 'Device A'; a.ticks['vision.why:0'] = true;
+  b.notes['vision.why#1'] = 'Device B'; b.ticks['vision.why:1'] = true;
+  stampDeck(a, base, 20); stampDeck(b, base, 30);
+  const state = (d) => ({ projects: [p], decks: [d], deleted: {} });
+  const merged = mergeStates(state(a), state(b));
+  assert.deepEqual(merged.decks[0].notes, { 'vision.why#0': 'Device A', 'vision.why#1': 'Device B' });
+  assert.deepEqual(merged.decks[0].ticks, { 'vision.why:0': true, 'vision.why:1': true });
+  assert.ok(sameState(merged, mergeStates(state(b), state(a))));
+  assert.ok(sameState(merged, mergeStates(merged, state(a))));
+});
+
+test('merge: fields, Selah answers and passes merge independently', () => {
+  const base = { id: 'd', projectId: 'p', title: 'Before', updated: 10, notes: {}, ticks: {}, selah: {}, slide: 0, finished: null, passes: 1, loops: 0 };
+  const a = structuredClone(base), b = structuredClone(base);
+  a.title = 'Renamed'; a.finished = 19; a.loops = 1; a.passes = 2;
+  a.notes['vision.selah'] = 'Answer A'; a.selah.vision = true;
+  b.slide = 4; b.notes['research.selah'] = 'Answer B'; b.selah.research = true;
+  stampDeck(a, base, 20); stampDeck(b, base, 30);
+  const state = (d) => ({ projects: [{ id: 'p' }], decks: [d] });
+  const d = mergeStates(state(a), state(b)).decks[0];
+  assert.equal(d.title, 'Renamed'); assert.equal(d.finished, 19); assert.equal(d.slide, 4);
+  assert.equal(d.loops, 1); assert.equal(d.passes, 2);
+  assert.deepEqual(d.selah, { research: true, vision: true });
+  assert.equal(d.notes['vision.selah'], 'Answer A'); assert.equal(d.notes['research.selah'], 'Answer B');
+});
+
+test('merge: item clears and unticks beat older edits, not unrelated changes', () => {
+  const base = { id: 'd', projectId: 'p', title: 'T', updated: 10, notes: { x: 'old', y: 'keep' }, ticks: { x: true }, selah: { vision: true }, selahBy: { vision: 'claude' } };
+  const clear = structuredClone(base), edit = structuredClone(base);
+  delete clear.notes.x; clear.ticks.x = false; delete clear.selah.vision; delete clear.selahBy.vision;
+  edit.notes.x = 'older'; edit.notes.y = 'newer unrelated';
+  stampDeck(clear, base, 30); stampDeck(edit, base, 20);
+  const state = (d) => ({ projects: [{ id: 'p' }], decks: [d] });
+  const merged = mergeStates(state(clear), state(edit));
+  const d = merged.decks[0];
+  assert.equal(d.notes.x, undefined); assert.equal(d.notes.y, 'newer unrelated');
+  assert.equal(d.ticks.x, false); assert.equal(d.selah.vision, undefined); assert.equal(d.selahBy.vision, undefined);
+  assert.equal(mergeStates(merged, state(base)).decks[0].notes.x, undefined);
+});
+
+test('merge: legacy data uses task time and deletions still win', () => {
+  const base = { id: 'd', projectId: 'p', title: 'T', created: 1, updated: 10, notes: { x: 'legacy' }, ticks: {}, selah: {} };
+  const newer = { ...base, updated: 20, notes: { x: 'new legacy' } };
+  const state = (d) => ({ projects: [{ id: 'p', updated: 1 }], decks: [d], deleted: {} });
+  assert.equal(mergeStates(state(base), state(newer)).decks[0].notes.x, 'new legacy');
+  const modern = structuredClone(base);
+  modern.title = 'New title'; stampDeck(modern, base, 30);
+  const combined = mergeStates(state(modern), state(newer));
+  assert.equal(combined.decks[0].title, 'New title'); assert.equal(combined.decks[0].notes.x, 'new legacy');
+  assert.equal(mergeStates(combined, { projects: [], decks: [], deleted: { d: 30 } }).decks.length, 0);
+  assert.equal(mergeStates(combined, { projects: [], decks: [], deleted: { p: 40 } }).decks.length, 0);
+});
+
+test('store: saving stamps only changed items and retains clears across sync', () => {
+  store.reset();
+  const p = store.addProject('Clock test'), d = store.addDeck(p.id, 'Task');
+  const before = structuredClone(d);
+  d.notes.x = 'one'; d.selah.vision = true; store.save(d);
+  assert.equal(d._changed.fields.title, before.updated);
+  const xTime = d._changed.notes.x;
+  d.notes.y = 'two'; delete d.selah.vision; store.save(d);
+  assert.equal(d._changed.notes.x, xTime);
+  assert.ok(d._changed.selah.vision > xTime);
+  store.applyMerged(store.snapshot());
+  d.title = 'Renamed'; store.save(d);
+  assert.equal(d._changed.notes.x, xTime);
+  const exported = store.exportJSON(); store.importJSON(exported);
+  assert.equal(store.allDecks()[0]._changed.notes.x, xTime);
+});
+
+test('merge: equal-time conflicts converge and no-op merges are stable', () => {
+  const state = (note) => ({ projects: [{ id: 'p', name: 'P' }], decks: [{ id: 'd', projectId: 'p', updated: 5, notes: { x: note } }] });
+  const a = state('a'), b = state('b');
+  const merged = mergeStates(a, b);
+  assert.ok(sameState(merged, mergeStates(b, a)));
+  assert.ok(sameState(merged, mergeStates(merged, merged)));
+});
+
+await testAsync('sync: edits made during a request survive its response', async () => {
+  const oldFetch = globalThis.fetch, oldDocument = globalThis.document;
+  globalThis.document = { activeElement: null, dispatchEvent() {} };
+  const { syncNow, saveSync } = await import('../js/sync.js');
+  store.reset();
+  const p = store.addProject('In-flight sync'), d = store.addDeck(p.id, 'Task');
+  d.notes.x = 'sent'; store.save(d);
+  let respond;
+  globalThis.fetch = async (url, init) => {
+    if (url.endsWith('/sync')) {
+      const { state } = JSON.parse(init.body);
+      return new Promise((resolve) => { respond = () => resolve(new Response(JSON.stringify({ state }), { headers: { 'Content-Type': 'application/json' } })); });
+    }
+    return new Response(JSON.stringify({ settings: { ai: {} } }));
+  };
+  try {
+    saveSync({ url: 'https://sync.example.invalid', token: 'test-fixture' });
+    const syncing = syncNow();
+    d.notes.x = 'edited while sending'; store.save(d);
+    respond();
+    const status = await syncing;
+    assert.equal(status.state, 'ok');
+    assert.equal(store.deck(d.id).notes.x, 'edited while sending');
+  } finally {
+    saveSync(null);
+    globalThis.fetch = oldFetch; globalThis.document = oldDocument;
+  }
+});
+
 console.log(`\n${passed} tests passed`);

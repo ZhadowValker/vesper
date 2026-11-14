@@ -40,7 +40,8 @@ export async function syncNow({ force = false } = {}) {
     if (res.status === 401) throw new Error('The token was not accepted.');
     if (!res.ok) throw new Error('The hub answered with ' + res.status + '.');
     const { state: remote } = await res.json();
-    const merged = mergeStates(local, remote);
+    // Edits made while the request was in flight must not be replaced by its snapshot.
+    const merged = mergeStates(store.snapshot(), remote);
     if (!sameState(merged, store.snapshot())) {
       if (typing() && !force) { status = { state: 'later', at: Date.now(), error: '' }; emit(); return status; }
       store.applyMerged(merged);

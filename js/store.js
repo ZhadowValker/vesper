@@ -1,5 +1,6 @@
 // All data lives on this device (localStorage) as one JSON document.
 // Everything goes through this module, so the storage can be swapped later.
+import { stampDeck } from './merge.js';
 
 const KEY = 'vesper.v1';
 
@@ -17,6 +18,8 @@ function read() {
 }
 
 let state = read();
+const copyDecks = () => new Map(state.decks.map((d) => [d.id, JSON.parse(JSON.stringify(d))]));
+let savedDecks = copyDecks();
 
 const listeners = [];
 let quiet = false;   // true while a sync is writing, so it does not trigger another sync
@@ -27,6 +30,7 @@ function write() {
   } catch (e) {
     console.warn('Vesper: could not save', e);
   }
+  savedDecks = copyDecks();
   if (!quiet) listeners.forEach((fn) => { try { fn(); } catch (e) { /* a listener must not break saving */ } });
 }
 
@@ -80,7 +84,7 @@ export const store = {
     write();
   },
   save(deck) {
-    deck.updated = Date.now();
+    stampDeck(deck, savedDecks.get(deck.id));
     write();
   },
 

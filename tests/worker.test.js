@@ -459,6 +459,42 @@ await test('concurrent sync saves re-read and retain both devices', async () => 
   copies.forEach((s) => assert.ok(saved.projects.some((p) => p.id === s.projects[0].id)));
 });
 
+await test('simultaneous connector edits to different steps of one task survive', async () => {
+  await tool('vesper_create_project', { name: 'Parallel task edits' });
+  const made = await tool('vesper_create_task', { project: 'Parallel task edits', title: 'Shared task' });
+  assert.ok(!made.isError);
+  const saved = JSON.parse(kv.get('state'));
+  const d = saved.decks.find((x) => x.title === 'Shared task');
+  assert.ok(d);
+  const results = await Promise.all([0, 1].map((step) => tool('vesper_set_note', {
+    task: d.id, slide: 'vision.why', step, text: `Parallel answer ${step}`,
+  })));
+  results.forEach((r) => assert.ok(!r.isError, JSON.stringify(r)));
+  const task = JSON.parse(kv.get('state')).decks.find((x) => x.id === d.id);
+  for (const step of [0, 1]) {
+    assert.equal(task.notes[`vision.why#${step}`], `Parallel answer ${step}`);
+    assert.equal(task.ticks[`vision.why:${step}`], true);
+    assert.ok(task._changed.notes[`vision.why#${step}`]);
+  }
+});
+
+await test('sync keeps independent modern device edits and old-format notes', async () => {
+  const { stampDeck } = await import('../js/merge.js');
+  const p = { id: 'step-sync-p', name: 'Two devices', updated: 1 };
+  const base = { id: 'step-sync-d', projectId: p.id, title: 'Shared', updated: 10, notes: { legacy: 'kept' }, ticks: {}, selah: {} };
+  const a = structuredClone(base), b = structuredClone(base);
+  a.notes.a = 'device A'; b.notes.b = 'device B';
+  stampDeck(a, base, 20); stampDeck(b, base, 30);
+  await Promise.all([a, b].map((d) => call('/sync', {
+    method: 'PUT', headers: app, body: { state: { projects: [p], decks: [d] } },
+  })));
+  const task = JSON.parse(kv.get('state')).decks.find((d) => d.id === base.id);
+  assert.deepEqual(task.notes, { a: 'device A', b: 'device B', legacy: 'kept' });
+  await call('/sync', { method: 'PUT', headers: app, body: { state: { projects: [p], decks: [], deleted: { [base.id]: 40 } } } });
+  await call('/sync', { method: 'PUT', headers: app, body: { state: { projects: [p], decks: [a] } } });
+  assert.ok(!JSON.parse(kv.get('state')).decks.some((d) => d.id === base.id));
+});
+
 await test('file KV queues puts and deletes and leaves atomic JSON', async () => {
   const { createFileStore } = await import('../server-store.mjs');
   const fs = await import('node:fs/promises');

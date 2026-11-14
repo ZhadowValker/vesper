@@ -82,6 +82,7 @@ const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(3
 
 // The same small interface as the app's store, over the online copy of the data.
 function makeDb(state) {
+  const savedDecks = new Map(state.decks.map((d) => [d.id, JSON.parse(JSON.stringify(d))]));
   return {
     projects: () => state.projects,
     project: (id) => state.projects.find((p) => p.id === id),
@@ -100,9 +101,13 @@ function makeDb(state) {
         passes: 1, loops: 0, finished: null, timer: null,
       };
       state.decks.push(d);
+      savedDecks.set(d.id, JSON.parse(JSON.stringify(d)));
       return d;
     },
-    save(deck) { deck.updated = Date.now(); },
+    save(deck) {
+      stampDeck(deck, savedDecks.get(deck.id));
+      savedDecks.set(deck.id, JSON.parse(JSON.stringify(deck)));
+    },
     removeDeck(id) { state.deleted = state.deleted || {}; state.deleted[id] = Date.now(); state.decks = state.decks.filter((d) => d.id !== id); },
     removeProject(id) {
       state.deleted = state.deleted || {};
