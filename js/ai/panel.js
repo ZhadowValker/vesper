@@ -199,17 +199,17 @@ export function openChatPanel({ focusId = null, mode = null } = {}) {
     const ps = dlg.querySelector('#iv-proj').value;
     if (ps === '__new') {
       const name = dlg.querySelector('#iv-pname').value.trim();
-      if (!name) return fail('Give the new project a name.');
+      if (!name) return fail('Give the new Area a name.');
       project = store.addProject(name);
     } else project = store.project(ps);
     let deck;
     const ts = dlg.querySelector('#iv-task').value;
     if (ts === '__new' || ps === '__new') {
       const name = dlg.querySelector('#iv-tname').value.trim();
-      if (!name) { if (ps === '__new') store.removeProject(project.id); return fail('Give the new task a name.'); }
+      if (!name) { if (ps === '__new') store.removeProject(project.id); return fail('Give the new Project a name.'); }
       deck = store.addDeck(project.id, name);
     } else deck = store.deck(ts);
-    if (!deck) return fail('Pick a task.');
+    if (!deck) return fail('Pick a Full Project, not a simple Task.');
     if (chat.iv.taskId !== deck.id) { chat.iv.msgs = []; chat.iv.skipped = []; }
     chat.iv.taskId = deck.id; chat.focus = deck.id; ivUndo = null; dirty = true;
     const pr = progress(deck);

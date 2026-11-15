@@ -98,38 +98,72 @@ Good to know:
 
 Anyone signed in with Google can open the account dialog, press **Create my Claude link** under Hub details, and paste the link into Claude (Settings, Connectors, Add custom connector). The link is `https://your-hub/mcp/u/<token>` and reaches only that person's own projects. It is shown once, works like a password, and **Replace link** or **Turn off** ends the old one. Deleting the account removes it too. Your own owner link (`/mcp/<APP_TOKEN>`) is unchanged.
 
-## Organization and compact connector tools
+## Areas, Projects and simple Tasks (version 2)
 
-Tasks also support `mode: "quick"` (12 slides, one notes box per stage) or
-`"full"` (default, original 27 slides/34 steps). Pass optional `mode` to
-`vesper_create_task`, or change it with `vesper_set_task`; switching preserves
-both formats' notes, ticks and Selahs. Overview/get-task report the mode and
-mode-specific progress. For Quick tasks, `vesper_next_questions` returns at most
-one question per stage; save the answer to the returned `<stage>.quick` slide
-with no step (or `step: null`). The same five Selahs and finish policy apply.
+An **Area** is a named group. A **Project** belongs to exactly one Area and has
+the full 27-slide / 34-step Vesper flow. A **Task** is simple: title, tick, note,
+priority, due and order. It lives in Inbox, an Area or a Project. Projects never
+nest. Quick mode is removed; old Quick stage notes stay stored and read-only on
+the first matching Full slide, plus recap/export.
 
-All the original tools remain available. New tools:
-
-| Tool | Inputs |
+| Tool | Inputs / behavior |
 | --- | --- |
-| `vesper_rename` | Exactly one of `task` / `project` (id or exact name), plus `name` |
-| `vesper_move_task` | `task`, destination `project` |
-| `vesper_reorder` | `kind: "projects"` or `"tasks"`; `project` for tasks; either full `order` of ids, or `item` id and 1-based `position` |
-| `vesper_list_projects` | None; returns only ids, names and task counts |
+| `vesper_create_area` | `name` |
+| `vesper_create_project` | `area`, `title`, optional `priority`, `due` |
+| `vesper_create_task` | SIMPLE Task: `title`, optional `area` OR `project`, `priority`, `due`, `note`; no location means Inbox |
+| `vesper_update_task` | `task`, optional `title`, `done`, `priority`, `due`, `note`; null clears priority/due |
+| `vesper_move_task` | Simple `task`, destination `inbox:true` OR `area` OR `project` |
+| `vesper_promote_task` | Open `task`; Inbox needs `area`. Note becomes Vision/Why first note; provenance retained |
+| `vesper_demote_project` | `project`, only if no notes/ticks/passed Selahs; child Tasks move to its Area |
+| `vesper_move_project` | `project`, destination `area` |
+| `vesper_list_areas` | Area ids/names, Project counts and loose-Task counts |
+| `vesper_list_projects` | DEPRECATED alias of list_areas, not a list of Full Projects |
+| `vesper_get_project` | `project`; includes contained Tasks |
+| `vesper_set_project` | `project`, optional priority/due; null clears |
+| `vesper_rename` | Exactly one `area` or `project`, plus `name`; old `task` aliases Project |
+| `vesper_reorder` | `kind:areas|projects|tasks`, full `order` OR `item` + 1-based `position`; `area` for Projects, one location for Tasks |
+| `vesper_delete_area`, `vesper_delete_simple_task` | `area` / `task`, explicit `confirm:true` |
+| `vesper_framework` | Model explanation plus all five stages |
 
-`vesper_overview` accepts optional `query`, `project`, `stage` (`vision`,
-`research`, `plan`, `execute`, `review`), `status` (`active`, `finished`,
-`not started`), `priority` (`P1`–`P4` or `none`), `dueBefore` (YYYY-MM-DD)
-and `limit` (default 25, range 1–1000). Filters combine; name search is
-case-insensitive and matches both project and task names. `active` means started
-and unfinished; due dates must be strictly earlier than `dueBefore`.
+Existing flow tools (`vesper_get_task`, `vesper_next_questions`, `vesper_set_note`,
+`vesper_tick`, `vesper_pass_selah`, `vesper_loop_back`, `vesper_finish`,
+`vesper_schedule`, `vesper_delete`, `vesper_set_task`) now use **`project`**.
+They still accept old **`task` as a Project alias**. Do not use flow tools or the
+interview for simple Tasks. Finish requires all Selahs, unless `force:true` and a
+short `reason`; unfinished simple Tasks are reported but do not block it.
 
-The result remains a JSON array of project groups for existing clients, but every
-task is one compact JSON line, including its project, current stage, priority,
-due date, filled-step count and any check note. Projects/tasks follow manual
-order. Existing priority/due tools, finish checks and Markdown exports are unchanged.
-Names, membership and order merge per field; equal ranks sort deterministically
-by id. Moving an item does not overwrite its notes or other task fields.
+`vesper_overview` is a JSON array with **one compact record per Project or Task**,
+including `kind`. Optional combined filters: `query` (titles/Area names),
+`kind:project|task`, `area`, `project`, `stage`, `status:active|finished|not started`,
+`priority:P1|P2|P3|P4|none`, exclusive `dueBefore`, and `limit` (25 default,
+1–1000). Active Projects are started and unfinished; active Tasks are open.
+Not-started/stage filters apply only to Projects. Use ids when names are ambiguous.
+Names, order, membership and every Task field (including atomic location) merge
+independently. Notes/ticks/Selahs retain their per-item clocks. Newer deletions win
+over older edits, and equal order ranks tie-break by id.
+
+### Upgrade a live version 1 hub
+
+**Back up before upgrading.** Export browser backups and copy Node `DATA_DIR` or
+export Worker KV. Pause writes, upgrade app and hub together, then **all devices
+should reload**, including offline/installed PWAs. No live deployment is performed
+by this branch.
+
+The hub stores v2; old groups become Areas and old decks become Full Projects
+without losing their ids or content. None become simple Tasks automatically.
+Version 1 backups still import, and v1 sync uploads migrate before merging so old
+clients cannot erase v2 Tasks. Old clients receive a legacy projection only.
+
+Before its first migration Node atomically keeps the original private KV file at
+`DATA_DIR/backups/pre-v2.json`; the Worker keeps each user's original state in
+private KV key `migration:v1` (namespaced for Google users). Neither expires.
+Snapshot failure aborts the migration write. Daily snapshots still have 14-day
+retention. These snapshots are not served over HTTP.
+
+Reload old devices promptly; they cannot display the new model. Cloudflare KV is
+eventually consistent: per-instance queues/latest-state merges are not distributed
+transactions. Keep offline exports too. A rollback must restore the saved v1 data,
+not just old code. See the root README and `docs/batch-6-plan.md` for the migration.
 
 ## Named owner access tokens
 

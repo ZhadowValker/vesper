@@ -31,8 +31,8 @@ export function draftMessages(deck, project, slide) {
   const idx = SLIDES.indexOf(slide);
   const existing = sub.steps.map((t, k) => (deck.notes[`${slide.key}#${k}`] || '').trim());
   const steps = sub.steps.map((t, k) => `${k + 1}. ${t}${existing[k] ? `  (they already wrote: ${existing[k]})` : ''}`).join('\n');
-  const user = `Project: ${project ? project.name : '(none)'}
-Task: ${deck.title}
+  const user = `Area: ${project ? project.name : '(none)'}
+Project: ${deck.title}
 
 What they have written so far:
 ${contextBefore(deck, idx)}
@@ -59,8 +59,8 @@ export function reviewMessages(deck, project, stage) {
     const n = (deck.notes[sl.key] || '').trim();
     if (n) here.push(`- ${sl.sub.name} / Notes: ${n}`);
   }
-  const user = `Project: ${project ? project.name : '(none)'}
-Task: ${deck.title}
+  const user = `Area: ${project ? project.name : '(none)'}
+Project: ${deck.title}
 
 Earlier stages:
 ${contextBefore(deck, end)}

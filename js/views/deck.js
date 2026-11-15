@@ -77,7 +77,7 @@ export function deckView(id) {
     async function onClick(e) {
       if (e.target.closest('[data-act="add-simple-task"]')) { await addTaskDialog({ kind: 'project', id }); rerender(); return; }
       if (e.target.closest('[data-act="demote-project"]')) {
-        if (!(await confirmBox('Make this a task?', 'Only an empty flow can become a Task. Any contained tasks move to its Area.'))) return;
+        if (!(await confirmBox('Make this a task?', 'Only an empty flow can become a Task. Any contained tasks move to its Area.', { ok: 'Make this a task', danger: false }))) return;
         try { store.demoteProject(id); go(`#/p/${deck.areaId}`); } catch (error) { notice('Could not make Task', error.message); }
         return;
       }
@@ -114,5 +114,5 @@ export function bindTaskDetails(root, deck) {
 }
 
 function notFound() {
-  return `<div class="page"><div class="card empty"><h2>Task not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/">Back to dashboard</a></div></div>`;
+  return `<div class="page"><div class="card empty"><h2>Project not found</h2><p class="muted lead-gap">It may have been deleted.</p><a class="btn" href="#/">Back to dashboard</a></div></div>`;
 }

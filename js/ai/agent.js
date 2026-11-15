@@ -154,7 +154,7 @@ Delete only after explicit confirmation from the person.
 For Full Project flow actions use project id (legacy task is accepted as a Project alias):
 {"type":"set_note","project":"id","slide":"vision.why","step":0,"text":"...","mode":"append"}
 {"type":"tick","project":"id","slide":"vision.why","step":0,"done":true}
-{"type":"pass_selah","project":"id","answer":"the person's answer"}
+{"type":"pass_selah","project":"id","stage":"vision","answer":"the person's answer"}
 {"type":"loop_back","project":"id","stage":"research"}
 {"type":"finish","project":"id"}; requires all Selahs, unless force:true and their short reason.
 {"type":"reopen","project":"id"}; {"type":"set_project","project":"id","priority":"P1","due":null}

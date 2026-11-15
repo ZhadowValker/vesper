@@ -27,8 +27,8 @@ export function nextQuestion(deck, skipped, prev) {
     }
   }
   if (!next) {
-    parts.push('Everything that can be asked is filled in. Open the task to read it through. Your notes are saved.');
-    links.push({ text: 'Open the task map', href: `#/d/${deck.id}` });
+    parts.push('Every Project step is filled in. Open the Project to read it through. Your notes are saved.');
+    links.push({ text: 'Open the Project map', href: `#/d/${deck.id}` });
     return { text: parts.join('\n\n'), target: null, links };
   }
   const head = (!prev || prev.slide.key !== next.slide.key) ? `**${label(next)}**\n` : '';
@@ -45,8 +45,8 @@ Always include a note for the step being asked about. Add notes for other listed
 export function extractMessages(deck, project, target, answer, skipped = []) {
   const idx = slideIndex(target.slide.key);
   const others = emptySteps(deck, skipped).filter((s) => s.key !== target.key).slice(0, 8);
-  const user = `Project: ${project ? project.name : '(none)'}
-Task: ${deck.title}
+  const user = `Area: ${project ? project.name : '(none)'}
+Project: ${deck.title}
 
 Already written:
 ${contextBefore(deck, idx + 1)}

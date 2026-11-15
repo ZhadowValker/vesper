@@ -3,7 +3,10 @@
 [![CI](https://github.com/ZhadowValker/vesper/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ZhadowValker/vesper/actions/workflows/ci.yml)
 
 Vision, Research, Plan, Execute, Review, with a **Selah** pause at the end of each stage.
-Words used in the app: a **Project** holds **Tasks**. Each task is played as a **deck** of 27 **slides**. There are three dashboards: main, project and task.
+An **Area** groups work (Ministry, Work, Home). A **Project** belongs to one Area
+and has the full Vesper flow: 27 slides, 34 steps and five Selahs. A simple
+**Task** has a title, done tick, priority, due date and short note, without slides.
+Tasks live in Inbox, directly in an Area, or inside a Project. Projects never nest.
 
 ## Technology decision
 
@@ -168,31 +171,56 @@ Edit `js/framework.js` only. Stage names, sub-stages, steps and Selah questions 
 
 ## Known limits of this first version
 
-- Data is stored per browser on one device. Use Export backup and Import backup to move it.
+- Data is stored per browser unless optional hub Sync is enabled. Export backups regularly.
 - The slide sorter is still not built.
 
-## Full and Quick tasks
+## Areas, Projects and simple Tasks (state version 2)
 
-Choose **Full** or **Quick** when creating a task (also in the AI interview setup),
-or change **Mode** on its task dashboard; it applies immediately without saving
-priority or due-date drafts (use **Save details** for those). Full keeps the original 27
-slides and 34 steps. Quick has 12 slides: cover, one notes slide and one Selah
-per stage, then recap. Sub-stage names act as short prompts for each stage note.
-All five Selahs are still required for normal Finish; early-finish rules are
-unchanged. Progress, maps, overview, interview and Markdown understand both modes.
+**New** asks Task or Project. A Task needs only a title and defaults to Inbox.
+A Project needs a title and an Area. Home shows Inbox, Areas, Resume and mixed
+Project/Task sorting and priority filtering; an Area shows its Projects and loose
+Tasks. A Project has its mind map, slide player and own Task list. Priority and due
+date remain on **Save details**. Simple Tasks can be edited, ticked, moved and
+reordered independently. Sort/filter and Auto/Dark/Light preferences stay local.
 
-Switching modes never deletes notes, ticks or Selahs. Quick notes use separate
-`<stage>.quick` keys; Full-mode step notes remain stored and return when switching
-back. Retained Quick notes appear read-only on that stage's Full slides and are
-included in recap/export. Older tasks without a mode remain Full. Mode merges as
-its own field, and each Quick note uses the existing independent note clock.
-Stored slide indexes retain their original Full coordinates to avoid reinterpreting
-a cursor edited on another device; the UI shows the correct 12-slide positions.
+**Make this a project** promotes an open Task in its Area (Inbox asks which Area;
+a Project's Task becomes a sibling Project). Title, priority and due carry over;
+the note becomes Vision → Why's first step. Both records retain provenance and
+the original Task leaves Task lists. **Make this a task** is allowed only for a
+Project with no notes, ticks or passed Selahs. Its contained Tasks move to the
+Area, so none are lost. Open Tasks never block Project Finish; confirmation
+mentions them alongside unpassed Selahs. Forced connector/AI Finish still needs
+`force:true` and a short `reason`.
 
-The in-app AI and `vesper_create_task` accept optional `mode: "full" | "quick"`.
-`vesper_set_task` can change mode later. `vesper_next_questions` asks one question
-per stage for Quick tasks; save its answer with `vesper_set_note`, slide such as
-`vision.quick`, and no step (or `step: null`). Full questions are unchanged.
+Quick mode is removed, replaced by simple Tasks. Old Quick flows become Full
+Projects without deleting their separate stage notes. Those notes are read-only
+on the **first Full slide of the matching stage**, and remain in recap/export.
+No old flow is automatically converted into a simple Task.
+
+### Upgrading a version 1 notebook or live hub
+
+1. **Back up before upgrading**: export every important browser notebook and copy
+   the live Node `DATA_DIR` (or export the Worker's KV data). Keep a rollback copy
+   of the old server/Worker as well. This branch does not deploy production.
+2. Pause writes while upgrading the hub, then update the app and hub together.
+   Node writes `DATA_DIR/backups/pre-v2.json` before its first stored-v1 migration;
+   the Worker writes a private `migration:v1` snapshot per user. These pre-v2
+   snapshots do not expire. A failed snapshot prevents the migration write.
+3. **All devices should reload**, including installed/offline PWAs. Version 1
+   backups still import automatically. Old groups become Areas; old flow decks
+   become Projects with the same ids, notes, ticks, Selahs, order, metadata and
+   finish state. Browser migration first keeps `vesper.pre-v2` locally.
+4. The hub always stores v2. Old-client uploads are migrated **before merging**;
+   old clients receive a v1-compatible projection, so they cannot erase simple
+   Tasks they cannot see. Do not keep using old clients for new-model work.
+
+Sync merges Areas, Projects and Tasks per record/field, with atomic Task location
+and independent done/note clocks. Flow notes/ticks/Selahs keep their independent
+clocks; old values fall back to the record's updated time. Newer deletion
+tombstones beat older edits. Daily backups still rotate after 14 days. Cloudflare
+KV remains eventually consistent: the merge/queue cannot provide a cross-isolate
+transaction guarantee. Use a single Node hub for stronger in-process ordering.
+Rolling back requires restoring the pre-upgrade data, not just deploying old code.
 
 ## Telugu text offline
 
@@ -223,11 +251,19 @@ Off until you open **AI** on the home screen and add an address, a key and a mod
 
 ## AI assistant (optional)
 
-The dashboard stays the home screen. The **AI** button (home, task and slide pages) opens a chat panel (`js/ai/panel.js`). The settings icon inside the panel opens the address, key and model form. With AI set up you talk in plain words and the assistant (`js/ai/agent.js`) creates projects and tasks, fills step notes, ticks steps and moves a task forward. It can also pass a Selah (only with your answer to that stage's question, saved on the Selah slide and marked "Passed by Vesper AI", with a "Take this Selah back" button), loop back, finish or reopen a task, and delete a task or project after you say yes. Each turn that changes something has an Undo (only while nothing else has changed). Chat history is in `vesper.chat`, separate from task data.
+The **AI** button opens chat (`js/ai/panel.js`); its settings configure the model.
+The assistant creates Areas, Full Projects and simple Tasks; it can update, move
+and promote Tasks. Project flow actions fill notes/ticks, pass Selah only with your
+answer, loop back, finish or reopen. Deletion needs your explicit confirmation.
+Changes have Undo while nothing else has changed. Chat stays in `vesper.chat`,
+separate from notebook data.
 
 ### Interview mode
 
-The **Interview** tab in the AI panel asks the questions and fills the notes. Pick a project and task (or make new ones); the app asks one plain question per empty step in framework order (`js/ai/questions.js`, all 34). The AI only turns each answer into clean notes (`js/ai/interview.js`) and may fill other empty steps when an answer clearly covers them; if it fails, the person's own words are saved. "Skip" and "stop" work without the AI. At the end of each stage it reminds you of the Selah question and links to it, but never passes it.
+The **Interview** tab selects an Area and a Full Project (or creates them), never
+a simple Task. It asks one plain question per empty step (all 34), cleans your
+answers into notes, and falls back to your original words if AI fails. "Skip"
+and "stop" work without AI. Selah reminders link to the pause but never pass it.
 
 ## Hub: sync, Claude connector, export, calendar (optional)
 
@@ -239,29 +275,35 @@ A free Cloudflare Worker (`worker/vesper-hub.js`, setup in `worker/README.md`) a
 - **Add to calendar**: from a task, open Google Calendar with the entry filled in, or download an .ics file. With the optional Google link on the hub (`worker/README.md`), Vesper and Claude add and move events by themselves.
 - **Sign in with Google** (optional): each person gets a private space, with a copy saved in their own Google Drive. See `worker/README.md`.
 
-### Organizing tasks and connector tools
+### Connector tools (version 2)
 
-Task dashboards now have **Rename task** and **Move task**. A project dashboard has
-**Rename project**, task **Up/Down** controls, and the main dashboard has project
-**Up/Down** controls. Choose **Manual order** to follow the saved order; priority,
-due-date and recently-changed sorting remain available as browser-only preferences.
-Names, project membership and each item's order have independent merge clocks.
-Older saved data still works. Concurrent equal ranks use the item id as a stable
-tie-breaker; no tasks are removed or duplicated to resolve an order conflict.
+- `vesper_create_area(name)`; `vesper_create_project(area,title,priority?,due?)`.
+- `vesper_create_task(title,area?|project?,priority?,due?,note?)` creates a
+  **simple Task**. Omit location for Inbox.
+- `vesper_update_task(task,title?,done?,priority?,due?,note?)`.
+- `vesper_move_task(task,inbox:true|area|project)`, `vesper_promote_task(task,area?)`,
+  `vesper_demote_project(project)`, `vesper_move_project(project,area)`.
+- `vesper_list_areas` returns Area ids/names and Project/loose-Task counts.
+  **`vesper_list_projects` is a deprecated alias of list_areas**, not Full Projects.
+- `vesper_get_project`, `vesper_set_project` (priority/due; null clears) and all
+  existing flow tools (`vesper_get_task`, `vesper_next_questions`, `vesper_set_note`,
+  `vesper_tick`, `vesper_pass_selah`, `vesper_loop_back`, `vesper_finish`,
+  `vesper_schedule`, `vesper_delete`, `vesper_set_task`) take **`project`**.
+  The old **`task` argument remains a Project alias** on these flow tools.
+- `vesper_rename(area|project,name)` (old `task` aliases Project);
+  `vesper_reorder(kind:areas|projects|tasks,order|item+position)` takes an Area for
+  Projects, or one Inbox/Area/Project location for Tasks. Positions are 1-based.
+  `vesper_delete_area` and `vesper_delete_simple_task` require `confirm:true`.
+- `vesper_overview` returns mixed one-line records with a `kind` column. Filters:
+  `query`, `kind:project|task`, `area`, `project`, `stage`, `status`, `priority`,
+  `dueBefore` (exclusive), `limit` (25 default, max 1000). Active Projects are
+  started/unfinished; active Tasks are not done. Not-started applies to Projects.
+  Stage filters exclude simple Tasks. Names must be unique or use ids.
+- `vesper_framework` explains the model and returns the five-stage framework.
 
-The in-app AI supports `rename`, `move_task` and `reorder` actions. Claude has:
-
-- `vesper_rename`: exactly one `task` or `project`, plus `name`.
-- `vesper_move_task`: `task` and destination `project`.
-- `vesper_reorder`: `kind` (`projects` or `tasks`), and `project` for tasks.
-  Supply either every item id in `order`, or an `item` id and 1-based `position`.
-- `vesper_list_projects`: only project ids, names and task counts.
-- `vesper_overview`: optional `query` (project/task names), `project` (id or exact
-  name), `stage`, `status`, `priority`, `dueBefore` and `limit` (default 25).
-  Output stays valid grouped JSON for existing clients, with one compact JSON
-  line per task: name, project, stage, priority, due date, filled steps and any
-  check note. Filters combine. Active means started and unfinished; `not started`
-  and `finished` are separate statuses. `dueBefore` is an exclusive cutoff.
+Manual Up/Down order, membership, names and metadata merge independently.
+Equal ranks tie-break by id. Area Markdown includes its Projects and loose Tasks;
+Project Markdown includes its own Tasks.
 
 ### Separate tokens for devices and Claude
 
