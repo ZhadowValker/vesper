@@ -693,7 +693,7 @@ test('organize: local agent renames, moves and reorders with per-field clocks', 
   assert.deepEqual(orderedItems(store.decksOf(a.id)).map((d) => d.id), [z.id, y.id, x.id]);
   for (const d of [x, y, z]) assert.ok(d._changed.fields.order);
   applyActions([{ type: 'move_task', task: x.id, project: b.id }]);
-  assert.equal(x.projectId, b.id); assert.ok(x._changed.fields.projectId);
+  assert.equal(x.projectId, b.id); assert.ok(x._changed.fields.areaId);
   assert.ok(!store.decksOf(a.id).includes(x));
   applyActions([{ type: 'reorder', kind: 'projects', item: b.id, position: 1 }]);
   assert.equal(orderedItems(store.projects())[0].id, b.id);
@@ -940,6 +940,43 @@ await testAsync('task mode: change applies immediately, preserves all data and m
     assert.deepEqual(preserved(), before);
     assert.equal(d.priority, 'P2'); assert.equal(d.due, '2029-02-03');
   } finally { stop?.(); globalThis.FormData = originalFormData; setRenderer(() => {}); }
+});
+
+const m2 = await import('../js/model-v2.js');
+test('v2 migration: sample and handcrafted backups preserve every old record and field without inventing tasks', () => {
+  const source = { version: 1, projects: [{ id: 'a', name: 'Books', order: 3, updated: 10 }], decks: built.decks.map((d, i) => ({ ...structuredClone(d), id: 'p' + i, projectId: 'a', mode: 'quick', priority: 'P1', due: '2030-01-01', custom: 'keep', _changed: { notes: { x: 5 }, fields: { title: 6 } } })), deleted: { gone: 20 } };
+  const next = m2.normalizeV2(source);
+  assert.equal(next.version, 2); assert.equal(next.areas.length, 1); assert.equal(next.projects.length, built.decks.length); assert.deepEqual(next.tasks, []);
+  assert.deepEqual(next.areas, source.projects); assert.deepEqual(next.deleted, source.deleted);
+  for (let i = 0; i < source.decks.length; i++) {
+    const old = source.decks[i], p = next.projects[i];
+    for (const key of Object.keys(old).filter((k) => !['projectId', 'mode', '_changed'].includes(k))) assert.deepEqual(p[key], old[key], key);
+    assert.equal(p.areaId, 'a'); assert.equal(p.mode, 'full'); assert.equal(p.custom, 'keep');
+    assert.equal(p._changed.notes.x, 5); assert.equal(p._changed.fields.title, 6);
+  }
+  assert.deepEqual(m2.normalizeV2(next), next);
+  store.importJSON(JSON.stringify(source));
+  assert.equal(store.snapshot().version, 2); assert.equal(store.tasks().length, 0);
+  assert.equal(store.flowProjects()[0].notes['vision.why#0'], next.projects[0].notes['vision.why#0']);
+  assert.throws(() => m2.normalizeV2({ version: 3 }), /Unsupported/);
+});
+
+test('v2 sync: task done/note and location/title merge independently; deletions beat old edits', () => {
+  const s = m2.emptyV2(), db = m2.createModelDb(s);
+  const a = db.addArea('A'), b = db.addArea('B'), t = db.addTask('Small', { location: { kind: 'area', id: a.id } });
+  const original = structuredClone(t), left = structuredClone(s), right = structuredClone(s);
+  left.tasks[0].done = true; left.tasks[0].location = { kind: 'area', id: b.id };
+  stampDeck(left.tasks[0], original, original.updated + 10);
+  right.tasks[0].note = 'Other device'; right.tasks[0].title = 'Renamed';
+  stampDeck(right.tasks[0], original, original.updated + 20);
+  const merged = mergeStates(left, right);
+  assert.equal(merged.tasks[0].done, true); assert.equal(merged.tasks[0].note, 'Other device');
+  assert.equal(merged.tasks[0].title, 'Renamed'); assert.equal(merged.tasks[0].location.id, b.id);
+  assert.ok(sameState(merged, mergeStates(right, left)));
+  const removed = structuredClone(merged); removed.deleted[t.id] = original.updated + 30;
+  assert.equal(mergeStates(removed, s).tasks.length, 0);
+  const v1 = { version: 1, projects: [{ ...a }, { ...b }], decks: [], deleted: {} };
+  assert.equal(mergeStates(merged, m2.normalizeV2(v1)).tasks[0].note, 'Other device');
 });
 
 console.log(`\n${passed} tests passed`);

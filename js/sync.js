@@ -34,7 +34,7 @@ export async function syncNow({ force = false } = {}) {
     const local = store.snapshot();
     const res = await fetch(cfg.url + '/sync', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.token },
+      headers: { 'Content-Type': 'application/json', 'X-Vesper-Version': '2', Authorization: 'Bearer ' + cfg.token },
       body: JSON.stringify({ state: local }),
     });
     if (res.status === 401) throw new Error('The token was not accepted.');

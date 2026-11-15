@@ -35,7 +35,7 @@ function cors(origin) {
   if (!origin) return {};
   return {
     'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Headers': 'authorization,content-type',
+    'Access-Control-Allow-Headers': 'authorization,content-type,x-vesper-version',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
@@ -57,12 +57,36 @@ const bearer = (request) => (request.headers.get('Authorization') || '').replace
 
 async function loadState(env) {
   const s = await env.VESPER.get('state', 'json');
-  return s && Array.isArray(s.projects) && Array.isArray(s.decks) ? { ...emptyState(), ...s } : emptyState();
+  if (!isV1(s)) return normalizeV2(s);
+  return stateWrite(env, async () => {
+    const latest = await env.VESPER.get('state', 'json');
+    await migrationSnapshot(env, latest);
+    const next = normalizeV2(latest);
+    await env.VESPER.put('state', JSON.stringify(next));
+    return next;
+  });
 }
 // Scope the save queue to the backing store and user, not the per-request env wrapper.
 // KV has no cross-isolate transaction: this queue protects one running hub instance.
 const stateWrites = new WeakMap();
 const dailySnapshots = new WeakMap();
+async function migrationSnapshot(env, state) {
+  if (!isV1(state)) return;
+  const backing = env.RAW || env.VESPER;
+  if (backing.backupMigration) await backing.backupMigration();
+  if (!(await env.VESPER.get('migration:v1'))) await env.VESPER.put('migration:v1', JSON.stringify(state));
+}
+function stateWrite(env, action) {
+  const backing = env.RAW || env.VESPER;
+  let queues = stateWrites.get(backing);
+  if (!queues) { queues = new Map(); stateWrites.set(backing, queues); }
+  const key = env.UID || 'owner';
+  const write = (queues.get(key) || Promise.resolve()).then(action);
+  const settled = write.catch(() => {});
+  queues.set(key, settled);
+  settled.then(() => { if (queues.get(key) === settled) queues.delete(key); });
+  return write;
+}
 async function backupState(env, state) {
   const backing = env.RAW || env.VESPER;
   if (backing.dailyBackups) return; // server-store snapshots the complete file itself.
@@ -79,83 +103,22 @@ async function backupState(env, state) {
   days.set(user, day);
 }
 function saveState(env, changed) {
-  const backing = env.RAW || env.VESPER;
-  let queues = stateWrites.get(backing);
-  if (!queues) { queues = new Map(); stateWrites.set(backing, queues); }
-  const key = env.UID || 'owner';
-  const write = (queues.get(key) || Promise.resolve()).then(async () => {
-    const latest = await loadState(env);
-    const merged = mergeStates(latest, changed);
-    await backupState(env, latest.projects.length || latest.decks.length || Object.keys(latest.deleted).length ? latest : merged);
+  return stateWrite(env, async () => {
+    const raw = await env.VESPER.get('state', 'json');
+    await migrationSnapshot(env, raw);
+    const latest = normalizeV2(raw);
+    const merged = mergeStates(latest, normalizeV2(changed));
+    await backupState(env, latest.areas.length || latest.projects.length || latest.tasks.length || Object.keys(latest.deleted).length ? latest : merged);
     await env.VESPER.put('state', JSON.stringify(merged));
     return merged;
   });
-  const settled = write.catch(() => {});
-  queues.set(key, settled);
-  settled.then(() => { if (queues.get(key) === settled) queues.delete(key); });
-  return write;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 
 // The same small interface as the app's store, over the online copy of the data.
 function makeDb(state) {
-  const savedDecks = new Map(state.decks.map((d) => [d.id, JSON.parse(JSON.stringify(d))]));
-  const savedProjects = new Map(state.projects.map((p) => [p.id, structuredClone(p)]));
-  return {
-    projects: () => state.projects,
-    project: (id) => state.projects.find((p) => p.id === id),
-    decksOf: (pid) => state.decks.filter((d) => d.projectId === pid),
-    allDecks: () => state.decks,
-    deck: (id) => state.decks.find((d) => d.id === id),
-    addProject(name) {
-      const p = { id: uid(), name, created: Date.now(), updated: Date.now(), order: appendOrder(state.projects) };
-      state.projects.push(p);
-      savedProjects.set(p.id, structuredClone(p));
-      return p;
-    },
-    addDeck(projectId, title, mode = 'full') {
-      if (!['full', 'quick'].includes(mode)) throw new Error('Mode must be full or quick.');
-      const d = {
-        id: uid(), projectId, title, created: Date.now(), updated: Date.now(),
-        mode,
-        order: appendOrder(state.decks.filter((d) => d.projectId === projectId)),
-        slide: 0, reached: 0, ticks: {}, notes: {}, selah: {},
-        passes: 1, loops: 0, finished: null, timer: null,
-      };
-      state.decks.push(d);
-      savedDecks.set(d.id, JSON.parse(JSON.stringify(d)));
-      return d;
-    },
-    save(deck) {
-      stampDeck(deck, savedDecks.get(deck.id));
-      savedDecks.set(deck.id, JSON.parse(JSON.stringify(deck)));
-    },
-    saveProject(project) {
-      stampProject(project, savedProjects.get(project.id));
-      savedProjects.set(project.id, structuredClone(project));
-    },
-    saveItems(items, kind) {
-      for (const item of items) {
-        if (kind === 'projects') {
-          stampProject(item, savedProjects.get(item.id));
-          savedProjects.set(item.id, structuredClone(item));
-        } else {
-          stampDeck(item, savedDecks.get(item.id));
-          savedDecks.set(item.id, structuredClone(item));
-        }
-      }
-    },
-    removeDeck(id) { state.deleted = state.deleted || {}; state.deleted[id] = Date.now(); state.decks = state.decks.filter((d) => d.id !== id); },
-    removeProject(id) {
-      state.deleted = state.deleted || {};
-      const now = Date.now();
-      state.decks.filter((d) => d.projectId === id).forEach((d) => { state.deleted[d.id] = now; });
-      state.deleted[id] = now;
-      state.decks = state.decks.filter((d) => d.projectId !== id);
-      state.projects = state.projects.filter((p) => p.id !== id);
-    },
-  };
+  return createModelDb(state);
 }
 
 
@@ -355,7 +318,7 @@ async function driveRestore(env) {
   if (!id) throw new Error('No Vesper copy was found in your Google Drive yet.');
   const res = await fetch(`${DRIVE}/files/${id}?alt=media`, { headers: { Authorization: 'Bearer ' + access } });
   const data = res.ok ? await res.json().catch(() => null) : null;
-  if (!data || !Array.isArray(data.projects) || !Array.isArray(data.decks)) throw new Error('The copy in Google Drive could not be read.');
+  try { normalizeV2(data); } catch { throw new Error('The copy in Google Drive could not be read.'); }
   return data;
 }
 
@@ -482,8 +445,8 @@ const norm2 = (s) => String(s || '').trim().toLowerCase();
 function findTask(state, ref) {
   const r = norm2(ref);
   if (!r) return null;
-  return state.decks.find((d) => d.id === ref) || (() => {
-    const hits = state.decks.filter((d) => norm2(d.title) === r);
+  return state.projects.find((d) => d.id === ref) || (() => {
+    const hits = state.projects.filter((d) => norm2(d.title) === r);
     return hits.length === 1 ? hits[0] : null;
   })();
 }
@@ -497,7 +460,7 @@ function whereIs(d) {
 
 function taskSummary(state, d) {
   const pr = progress(d);
-  const p = state.projects.find((x) => x.id === d.projectId);
+  const p = state.areas.find((x) => x.id === d.areaId);
   return { id: d.id, title: d.title, mode: isQuick(d) ? 'quick' : 'full', priority: d.priority || null, due: d.due || null, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
 }
 
@@ -543,10 +506,10 @@ async function callTool(env, name, a) {
     })));
   }
   if (name === 'vesper_overview') {
-    try { return text(compactOverview(filterOverview(state, a), (d) => taskSummary(state, d))); }
+    try { return text(compactOverview(filterOverview(legacyV1(state), a), (d) => taskSummary(state, d))); }
     catch (e) { return fail(e.message); }
   }
-  if (name === 'vesper_list_projects') return text(orderedItems(state.projects).map((p) => ({ id: p.id, name: p.name, tasks: state.decks.filter((d) => d.projectId === p.id).length })));
+  if (name === 'vesper_list_projects') return text(orderedItems(state.areas).map((p) => ({ id: p.id, name: p.name, tasks: state.projects.filter((d) => d.areaId === p.id).length })));
   if (name === 'vesper_get_task' || name === 'vesper_next_questions') {
     const d = findTask(state, a.task);
     if (!d) return fail(`No task found for "${a.task}". Use vesper_overview to see the ids.`);
@@ -640,19 +603,23 @@ async function mcp(request, env) {
 // ---- Sync -------------------------------------------------------------------------------
 
 async function sync(request, env, origin) {
-  if (request.method === 'GET') return json(200, { state: await loadState(env) }, origin);
+  if (request.method === 'GET') {
+    const state = await loadState(env);
+    return json(200, { state: request.headers.get('X-Vesper-Version') === '2' ? state : legacyV1(state) }, origin);
+  }
   if (request.method !== 'PUT') return json(405, { error: 'use GET or PUT' }, origin);
   const text = await request.text();
   if (text.length > MAX_BODY) return json(413, { error: 'too large' }, origin);
   let body;
   try { body = JSON.parse(text); } catch (e) { return json(400, { error: 'invalid JSON' }, origin); }
   const inc = body && body.state;
-  if (!inc || !Array.isArray(inc.projects) || !Array.isArray(inc.decks)) return json(400, { error: 'state with projects and decks is required' }, origin);
+  try { if (!inc) throw new Error('state is required'); normalizeV2(inc); }
+  catch (e) { return json(400, { error: e.message }, origin); }
   const stored = await loadState(env);
-  let merged = mergeStates(stored, inc);
+  let merged = mergeStates(stored, normalizeV2(inc));
   if (!sameState(stored, merged)) merged = await saveState(env, merged);
   await driveBackup(env, merged);
-  return json(200, { state: merged }, origin);
+  return json(200, { state: inc.version === 2 ? merged : legacyV1(merged) }, origin);
 }
 
 // ---- AI proxy ---------------------------------------------------------------------------

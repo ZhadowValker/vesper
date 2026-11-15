@@ -49,6 +49,12 @@ export function createFileStore(dataDir, { now = Date.now } = {}) {
   }
   return {
     dailyBackups: true,
+    backupMigration: () => enqueue(async () => {
+      await fs.mkdir(backups, { recursive: true });
+      const snapshot = path.join(backups, 'pre-v2.json');
+      try { await fs.access(snapshot); }
+      catch (e) { if (e.code !== 'ENOENT') throw e; await atomicWrite(snapshot, await readAll()); }
+    }),
     async get(key, type) {
       await pending;
       const value = (await readAll())[key];

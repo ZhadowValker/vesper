@@ -1,4 +1,5 @@
 // Shared by the app and hub. Old task timestamps remain the fallback for old backups.
+import { normalizeV2, flowAliases } from './model-v2.js';
 const stamp = (x) => x.updated || x.created || 0;
 const maps = ['notes', 'ticks', 'selah', 'selahBy'];
 const fieldKeys = (d) => Object.keys(d).filter((k) => !['id', 'created', 'updated', '_changed', ...maps].includes(k));
@@ -77,7 +78,7 @@ export function emptyState() {
   return { version: 1, projects: [], decks: [], deleted: {} };
 }
 
-export function mergeStates(a, b) {
+function mergeV1(a, b) {
   a = a || emptyState(); b = b || emptyState();
   const deleted = { ...(a.deleted || {}) };
   for (const [id, ts] of Object.entries(b.deleted || {})) deleted[id] = Math.max(deleted[id] || 0, ts);
@@ -88,8 +89,36 @@ export function mergeStates(a, b) {
   return { version: 1, projects, decks, deleted };
 }
 
+export function mergeStates(a, b) {
+  // Retain the legacy pure-function contract for callers merging two old backups.
+  // Every persistent v2 store/hub normalizes before invoking this function.
+  if (a?.version !== 2 && b?.version !== 2) return mergeV1(a, b);
+  a = normalizeV2(a); b = normalizeV2(b);
+  const deleted = { ...a.deleted };
+  for (const [id, time] of Object.entries(b.deleted)) deleted[id] = Math.max(deleted[id] || 0, time);
+  const alive = (x) => !(deleted[x.id] && deleted[x.id] >= stamp(x));
+  const areas = pick(a.areas, b.areas, mergeProject).filter(alive);
+  const areaIds = new Set(areas.map((x) => x.id));
+  const projects = pick(a.projects, b.projects, mergeDeck).filter(alive).filter((p) => areaIds.has(p.areaId)).map(flowAliases);
+  const projectIds = new Set(projects.map((p) => p.id));
+  const tasks = pick(a.tasks, b.tasks, mergeProject).filter(alive).map((t) => {
+    if ((t.location?.kind === 'area' && !areaIds.has(t.location.id)) ||
+        (t.location?.kind === 'project' && !projectIds.has(t.location.id))) return { ...t, location: { kind: 'inbox' } };
+    return t;
+  });
+  return { version: 2, areas, projects, tasks, deleted };
+}
+
 // True when two states hold the same data (ignoring order of keys).
 export function sameState(a, b) {
+  if (a?.version === 2 || b?.version === 2) {
+    const canonical = (value) => {
+      const s = normalizeV2(value);
+      for (const key of ['areas', 'projects', 'tasks']) s[key].sort((x, y) => x.id.localeCompare(y.id));
+      return stable(s);
+    };
+    return canonical(a) === canonical(b);
+  }
   const norm = (s) => stable({ p: [...s.projects].sort((x, y) => (x.id > y.id ? 1 : -1)), d: [...s.decks].sort((x, y) => (x.id > y.id ? 1 : -1)), x: s.deleted || {} });
   return norm(a) === norm(b);
 }

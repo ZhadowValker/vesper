@@ -324,18 +324,18 @@ await test('login: calendar connect works per person', async () => {
 
 await test('drive: copy is saved to the person\'s Drive, at most every five minutes, and can be restored', async () => {
   assert.equal(drive.uploads, 1);   // Ann's first sync already saved a copy
-  assert.deepEqual(JSON.parse(drive.data).projects.map((x) => x.name), ['Ann project']);
+  assert.deepEqual(JSON.parse(drive.data).areas.map((x) => x.name), ['Ann project']);
   await call('/sync', { method: 'PUT', headers: as(ann.token), body: { state: { projects: [project('pa', 'Ann project'), project('pb', 'Second')], decks: [], deleted: {} } } });
   assert.equal(drive.uploads, 1);   // too soon, not saved again
   const forced = await call('/me/backup', { method: 'POST', headers: as(ann.token) });
   assert.equal(forced.status, 200);
   assert.equal(drive.uploads, 2);
-  assert.deepEqual(JSON.parse(drive.data).projects.map((x) => x.name).sort(), ['Ann project', 'Second']);
+  assert.deepEqual(JSON.parse(drive.data).areas.map((x) => x.name).sort(), ['Ann project', 'Second']);
   // the hub copy is replaced by an older one, then restored from Drive
   const saved = drive.data;
   await call('/sync', { method: 'PUT', headers: as(ann.token), body: { state: { projects: [], decks: [], deleted: { pa: 1, pb: 1 } } } });
   const r = await (await call('/me/restore', { method: 'POST', headers: as(ann.token) })).json();
-  assert.equal(r.state.projects.length, 2);
+  assert.equal(r.state.areas.length, 2);
   assert.equal(drive.data, saved);
   assert.equal((await call('/me/restore', { method: 'POST', headers: app })).status, 400);   // the owner token has no Drive link
 });
@@ -447,7 +447,7 @@ await test('concurrent connector calls retain both new projects', async () => {
   const results = await Promise.all(names.map((name) => tool('vesper_create_project', { name })));
   results.forEach((r) => assert.ok(!r.isError));
   const saved = JSON.parse(kv.get('state'));
-  names.forEach((name) => assert.ok(saved.projects.some((p) => p.name === name)));
+  names.forEach((name) => assert.ok(saved.areas.some((p) => p.name === name)));
 });
 
 await test('concurrent sync saves re-read and retain both devices', async () => {
@@ -456,7 +456,7 @@ await test('concurrent sync saves re-read and retain both devices', async () => 
   }));
   await Promise.all(copies.map((state) => call('/sync', { method: 'PUT', headers: app, body: { state } })));
   const saved = JSON.parse(kv.get('state'));
-  copies.forEach((s) => assert.ok(saved.projects.some((p) => p.id === s.projects[0].id)));
+  copies.forEach((s) => assert.ok(saved.areas.some((p) => p.id === s.projects[0].id)));
 });
 
 await test('simultaneous connector edits to different steps of one task survive', async () => {
@@ -464,13 +464,13 @@ await test('simultaneous connector edits to different steps of one task survive'
   const made = await tool('vesper_create_task', { project: 'Parallel task edits', title: 'Shared task' });
   assert.ok(!made.isError);
   const saved = JSON.parse(kv.get('state'));
-  const d = saved.decks.find((x) => x.title === 'Shared task');
+  const d = saved.projects.find((x) => x.title === 'Shared task');
   assert.ok(d);
   const results = await Promise.all([0, 1].map((step) => tool('vesper_set_note', {
     task: d.id, slide: 'vision.why', step, text: `Parallel answer ${step}`,
   })));
   results.forEach((r) => assert.ok(!r.isError, JSON.stringify(r)));
-  const task = JSON.parse(kv.get('state')).decks.find((x) => x.id === d.id);
+  const task = JSON.parse(kv.get('state')).projects.find((x) => x.id === d.id);
   for (const step of [0, 1]) {
     assert.equal(task.notes[`vision.why#${step}`], `Parallel answer ${step}`);
     assert.equal(task.ticks[`vision.why:${step}`], true);
@@ -488,11 +488,11 @@ await test('sync keeps independent modern device edits and old-format notes', as
   await Promise.all([a, b].map((d) => call('/sync', {
     method: 'PUT', headers: app, body: { state: { projects: [p], decks: [d] } },
   })));
-  const task = JSON.parse(kv.get('state')).decks.find((d) => d.id === base.id);
+  const task = JSON.parse(kv.get('state')).projects.find((d) => d.id === base.id);
   assert.deepEqual(task.notes, { a: 'device A', b: 'device B', legacy: 'kept' });
   await call('/sync', { method: 'PUT', headers: app, body: { state: { projects: [p], decks: [], deleted: { [base.id]: 40 } } } });
   await call('/sync', { method: 'PUT', headers: app, body: { state: { projects: [p], decks: [a] } } });
-  assert.ok(!JSON.parse(kv.get('state')).decks.some((d) => d.id === base.id));
+  assert.ok(!JSON.parse(kv.get('state')).projects.some((d) => d.id === base.id));
 });
 
 await test('file KV queues puts and deletes and leaves atomic JSON', async () => {
@@ -574,7 +574,7 @@ await test('Worker snapshots are daily, immutable, expire in 14 days and isolate
   assert.equal((await request('/sync', { state })).status, 200);
   const key = `backup:${new Date().toISOString().slice(0, 10)}`;
   const first = values.get(key);
-  assert.equal(JSON.parse(first).projects[0].name, 'First');
+  assert.equal(JSON.parse(first).areas[0].name, 'First');
   assert.equal(options.get(key).expirationTtl, 14 * 86400);
   state.projects[0] = { ...state.projects[0], name: 'Second', updated: 2 };
   await request('/sync', { state });
@@ -620,7 +620,7 @@ await test('Worker daily snapshot TTL rotates storage across fifteen days', asyn
     for (const key of [...values.keys()]) await disk.get(key);
     assert.equal(await disk.get('backup:2026-02-01'), null);
     assert.equal([...values.keys()].filter((k) => k.startsWith('backup:')).length, 14);
-    assert.equal(JSON.parse(await disk.get('state')).projects[0].name, 'Day 15');
+    assert.equal(JSON.parse(await disk.get('state')).areas[0].name, 'Day 15');
   } finally { globalThis.Date = RealDate; }
 });
 
@@ -993,6 +993,52 @@ await test('quick: connector creates, interviews, switches and finishes a Quick 
   await tool('vesper_set_task', { task: d.id, mode: 'full' });
   assert.equal(txt(await tool('vesper_get_task', { task: d.id })).steps[0].note, 'Detailed reason');
   assert.equal(txt(await tool('vesper_create_task', { project: 'Quick connector', title: 'Invalid mode', mode: 'invalid' })).changed.length, 0);
+});
+
+await test('v2 hub migration backs up v1 first and old clients cannot erase simple tasks or Quick notes', async () => {
+  const values = new Map(), writes = [];
+  const original = { version: 1, projects: [{ id: 'a', name: 'Area', updated: 1 }], decks: [{ id: 'p', projectId: 'a', title: 'Flow', mode: 'quick', updated: 2, notes: { 'vision.quick': 'Keep me' }, ticks: {}, selah: {} }], deleted: {} };
+  values.set('state', JSON.stringify(original));
+  const storage = {
+    get: async (key, type) => { const v = values.get(key); return v === undefined ? null : type === 'json' ? JSON.parse(v) : v; },
+    put: async (key, value) => { writes.push(key); values.set(key, value); },
+  };
+  const migrationEnv = { APP_TOKEN: 'isolated-migration-test', VESPER: storage };
+  const request = (method = 'GET', state) => hub.fetch(new Request('https://hub.example/sync', {
+    method, headers: { Authorization: 'Bearer isolated-migration-test', 'X-Vesper-Version': '2', 'Content-Type': 'application/json' },
+    ...(state ? { body: JSON.stringify({ state }) } : {}),
+  }), migrationEnv);
+  const first = await (await request()).json();
+  assert.equal(first.state.version, 2);
+  assert.deepEqual(JSON.parse(values.get('migration:v1')), original);
+  assert.ok(writes.indexOf('migration:v1') < writes.indexOf('state'));
+  assert.equal(first.state.projects[0].mode, 'full'); assert.equal(first.state.projects[0].notes['vision.quick'], 'Keep me');
+  const { createModelDb } = await import('../js/model-v2.js');
+  createModelDb(first.state).addTask('New simple task', { note: 'Do not erase' });
+  assert.equal((await request('PUT', first.state)).status, 200);
+  original.decks[0].notes['vision.why#0'] = 'Old client edit'; original.decks[0].updated = Date.now();
+  const oldReply = await (await request('PUT', original)).json();
+  assert.equal(oldReply.state.version, 1);
+  const latest = (await (await request()).json()).state;
+  assert.equal(latest.version, 2); assert.equal(latest.tasks.length, 1); assert.equal(latest.tasks[0].note, 'Do not erase');
+  assert.equal(latest.projects[0].mode, 'full'); assert.equal(latest.projects[0].notes['vision.why#0'], 'Old client edit');
+  assert.equal(latest.projects[0].notes['vision.quick'], 'Keep me');
+  assert.deepEqual(JSON.parse(values.get('migration:v1')).decks[0].notes, { 'vision.quick': 'Keep me' });
+});
+
+await test('Node pre-v2 snapshot is kept outside daily backup rotation', async () => {
+  const fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path');
+  const { createFileStore } = await import('../server-store.mjs');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vesper-v2-'));
+  try {
+    let now = Date.parse('2026-01-01'); const disk = createFileStore(dir, { now: () => now });
+    await disk.put('state', JSON.stringify({ version: 1, projects: [], decks: [] }));
+    await disk.backupMigration();
+    await disk.put('state', JSON.stringify({ version: 2, areas: [], projects: [], tasks: [] }));
+    now += 20 * 86400000; await disk.put('other', 'x');
+    const backup = JSON.parse(await fs.readFile(path.join(dir, 'backups/pre-v2.json'), 'utf8'));
+    assert.equal(JSON.parse(backup.state).version, 1);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);

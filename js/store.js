@@ -1,142 +1,56 @@
-// All data lives on this device (localStorage) as one JSON document.
-// Everything goes through this module, so the storage can be swapped later.
-import { stampDeck, stampProject } from './merge.js';
-import { appendOrder } from './organize.js';
-
+// Persist canonical v2 data while retaining the original storage key for upgrades.
+import { createModelDb, normalizeV2, emptyV2, isV1, flowAliases } from './model-v2.js';
 const KEY = 'vesper.v1';
-
-function emptyState() {
-  return { version: 1, projects: [], decks: [], deleted: {} };
-}
-
 function read() {
-  try {
-    const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(KEY);
-    const s = raw ? JSON.parse(raw) : null;
-    if (s && Array.isArray(s.projects) && Array.isArray(s.decks)) { if (!s.deleted) s.deleted = {}; return s; }
-  } catch (e) { /* fall through to empty state */ }
-  return emptyState();
-}
-
-let state = read();
-const copyDecks = () => new Map(state.decks.map((d) => [d.id, JSON.parse(JSON.stringify(d))]));
-let savedDecks = copyDecks();
-let savedProjects = new Map(state.projects.map((p) => [p.id, structuredClone(p)]));
-
-const listeners = [];
-let quiet = false;   // true while a sync is writing, so it does not trigger another sync
-
-function write() {
-  try {
-    if (typeof localStorage !== 'undefined') localStorage.setItem(KEY, JSON.stringify(state));
-  } catch (e) {
-    console.warn('Vesper: could not save', e);
+  if (typeof localStorage === 'undefined') return emptyV2();
+  const raw = localStorage.getItem(KEY);
+  if (!raw) return emptyV2();
+  const original = JSON.parse(raw), next = normalizeV2(original);
+  if (isV1(original)) {
+    // Abort rather than overwrite the only copy if quota prevents the backup.
+    if (!localStorage.getItem('vesper.pre-v2')) localStorage.setItem('vesper.pre-v2', raw);
+    localStorage.setItem(KEY, JSON.stringify(next));
   }
-  savedDecks = copyDecks();
-  savedProjects = new Map(state.projects.map((p) => [p.id, structuredClone(p)]));
-  if (!quiet) listeners.forEach((fn) => { try { fn(); } catch (e) { /* a listener must not break saving */ } });
+  return next;
 }
-
-const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
-
-export const store = {
-  projects: () => state.projects,
-  project: (id) => state.projects.find((p) => p.id === id),
-  decksOf: (projectId) => state.decks.filter((d) => d.projectId === projectId),
-  allDecks: () => state.decks,
-  deck: (id) => state.decks.find((d) => d.id === id),
-
-  addProject(name) {
-    const p = { id: uid(), name, created: Date.now(), updated: Date.now(), order: appendOrder(state.projects) };
-    state.projects.push(p);
-    write();
-    return p;
-  },
-  removeProject(id) {
-    const now = Date.now();
-    state.decks.filter((d) => d.projectId === id).forEach((d) => { state.deleted[d.id] = now; });
-    state.deleted[id] = now;
-    state.decks = state.decks.filter((d) => d.projectId !== id);
-    state.projects = state.projects.filter((p) => p.id !== id);
-    write();
-  },
-  addDeck(projectId, title, mode = 'full') {
-    if (!['full', 'quick'].includes(mode)) throw new Error('Mode must be full or quick.');
-    const d = {
-      id: uid(), projectId, title,
-      mode,
-      order: appendOrder(state.decks.filter((d) => d.projectId === projectId)),
-      created: Date.now(), updated: Date.now(),
-      slide: 0, reached: 0,
-      ticks: {}, notes: {}, selah: {},
-      passes: 1, loops: 0, finished: null, timer: null,
-    };
-    state.decks.push(d);
-    write();
-    return d;
-  },
-  findSample: (key) => state.projects.find((p) => p.sample === key),
-  // Adds a ready-made project and its tasks (see sample.js). Returns the new project.
+let state = read(), quiet = false;
+const listeners = [];
+function write() {
+  if (typeof localStorage !== 'undefined') localStorage.setItem(KEY, JSON.stringify(state));
+  if (!quiet) for (const fn of listeners) { try { fn(); } catch { /* independent subscribers */ } }
+}
+let db = createModelDb(state, write);
+const extras = {
+  findSample: (key) => state.areas.find((a) => a.sample === key),
   insertSample(built) {
-    const p = { id: uid(), name: built.project.name, created: built.project.created, sample: built.sample };
-    state.projects.push(p);
-    built.decks.forEach((d) => state.decks.push({ ...d, id: uid(), projectId: p.id }));
-    write();
-    return p;
-  },
-  removeDeck(id) {
-    state.deleted[id] = Date.now();
-    state.decks = state.decks.filter((d) => d.id !== id);
-    write();
-  },
-  save(deck) {
-    stampDeck(deck, savedDecks.get(deck.id));
-    write();
-  },
-  saveProject(project) {
-    stampProject(project, savedProjects.get(project.id));
-    write();
-  },
-  saveItems(items, kind) {
-    for (const item of items) {
-      if (kind === 'projects') stampProject(item, savedProjects.get(item.id));
-      else stampDeck(item, savedDecks.get(item.id));
+    const a = db.addArea(built.project.name); a.sample = built.sample; a.created = built.project.created;
+    for (const source of built.decks) {
+      const p = db.addFlowProject(a.id, source.title);
+      const id = p.id;
+      Object.assign(p, source, { id, areaId: a.id, mode: 'full' }); delete p.projectId; flowAliases(p); db.save(p);
     }
-    write();
+    return a;
   },
-
   exportJSON: () => JSON.stringify(state, null, 2),
-  importJSON(text) {
-    const s = JSON.parse(text);
-    if (!s || !Array.isArray(s.projects) || !Array.isArray(s.decks)) throw new Error('This file is not a Vesper backup.');
-    if (!s.deleted) s.deleted = {};
-    state = s;
-    write();
-  },
-  // Sync support: a plain copy of the data, a way to hear about changes, and a way to apply
-  // merged data IN PLACE, so screens that hold a task object keep pointing at the live one.
-  snapshot: () => JSON.parse(JSON.stringify(state)),
-  onChange: (fn) => { listeners.push(fn); },
+  importJSON(text) { state = normalizeV2(JSON.parse(text)); db = createModelDb(state, write); write(); },
+  snapshot: () => normalizeV2(state),
+  onChange(fn) { listeners.push(fn); },
   applyMerged(next) {
-    const sync = (list, incoming) => {
-      const ids = new Set(incoming.map((x) => x.id));
-      for (let i = list.length - 1; i >= 0; i--) if (!ids.has(list[i].id)) list.splice(i, 1);
-      incoming.forEach((x, i) => {
-        const have = list.find((y) => y.id === x.id);
-        if (have) { Object.keys(have).forEach((k) => { delete have[k]; }); Object.assign(have, x); }
-        else list.splice(i, 0, x);
-      });
-    };
+    next = normalizeV2(next);
     quiet = true;
     try {
-      sync(state.projects, next.projects);
-      sync(state.decks, next.decks);
-      state.deleted = next.deleted || {};
-      write();
+      for (const key of ['areas', 'projects', 'tasks']) {
+        const incoming = next[key], list = state[key], ids = new Set(incoming.map((x) => x.id));
+        for (let i = list.length - 1; i >= 0; i--) if (!ids.has(list[i].id)) list.splice(i, 1);
+        for (const x of incoming) {
+          const have = list.find((y) => y.id === x.id);
+          if (have) { for (const k of Object.keys(have)) delete have[k]; Object.assign(have, x); if (key === 'projects') flowAliases(have); }
+          else list.push(key === 'projects' ? flowAliases(x) : x);
+        }
+      }
+      state.deleted = next.deleted; db = createModelDb(state, write); write();
     } finally { quiet = false; }
   },
-  reset() {
-    state = emptyState();
-    write();
-  },
+  reset() { state = emptyV2(); db = createModelDb(state, write); write(); },
 };
+export const store = new Proxy(extras, { get(target, key) { return Object.hasOwn(target, key) ? target[key] : db[key]; } });
