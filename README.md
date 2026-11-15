@@ -174,7 +174,8 @@ Edit `js/framework.js` only. Stage names, sub-stages, steps and Selah questions 
 ## Full and Quick tasks
 
 Choose **Full** or **Quick** when creating a task (also in the AI interview setup),
-or change **Mode** on its task dashboard and save. Full keeps the original 27
+or change **Mode** on its task dashboard; it applies immediately without saving
+priority or due-date drafts (use **Save details** for those). Full keeps the original 27
 slides and 34 steps. Quick has 12 slides: cover, one notes slide and one Selah
 per stage, then recap. Sub-stage names act as short prompts for each stage note.
 All five Selahs are still required for normal Finish; early-finish rules are

@@ -34,6 +34,7 @@ export function deckView(id) {
     ${taskChips(deck)}
     <form class="card task-meta-form" data-task-meta>
       <label>Mode<select name="mode"><option value="full" ${!isQuick(deck) ? 'selected' : ''}>Full — 27 slides</option><option value="quick" ${isQuick(deck) ? 'selected' : ''}>Quick — 12 slides</option></select></label>
+      <p class="sub">Mode applies immediately. Both modes' notes are kept.</p>
       <h2>Task details</h2>
       <div class="row wrap">
         <label>Priority<select name="priority"><option value="">No priority</option>${PRIORITIES.map((p) => `<option value="${p}" ${deck.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
@@ -66,20 +67,11 @@ export function deckView(id) {
       else rerender();
     }
     moveForm.addEventListener('submit', moveTask);
-    const form = root.querySelector('[data-task-meta]');
-    form.addEventListener('submit', saveDetails);
-    function saveDetails(e) {
-      e.preventDefault();
-      const data = new FormData(form);
-      const error = setTaskMeta(deck, { priority: data.get('priority') || null, due: data.get('due') || null });
-      if (error) { notice('Could not save task details', error); return; }
-      setTaskMode(deck, data.get('mode'));
-      store.save(deck); rerender();
-    }
+    const stopDetails = bindTaskDetails(root, deck);
     const stopTree = drawTree(root);
     const here = root.querySelector('.dt-chip.now');
     if (here && here.scrollIntoView) here.scrollIntoView({ block: 'center', behavior: 'auto' });
-    return () => { root.removeEventListener('click', onClick); form.removeEventListener('submit', saveDetails); moveForm.removeEventListener('submit', moveTask); stopOrganize(); stopTree(); };
+    return () => { root.removeEventListener('click', onClick); stopDetails(); moveForm.removeEventListener('submit', moveTask); stopOrganize(); stopTree(); };
     async function onClick(e) {
       const statusBtn = e.target.closest('[data-act="finish"],[data-act="reopen"]');
       if (statusBtn) {
@@ -98,6 +90,34 @@ export function deckView(id) {
     }
   }
   return { html, mount };
+}
+
+export function bindTaskDetails(root, deck) {
+  const form = root.querySelector('[data-task-meta]');
+  const mode = form.elements.namedItem('mode');
+  function changeMode() {
+    const draft = { priority: form.elements.namedItem('priority').value, due: form.elements.namedItem('due').value };
+    const error = setTaskMode(deck, mode.value);
+    if (error) { mode.value = isQuick(deck) ? 'quick' : 'full'; notice('Could not change mode', error); return; }
+    const x = globalThis.scrollX || 0, y = globalThis.scrollY || 0;
+    store.save(deck);
+    rerender();
+    // Refresh the map/counts, but keep unsaved metadata and the user's position.
+    const nextForm = root.querySelector('[data-task-meta]');
+    for (const [name, value] of Object.entries(draft)) nextForm.elements.namedItem(name).value = value;
+    nextForm.elements.namedItem('mode').focus?.({ preventScroll: true });
+    globalThis.scrollTo?.(x, y);
+  }
+  function saveDetails(e) {
+    e.preventDefault();
+    const data = new FormData(form);
+    const error = setTaskMeta(deck, { priority: data.get('priority') || null, due: data.get('due') || null });
+    if (error) { notice('Could not save task details', error); return; }
+    store.save(deck); rerender();
+  }
+  mode.addEventListener('change', changeMode);
+  form.addEventListener('submit', saveDetails);
+  return () => { mode.removeEventListener('change', changeMode); form.removeEventListener('submit', saveDetails); };
 }
 
 function notFound() {

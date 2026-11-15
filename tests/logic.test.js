@@ -887,4 +887,59 @@ test('theme: init and controls follow system changes only in Auto and clean up l
   }
 });
 
+await testAsync('task mode: change applies immediately, preserves all data and metadata drafts; Save details only saves metadata', async () => {
+  const { bindTaskDetails, deckView } = await import('../js/views/deck.js');
+  const { setRenderer } = await import('../js/nav.js');
+  store.reset();
+  const p = store.addProject('Instant mode'), d = store.addDeck(p.id, 'Keep my work');
+  Object.assign(d, { priority: 'P4', due: '2028-01-01', slide: 3, reached: 8, loops: 2, passes: 3 });
+  d.notes['vision.why#0'] = 'Full note'; d.notes['vision.quick'] = 'Quick note';
+  d.ticks['vision.why:0'] = true; d.selah.vision = true;
+  store.save(d);
+  const preserved = () => structuredClone({ notes: d.notes, ticks: d.ticks, selah: d.selah, slide: d.slide, reached: d.reached, loops: d.loops, passes: d.passes });
+  const before = preserved(), originalFormData = globalThis.FormData;
+  const element = (value = '') => {
+    const handlers = new Map();
+    return { value, handlers, focus() {}, addEventListener: (n, fn) => handlers.set(n, fn), removeEventListener: (n) => handlers.delete(n) };
+  };
+  const makeForm = () => {
+    const form = element(), fields = { mode: element(d.mode), priority: element(d.priority), due: element(d.due) };
+    form.elements = { namedItem: (name) => fields[name] };
+    return form;
+  };
+  let current = makeForm(), renders = 0, stop;
+  const root = { querySelector: () => current };
+  setRenderer(() => { renders++; current = makeForm(); });
+  globalThis.FormData = class { constructor(form) { this.form = form; } get(name) { return this.form.elements.namedItem(name).value; } };
+  try {
+    stop = bindTaskDetails(root, d);
+    const old = current;
+    current.elements.namedItem('priority').value = 'P2';
+    current.elements.namedItem('due').value = '2029-02-03';
+    current.elements.namedItem('mode').value = 'quick';
+    current.elements.namedItem('mode').handlers.get('change')();
+    assert.equal(d.mode, 'quick'); assert.equal(renders, 1);
+    assert.equal(d.priority, 'P4'); assert.equal(d.due, '2028-01-01');
+    assert.equal(current.elements.namedItem('priority').value, 'P2');
+    assert.equal(current.elements.namedItem('due').value, '2029-02-03');
+    assert.deepEqual(preserved(), before);
+    assert.match(deckView(d.id).html, /Slide 2 of 12/);
+    assert.ok(d._changed.fields.mode);
+    stop(); assert.equal(old.handlers.size, 0); assert.equal(old.elements.namedItem('mode').handlers.size, 0);
+
+    stop = bindTaskDetails(root, d);
+    // A value changed without a change event must not be applied by Save details.
+    current.elements.namedItem('mode').value = 'full';
+    current.handlers.get('submit')({ preventDefault() {} });
+    assert.equal(d.mode, 'quick'); assert.equal(d.priority, 'P2'); assert.equal(d.due, '2029-02-03');
+    stop();
+    stop = bindTaskDetails(root, d);
+    current.elements.namedItem('mode').value = 'full';
+    current.elements.namedItem('mode').handlers.get('change')();
+    assert.equal(d.mode, 'full'); assert.equal(renders, 3);
+    assert.deepEqual(preserved(), before);
+    assert.equal(d.priority, 'P2'); assert.equal(d.due, '2029-02-03');
+  } finally { stop?.(); globalThis.FormData = originalFormData; setRenderer(() => {}); }
+});
+
 console.log(`\n${passed} tests passed`);

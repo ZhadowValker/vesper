@@ -624,7 +624,7 @@ await test('Worker daily snapshot TTL rotates storage across fifteen days', asyn
   } finally { globalThis.Date = RealDate; }
 });
 
-await test('Node server accepts authenticated hub calls and never serves data or backups', async () => {
+await test('Node server serves every cached asset with correct content type, accepts hub calls and never serves private data', async () => {
   const { spawn } = await import('node:child_process');
   const { randomBytes } = await import('node:crypto');
   const fs = await import('node:fs/promises');
@@ -657,6 +657,32 @@ await test('Node server accepts authenticated hub calls and never serves data or
     const [{ port }] = await once(child, 'message', { signal: AbortSignal.timeout(10000) });
     const url = `http://127.0.0.1:${port}`;
     const request = (route, init = {}) => fetch(url + route, { ...init, signal: AbortSignal.timeout(5000) });
+    const { runInNewContext } = await import('node:vm');
+    const sw = await fs.readFile(new URL('../sw.js', import.meta.url), 'utf8');
+    const declaration = sw.match(/^const ASSETS = (\[[\s\S]*?\]);/m);
+    assert.ok(declaration, 'service-worker cache declaration exists');
+    const assets = runInNewContext(`(${declaration[1]})`);
+    const mime = {
+      '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
+      '.webmanifest': 'application/manifest+json', '.json': 'application/json',
+      '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp',
+      '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+      '.txt': 'application/octet-stream',
+    };
+    for (const asset of [...assets, 'sw.js']) {
+      const route = asset === './' ? '/' : '/' + asset;
+      const expectedType = asset === './' ? 'text/html' : mime[path.extname(asset)];
+      assert.ok(expectedType, `expected MIME type is defined for ${asset}`);
+      for (const method of ['GET', 'HEAD']) {
+        const response = await request(route, { method });
+        assert.equal(response.status, 200, `${method} ${route}`);
+        assert.equal(response.headers.get('content-type')?.split(';')[0], expectedType, `${method} ${route} MIME type`);
+        if (method === 'GET') {
+          const file = new URL('../' + (asset === './' ? 'index.html' : asset), import.meta.url);
+          assert.deepEqual(Buffer.from(await response.arrayBuffer()), await fs.readFile(file), `${route} serves the actual file, not an HTML fallback`);
+        } else assert.equal((await response.arrayBuffer()).byteLength, 0);
+      }
+    }
     assert.equal((await request('/')).status, 200);
     assert.equal((await request('/sync')).status, 401);
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
