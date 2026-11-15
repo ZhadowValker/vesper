@@ -17,7 +17,7 @@ export function setTaskMeta(deck, patch) {
 export function localCalendarDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
-export const isOverdue = (deck, today = localCalendarDate()) => !deck.finished && validDue(deck.due) && deck.due < today;
+export const isOverdue = (deck, today = localCalendarDate()) => !deck.finished && !deck.done && validDue(deck.due) && deck.due < today;
 
 const PREF_KEY = 'vesper.task-list.v1';
 const normalizePrefs = (p) => ({

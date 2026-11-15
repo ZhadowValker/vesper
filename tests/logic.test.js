@@ -788,18 +788,17 @@ test('quick: 12 slides, canonical navigation and old full tasks remain unchanged
   assert.equal(atSelah({ ...quick, slide: 10 }), true);
 });
 
-test('quick: agent creates and switches both ways without deleting full or Quick notes', () => {
+test('v2: Quick creation is refused and retained notes appear read-only only on the first Full slide', () => {
   store.reset(); const p = store.addProject('Quick tests');
   const result = applyActions([{ type: 'create_task', project: p.id, title: 'Small task', mode: 'quick' }]);
-  assert.equal(result.skipped.length, 0);
-  const d = store.allDecks()[0];
-  assert.equal(d.mode, 'quick');
-  applyActions([{ type: 'set_note', task: d.id, slide: 'vision.quick', text: 'My stage summary' }]);
+  assert.equal(result.skipped.length, 1);
+  const d = store.addDeck(p.id, 'Full Project');
+  d.notes['vision.quick'] = 'My stage summary';
   d.notes['vision.why#0'] = 'Full note'; d.ticks['vision.why:0'] = true; store.save(d);
   const content = structuredClone({ notes: d.notes, ticks: d.ticks, selah: d.selah, slide: d.slide, reached: d.reached });
-  for (const mode of ['full', 'quick', 'full']) {
-    assert.equal(applyActions([{ type: 'set_task', task: d.id, mode }]).skipped.length, 0);
-    assert.equal(d.mode, mode);
+  for (const mode of ['quick', 'invalid']) {
+    assert.equal(applyActions([{ type: 'set_task', task: d.id, mode }]).skipped.length, 1);
+    assert.equal(d.mode, 'full');
     assert.deepEqual({ notes: d.notes, ticks: d.ticks, selah: d.selah, slide: d.slide, reached: d.reached }, content);
   }
   assert.equal(applyActions([{ type: 'set_task', task: d.id, mode: 'invalid' }]).changes.length, 0);
@@ -808,17 +807,18 @@ test('quick: agent creates and switches both ways without deleting full or Quick
   assert.match(html, /Quick notes · read only/);
   assert.match(html, /My stage summary/);
   assert.match(html, /Full note/);
+  assert.doesNotMatch(quickSlideView(d.id, '2').html, /quick-retained/);
 });
 
-test('quick: progress, interview, export and finish policy use five stage notes and all Selahs', () => {
-  store.reset(); const p = store.addProject('Quick'); const d = store.addDeck(p.id, 'Tiny', 'quick');
-  assert.deepEqual(iv.progress(d), { filled: 0, total: 5 });
+test('v2: all Projects use the Full interview and five-Selah finish policy', () => {
+  store.reset(); const p = store.addProject('Quick'); const d = store.addDeck(p.id, 'Tiny');
+  assert.deepEqual(iv.progress(d), { filled: 0, total: 34 });
   const target = iv.emptySteps(d)[0];
-  assert.equal(target.key, 'vision.quick'); assert.equal(target.step, null);
+  assert.equal(target.key, 'vision.why#0'); assert.equal(target.step, 0);
   const saved = iv.saveAnswer(d, target, 'My one small goal', null);
   assert.equal(saved.fallback, true);
-  assert.deepEqual(iv.progress(d), { filled: 1, total: 5 });
-  assert.match(taskMarkdown(d, p.name), /Mode: Quick/);
+  assert.deepEqual(iv.progress(d), { filled: 1, total: 34 });
+  assert.doesNotMatch(taskMarkdown(d, p.name), /Mode: Quick/);
   assert.match(taskMarkdown(d), /My one small goal/);
   assert.equal(applyActions([{ type: 'finish', task: d.id }]).changes.length, 0);
   for (const stage of STAGES) applyActions([{ type: 'pass_selah', task: d.id, answer: 'I checked this stage', stage: stage.id }]);
@@ -887,7 +887,7 @@ test('theme: init and controls follow system changes only in Auto and clean up l
   }
 });
 
-await testAsync('task mode: change applies immediately, preserves all data and metadata drafts; Save details only saves metadata', async () => {
+await testAsync('v2 Project details: no Mode control; Save details saves only priority and due', async () => {
   const { bindTaskDetails, deckView } = await import('../js/views/deck.js');
   const { setRenderer } = await import('../js/nav.js');
   store.reset();
@@ -916,27 +916,12 @@ await testAsync('task mode: change applies immediately, preserves all data and m
     const old = current;
     current.elements.namedItem('priority').value = 'P2';
     current.elements.namedItem('due').value = '2029-02-03';
-    current.elements.namedItem('mode').value = 'quick';
-    current.elements.namedItem('mode').handlers.get('change')();
-    assert.equal(d.mode, 'quick'); assert.equal(renders, 1);
-    assert.equal(d.priority, 'P4'); assert.equal(d.due, '2028-01-01');
-    assert.equal(current.elements.namedItem('priority').value, 'P2');
-    assert.equal(current.elements.namedItem('due').value, '2029-02-03');
-    assert.deepEqual(preserved(), before);
-    assert.match(deckView(d.id).html, /Slide 2 of 12/);
-    assert.ok(d._changed.fields.mode);
-    stop(); assert.equal(old.handlers.size, 0); assert.equal(old.elements.namedItem('mode').handlers.size, 0);
-
-    stop = bindTaskDetails(root, d);
-    // A value changed without a change event must not be applied by Save details.
-    current.elements.namedItem('mode').value = 'full';
+    assert.equal(current.elements.namedItem('mode').handlers.size, 0);
+    assert.doesNotMatch(deckView(d.id).html, /name="mode"/);
     current.handlers.get('submit')({ preventDefault() {} });
-    assert.equal(d.mode, 'quick'); assert.equal(d.priority, 'P2'); assert.equal(d.due, '2029-02-03');
-    stop();
-    stop = bindTaskDetails(root, d);
-    current.elements.namedItem('mode').value = 'full';
-    current.elements.namedItem('mode').handlers.get('change')();
-    assert.equal(d.mode, 'full'); assert.equal(renders, 3);
+    assert.equal(d.mode, 'full'); assert.equal(d.priority, 'P2'); assert.equal(d.due, '2029-02-03');
+    assert.equal(renders, 1);
+    stop(); assert.equal(old.handlers.size, 0);
     assert.deepEqual(preserved(), before);
     assert.equal(d.priority, 'P2'); assert.equal(d.due, '2029-02-03');
   } finally { stop?.(); globalThis.FormData = originalFormData; setRenderer(() => {}); }
@@ -977,6 +962,64 @@ test('v2 sync: task done/note and location/title merge independently; deletions 
   assert.equal(mergeStates(removed, s).tasks.length, 0);
   const v1 = { version: 1, projects: [{ ...a }, { ...b }], decks: [], deleted: {} };
   assert.equal(mergeStates(merged, m2.normalizeV2(v1)).tasks[0].note, 'Other device');
+});
+
+test('v2 tasks: all move locations, promotion provenance and empty-flow demotion preserve content', () => {
+  store.reset(); const a = store.addArea('Work'), p = store.addFlowProject(a.id, 'Parent');
+  const t = store.addTask('Small', { priority: 'P1', due: '2030-01-02', note: 'Reason' });
+  assert.equal(t.location.kind, 'inbox');
+  assert.throws(() => store.promoteTask(t.id), /Area/);
+  store.moveTask(t.id, { kind: 'area', id: a.id });
+  store.moveTask(t.id, { kind: 'project', id: p.id });
+  const promoted = store.promoteTask(t.id);
+  assert.equal(promoted.areaId, a.id); assert.equal(promoted.promotedFrom, t.id); assert.equal(t.promotedTo, promoted.id);
+  assert.equal(promoted.notes['vision.why#0'], 'Reason'); assert.equal(promoted.priority, 'P1'); assert.equal(promoted.due, '2030-01-02');
+  assert.ok(!store.tasks().some((x) => x.id === t.id));
+  assert.equal(store.promoteTask(t.id).id, promoted.id);
+  assert.throws(() => store.demoteProject(promoted.id), /no notes/);
+  const empty = store.addFlowProject(a.id, 'Untouched');
+  const child = store.addTask('Child', { location: { kind: 'project', id: empty.id } });
+  const demoted = store.demoteProject(empty.id);
+  assert.equal(demoted.title, 'Untouched'); assert.equal(demoted.location.id, a.id); assert.equal(demoted.demotedFrom, empty.id);
+  assert.equal(child.location.kind, 'area'); assert.equal(child.location.id, a.id); assert.equal(store.flowProject(empty.id), undefined);
+  const done = store.addTask('Done'); store.updateTask(done.id, { done: true });
+  assert.throws(() => store.promoteTask(done.id, a.id), /done/);
+  assert.throws(() => store.moveTask(done.id, { kind: 'project', id: 'missing' }), /not found/);
+  for (const field of ['notes', 'ticks', 'selah', 'selahBy']) {
+    const blocked = store.addFlowProject(a.id, field); blocked[field] = { x: field === 'notes' ? 'Retained note' : true }; store.save(blocked);
+    assert.throws(() => store.demoteProject(blocked.id), /Only a Project/);
+  }
+});
+
+await testAsync('v2 screens: Home, Area and Project show the new model, mixed filtering and task controls', async () => {
+  const { modelHome, modelArea, taskListHTML } = await import('../js/views/model-ui.js');
+  const { deckView } = await import('../js/views/deck.js');
+  store.reset(); const a = store.addArea('Ministry'), p = store.addFlowProject(a.id, 'Full flow');
+  const t = store.addTask('Inbox item', { priority: 'P1', due: '2000-01-01' });
+  store.addTask('Area item', { location: { kind: 'area', id: a.id }, priority: 'P2' });
+  store.addTask('Project item', { location: { kind: 'project', id: p.id }, note: 'A small action' });
+  saveTaskPrefs({ sort: 'priority', priority: 'all' });
+  assert.match(modelHome().html, /Inbox/); assert.match(modelHome().html, /Ministry/);
+  assert.match(modelArea(a.id).html, /Full flow/); assert.match(modelArea(a.id).html, /Area item/);
+  assert.match(deckView(p.id).html, /Project item/); assert.match(deckView(p.id).html, /Add task/);
+  assert.doesNotMatch(deckView(p.id).html, /name="mode"/);
+  assert.match(taskListHTML('inbox'), /data-task-done/); assert.match(taskListHTML('inbox'), /overdue/);
+  const mixed = sortFilterTasks([p, t], { sort: 'priority', priority: 'P1' });
+  assert.deepEqual(mixed.map((x) => x.id), [t.id]);
+  store.updateTask(t.id, { done: true }); assert.equal(isOverdue(t), false);
+  saveTaskPrefs({});
+});
+
+await testAsync('v2 finish: open Tasks are mentioned with missing Selahs and never block confirmation', async () => {
+  const { finishInApp } = await import('../js/views/task-actions.js');
+  store.reset(); const a = store.addArea('A'), p = store.addFlowProject(a.id, 'Flow');
+  store.addTask('Open', { location: { kind: 'project', id: p.id } });
+  let message = '';
+  assert.equal(await finishInApp(p, async (title, text) => { message = title + text; return false; }), false);
+  assert.match(message, /Vision/); assert.match(message, /1 task still open/); assert.equal(p.finished, null);
+  for (const stage of STAGES) p.selah[stage.id] = true;
+  assert.equal(await finishInApp(p, async (title, text) => { message = title + text; return true; }), true);
+  assert.match(message, /All Selahs passed/); assert.match(message, /1 task still open/); assert.ok(p.finished);
 });
 
 console.log(`\n${passed} tests passed`);

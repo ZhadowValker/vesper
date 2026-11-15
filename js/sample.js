@@ -312,5 +312,9 @@ export function buildSample(def = BOOK_SAMPLE, now = Date.now()) {
     });
     return deck;
   });
-  return { sample: def.key, project: { name: def.project, created: now - 40 * DAY }, decks };
+  return { sample: def.key, project: { name: def.project, created: now - 40 * DAY }, decks, tasks: [
+    { title: 'Capture a new book idea', inbox: true, note: 'A small next step can start in Inbox.' },
+    { title: 'Find a quiet writing hour', priority: 'P2', note: 'This task belongs directly to the book Area.' },
+    { title: 'Outline the opening scene', project: 'Write Part One', note: 'Keep it to one paragraph.' },
+  ] };
 }

@@ -7,6 +7,7 @@ import { syncDialog } from './connect-ui.js';
 import { getSync } from './sync.js';
 import { esc, ask } from './util.js';
 import { showGuide } from './guide.js';
+import { createItem } from './views/model-ui.js';
 import { buildSample } from './sample.js';
 
 const I = {
@@ -25,9 +26,9 @@ const btn = (act, icon, label, extra = '') => `<button type="button" class="isl-
 // Where "Up" goes from here.
 function parentOf(hash) {
   let m;
-  if ((m = hash.match(/^#\/d\/(\w+)\/s\/\d+$/))) return `#/d/${m[1]}`;
-  if ((m = hash.match(/^#\/d\/(\w+)$/))) { const d = store.deck(m[1]); return d ? `#/p/${d.projectId}` : '#/'; }
-  if (/^#\/p\/\w+$/.test(hash)) return '#/';
+  if ((m = hash.match(/^#\/d\/([\w-]+)\/s\/\d+$/))) return `#/d/${m[1]}`;
+  if ((m = hash.match(/^#\/d\/([\w-]+)$/))) { const d = store.deck(m[1]); return d ? `#/p/${d.areaId}` : '#/'; }
+  if (/^#\/p\/[\w-]+$/.test(hash)) return '#/';
   return null;
 }
 
@@ -49,7 +50,7 @@ function paint(el) {
   if (/^#\/signin/.test(hash)) { el.hidden = true; return; }
   el.hidden = false;
   const up = parentOf(hash);
-  const s = hash.match(/^#\/d\/(\w+)\/s\/(\d+)$/);
+  const s = hash.match(/^#\/d\/([\w-]+)\/s\/(\d+)$/);
   const last = SLIDES.length - 1;
   const n = s ? Math.min(parseInt(s[2], 10) || 0, last) : 0;
   const deck = s ? store.deck(s[1]) : null;
@@ -75,20 +76,20 @@ function onClick(e) {
   if (act === 'home') go('#/');
   else if (act === 'up') go(parentOf(hash) || '#/');
   else if (act === 'prev' || act === 'next') {
-    const m = hash.match(/^#\/d\/(\w+)\/s\/(\d+)$/);
+    const m = hash.match(/^#\/d\/([\w-]+)\/s\/(\d+)$/);
     if (!m) return;
     const deck = store.deck(m[1]);
     if (!deck) return;
     const to = adjacentSlide(deck, parseInt(m[2], 10), act === 'next' ? 1 : -1);
     if (to !== undefined) go(`#/d/${m[1]}/s/${to}`);
   } else if (act === 'new') {
-    ask('Name your project', { ok: 'Create project', placeholder: 'Office relocation' }).then((name) => { if (name) go(`#/p/${store.addProject(name).id}`); });
+    createItem();
   } else if (act === 'help') {
     showGuide().then((r) => {
       if (r === 'sample') { const have = store.findSample('book'); go(`#/p/${(have || store.insertSample(buildSample())).id}`); }
     });
   } else if (act === 'ai') {
-    const m = hash.match(/^#\/d\/(\w+)/);
+    const m = hash.match(/^#\/d\/([\w-]+)/);
     openChatPanel({ focusId: m ? m[1] : null });
   } else if (act === 'account') syncDialog({ onChange: rerender });
 }

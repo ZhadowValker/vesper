@@ -123,7 +123,6 @@ export function openChatPanel({ focusId = null, mode = null } = {}) {
       <input id="iv-pname" class="iv-in" placeholder="Name the new project" maxlength="80" hidden>
       <label class="ai-f"><span>Task</span><select id="iv-task"></select></label>
       <input id="iv-tname" class="iv-in" placeholder="Name the new task" maxlength="80" hidden>
-      <label class="ai-f">New task mode<select id="iv-mode"><option value="full">Full — 34 steps</option><option value="quick">Quick — 5 stage notes</option></select></label>
       <p class="sub" id="iv-prog"></p>
       <p class="ai-status" id="iv-err" data-kind="bad"></p>
       <button type="button" class="btn primary" data-act="iv-start" id="iv-start">Start interview</button>
@@ -208,7 +207,7 @@ export function openChatPanel({ focusId = null, mode = null } = {}) {
     if (ts === '__new' || ps === '__new') {
       const name = dlg.querySelector('#iv-tname').value.trim();
       if (!name) { if (ps === '__new') store.removeProject(project.id); return fail('Give the new task a name.'); }
-      deck = store.addDeck(project.id, name, $('#iv-mode', dlg).value);
+      deck = store.addDeck(project.id, name);
     } else deck = store.deck(ts);
     if (!deck) return fail('Pick a task.');
     if (chat.iv.taskId !== deck.id) { chat.iv.msgs = []; chat.iv.skipped = []; }

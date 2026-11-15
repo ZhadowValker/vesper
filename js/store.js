@@ -29,6 +29,11 @@ const extras = {
       const id = p.id;
       Object.assign(p, source, { id, areaId: a.id, mode: 'full' }); delete p.projectId; flowAliases(p); db.save(p);
     }
+    for (const source of built.tasks || []) {
+      const project = source.project ? db.projectsIn(a.id).find((p) => p.title === source.project) : null;
+      db.addTask(source.title, { note: source.note || '', priority: source.priority ?? null,
+        location: project ? { kind: 'project', id: project.id } : source.inbox ? { kind: 'inbox' } : { kind: 'area', id: a.id } });
+    }
     return a;
   },
   exportJSON: () => JSON.stringify(state, null, 2),

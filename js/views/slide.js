@@ -258,7 +258,7 @@ function sub(deck, slide) {
     <div><span class="chip s-${stage.id}">${stage.name} ${slide.n} of ${stage.subs.length}</span></div>
     <div><h1>${esc(s.name)}</h1><p class="lead">${esc(s.what)}</p></div>
     <div class="slide-scroll">
-    ${(deck.notes[quickKey(stage)] || '').trim() ? `<section class="card quick-retained" aria-label="Quick notes, read only"><h3>Quick notes · read only</h3><pre style="white-space:pre-wrap">${esc(deck.notes[quickKey(stage)])}</pre><p class="sub">Switch to Quick mode on the task dashboard to edit these notes.</p></section>` : ''}
+    ${slide.key === `${stage.id}.${stage.subs[0].id}` && (deck.notes[quickKey(stage)] || '').trim() ? `<section class="card quick-retained" aria-label="Retained Quick notes, read only"><h3>Retained Quick notes · read only</h3><pre style="white-space:pre-wrap">${esc(deck.notes[quickKey(stage)])}</pre><p class="sub">Preserved from the previous version. Project flow notes remain editable below.</p></section>` : ''}
     <ul class="steps">${steps}</ul>
     ${aiReady() ? '<div class="no-print"><button class="btn small ai-btn" data-act="ai-draft">Help me with this</button></div>' : ''}
     ${extra}

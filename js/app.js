@@ -6,13 +6,14 @@ import { slideView } from './views/slide.js';
 import { startSync } from './sync.js';
 import { signinView } from './signin.js';
 import { mountIsland } from './island.js';
+import { modelHome, modelArea } from './views/model-ui.js';
 
 const routes = [
-  [/^#\/(overview)?$/, home],
+  [/^#\/(overview)?$/, modelHome],
   [/^#\/signin\?c=(\w+)$/, signinView],
-  [/^#\/p\/(\w+)$/, projectView],
-  [/^#\/d\/(\w+)$/, deckView],
-  [/^#\/d\/(\w+)\/s\/(\d+)$/, slideView],
+  [/^#\/p\/([\w-]+)$/, modelArea],
+  [/^#\/d\/([\w-]+)$/, deckView],
+  [/^#\/d\/([\w-]+)\/s\/(\d+)$/, slideView],
 ];
 
 const root = document.getElementById('app');

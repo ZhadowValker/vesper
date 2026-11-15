@@ -239,7 +239,7 @@ function setTaskMeta(deck, patch) {
 function localCalendarDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
-const isOverdue = (deck, today = localCalendarDate()) => !deck.finished && validDue(deck.due) && deck.due < today;
+const isOverdue = (deck, today = localCalendarDate()) => !deck.finished && !deck.done && validDue(deck.due) && deck.due < today;
 
 const PREF_KEY = 'vesper.task-list.v1';
 const normalizePrefs = (p) => ({
@@ -320,7 +320,7 @@ function normalizeV2(input) {
     if (!['areas', 'projects', 'tasks'].every((k) => Array.isArray(input[k]))) throw new Error('Invalid version 2 Vesper backup.');
     const s = structuredClone(input);
     s.deleted ||= {};
-    s.projects.forEach(flowAliases);
+    s.projects.forEach((p) => { p.mode = 'full'; flowAliases(p); });
     return s;
   }
   if (!isV1(input)) throw new Error('This file is not a Vesper backup.');
@@ -373,7 +373,7 @@ function createModelDb(s, persist = () => {}) {
     },
     addFlowProject(areaId, text, mode = 'full', fixedId) {
       if (!db.area(areaId)) throw new Error('Choose an Area for the Project.');
-      if (!['full', 'quick'].includes(mode)) throw new Error('Mode must be full or quick.');
+      if (mode !== 'full') throw new Error('Quick mode was removed. Create a simple Task instead.');
       const p = flowAliases({ id: fixedId || id(), areaId, title: title(text), mode,
         order: appendOrder(db.projectsIn(areaId)), created: Date.now(), updated: Date.now(),
         slide: 0, reached: 0, notes: {}, ticks: {}, selah: {}, passes: 1, loops: 0, finished: null, timer: null });
@@ -624,7 +624,7 @@ function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
     } else if (type === 'create_task') {
       const title = String(a.title || '').trim().slice(0, 80);
       const project = findProject(a.project);
-      if (a.mode !== undefined && !['full', 'quick'].includes(a.mode)) { skipped.push('Mode must be full or quick.'); continue; }
+      if (a.mode !== undefined && a.mode !== 'full') { skipped.push('Quick mode was removed. Create a simple Task instead.'); continue; }
       if (!title) { skipped.push('A task had no name.'); continue; }
       if (!project) { skipped.push(`No project found for "${title}".`); continue; }
       const have = db.decksOf(project.id).find((d) => norm(d.title) === norm(title));
@@ -639,7 +639,8 @@ function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
       const idx = slideIndex(String(a.slide || ''));
-      const slide = String(a.slide || '').endsWith('.quick') ? slideFor({ mode: 'quick', slide: idx }) : SLIDES[idx];
+      if (String(a.slide || '').endsWith('.quick')) { skipped.push('Retained Quick notes are read-only.'); continue; }
+      const slide = SLIDES[idx];
       if (!slide || !['sub', 'quick'].includes(slide.type) || (slide.type === 'quick' && slide.key !== a.slide)) { skipped.push(`There is no slide "${a.slide}".`); continue; }
       const hasStep = a.step !== undefined && a.step !== null && a.step !== '';
       const step = hasStep ? Number(a.step) : null;
@@ -731,7 +732,7 @@ function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
     } else if (type === 'set_task') {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
-      if (a.mode !== undefined && !['full', 'quick'].includes(a.mode)) { skipped.push('Mode must be full or quick.'); continue; }
+      if (a.mode !== undefined && a.mode !== 'full') { skipped.push('Quick mode was removed.'); continue; }
       const error = Object.hasOwn(a, 'priority') || Object.hasOwn(a, 'due') || a.mode === undefined ? setTaskMeta(deck, a) : null;
       if (error) { skipped.push(error); continue; }
       if (a.mode !== undefined) setTaskMode(deck, a.mode);

@@ -44,8 +44,8 @@ export function ask(title, { value = '', ok = 'Create', placeholder = '' } = {})
 
 export function askTask() {
   return modal({
-    html: `<form><h2>Name this task</h2><label>Task name<input name="title" required maxlength="80" placeholder="Plan the move" autocomplete="off"></label><label>Mode<select name="mode"><option value="full">Full — 27 slides, 34 steps</option><option value="quick">Quick — 12 slides, 5 stage notes</option></select></label><div class="modal-actions"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Create task</button></div></form>`,
-    value: (d) => ({ title: d.querySelector('[name=title]').value.trim(), mode: d.querySelector('[name=mode]').value }),
+    html: `<form><h2>Name this Project</h2><label>Project title<input name="title" required maxlength="80" placeholder="Plan the move" autocomplete="off"></label><div class="modal-actions"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Create Project</button></div></form>`,
+    value: (d) => ({ title: d.querySelector('[name=title]').value.trim(), mode: 'full' }),
     cancelValue: null,
   });
 }

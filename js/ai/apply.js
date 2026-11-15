@@ -66,7 +66,7 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
     } else if (type === 'create_task') {
       const title = String(a.title || '').trim().slice(0, 80);
       const project = findProject(a.project);
-      if (a.mode !== undefined && !['full', 'quick'].includes(a.mode)) { skipped.push('Mode must be full or quick.'); continue; }
+      if (a.mode !== undefined && a.mode !== 'full') { skipped.push('Quick mode was removed. Create a simple Task instead.'); continue; }
       if (!title) { skipped.push('A task had no name.'); continue; }
       if (!project) { skipped.push(`No project found for "${title}".`); continue; }
       const have = db.decksOf(project.id).find((d) => norm(d.title) === norm(title));
@@ -81,7 +81,8 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
       const idx = slideIndex(String(a.slide || ''));
-      const slide = String(a.slide || '').endsWith('.quick') ? slideFor({ mode: 'quick', slide: idx }) : SLIDES[idx];
+      if (String(a.slide || '').endsWith('.quick')) { skipped.push('Retained Quick notes are read-only.'); continue; }
+      const slide = SLIDES[idx];
       if (!slide || !['sub', 'quick'].includes(slide.type) || (slide.type === 'quick' && slide.key !== a.slide)) { skipped.push(`There is no slide "${a.slide}".`); continue; }
       const hasStep = a.step !== undefined && a.step !== null && a.step !== '';
       const step = hasStep ? Number(a.step) : null;
@@ -173,7 +174,7 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
     } else if (type === 'set_task') {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
-      if (a.mode !== undefined && !['full', 'quick'].includes(a.mode)) { skipped.push('Mode must be full or quick.'); continue; }
+      if (a.mode !== undefined && a.mode !== 'full') { skipped.push('Quick mode was removed.'); continue; }
       const error = Object.hasOwn(a, 'priority') || Object.hasOwn(a, 'due') || a.mode === undefined ? setTaskMeta(deck, a) : null;
       if (error) { skipped.push(error); continue; }
       if (a.mode !== undefined) setTaskMode(deck, a.mode);

@@ -11,6 +11,7 @@ import { resumeButton, stageBar, taskChips } from './parts.js';
 import { PRIORITIES, setTaskMeta } from '../task-meta.js';
 import { openChatPanel } from '../ai/panel.js';
 import { exportDialog, calendarDialog } from '../connect-ui.js';
+import { taskListHTML, bindTaskList, addTaskDialog } from './model-ui.js';
 
 export function deckView(id) {
   const deck = store.deck(id);
@@ -33,9 +34,7 @@ export function deckView(id) {
     </div>
     ${taskChips(deck)}
     <form class="card task-meta-form" data-task-meta>
-      <label>Mode<select name="mode"><option value="full" ${!isQuick(deck) ? 'selected' : ''}>Full — 27 slides</option><option value="quick" ${isQuick(deck) ? 'selected' : ''}>Quick — 12 slides</option></select></label>
-      <p class="sub">Mode applies immediately. Both modes' notes are kept.</p>
-      <h2>Task details</h2>
+      <h2>Project details</h2>
       <div class="row wrap">
         <label>Priority<select name="priority"><option value="">No priority</option>${PRIORITIES.map((p) => `<option value="${p}" ${deck.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
         <label>Due date<input name="due" type="date" min="0001-01-01" max="9999-12-31" value="${esc(deck.due || '')}"></label>
@@ -44,8 +43,8 @@ export function deckView(id) {
       <p class="sub">Choose no priority or clear the date to remove it.</p>
     </form>
     <form class="card task-meta-form" data-move-task>
-      <label>Project<select name="project">${store.projects().map((p) => `<option value="${esc(p.id)}" ${p.id === deck.projectId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
-      <div class="row wrap"><button class="btn small" type="submit">Move task</button><button class="btn small" type="button" data-organize="rename" data-kind="tasks" data-item="${esc(id)}" data-name="${esc(deck.title)}">Rename task</button></div>
+      <label>Area<select name="project">${store.areas().map((p) => `<option value="${esc(p.id)}" ${p.id === deck.areaId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+      <div class="row wrap"><button class="btn small" type="submit">Move Project</button><button class="btn small" type="button" data-organize="rename" data-kind="tasks" data-item="${esc(id)}" data-name="${esc(deck.title)}">Rename Project</button></div>
     </form>
     <div class="card now-card">
       <div class="now-text"><p class="sub">Now</p><p class="now-t">${esc(now)}</p><p class="sub">Slide ${slidePosition(deck) + 1} of ${slidesFor(deck).length}</p>${stageBar(deck.slide, deck)}</div>
@@ -53,11 +52,14 @@ export function deckView(id) {
     </div>
     <h2 class="section">Mind map</h2>
     <div class="card">${deckMap(deck)}${mapLegend('Done', 'Current', 'Not yet')}<p class="sub map-note">Tap any name to jump to that slide. Selah is the pause at the end of each stage.</p></div>
-    <div class="footer-tools"><button class="btn small" data-act="${deck.finished ? 'reopen' : 'finish'}">${deck.finished ? 'Reopen' : 'Finish'}</button><button class="btn small" data-act="calendar">Add to calendar</button><button class="btn small" data-act="export">Send elsewhere</button><button class="btn small danger" data-act="delete-deck">Delete task</button></div>
+    ${taskListHTML('project', id)}
+    <div class="row wrap"><button class="btn" data-act="add-simple-task">Add task</button><button class="btn" data-act="demote-project">Make this a task</button></div>
+    <div class="footer-tools"><button class="btn small" data-act="${deck.finished ? 'reopen' : 'finish'}">${deck.finished ? 'Reopen' : 'Finish'}</button><button class="btn small" data-act="calendar">Add to calendar</button><button class="btn small" data-act="export">Send elsewhere</button><button class="btn small danger" data-act="delete-deck">Delete Project</button></div>
   </div>`;
 
   function mount(root) {
     root.addEventListener('click', onClick);
+    const stopTasks = bindTaskList(root);
     const stopOrganize = bindOrganize(root);
     const moveForm = root.querySelector('[data-move-task]');
     function moveTask(e) {
@@ -71,8 +73,14 @@ export function deckView(id) {
     const stopTree = drawTree(root);
     const here = root.querySelector('.dt-chip.now');
     if (here && here.scrollIntoView) here.scrollIntoView({ block: 'center', behavior: 'auto' });
-    return () => { root.removeEventListener('click', onClick); stopDetails(); moveForm.removeEventListener('submit', moveTask); stopOrganize(); stopTree(); };
+    return () => { root.removeEventListener('click', onClick); stopDetails(); stopTasks(); moveForm.removeEventListener('submit', moveTask); stopOrganize(); stopTree(); };
     async function onClick(e) {
+      if (e.target.closest('[data-act="add-simple-task"]')) { await addTaskDialog({ kind: 'project', id }); rerender(); return; }
+      if (e.target.closest('[data-act="demote-project"]')) {
+        if (!(await confirmBox('Make this a task?', 'Only an empty flow can become a Task. Any contained tasks move to its Area.'))) return;
+        try { store.demoteProject(id); go(`#/p/${deck.areaId}`); } catch (error) { notice('Could not make Task', error.message); }
+        return;
+      }
       const statusBtn = e.target.closest('[data-act="finish"],[data-act="reopen"]');
       if (statusBtn) {
         if (statusBtn.dataset.act === 'finish') { if (!(await finishInApp(deck))) return; }
@@ -85,7 +93,7 @@ export function deckView(id) {
       if (other) { if (other.dataset.act === 'calendar') calendarDialog(deck); else exportDialog({ deck, project }); return; }
       const btn = e.target.closest('[data-act="delete-deck"]');
       if (!btn) return;
-      const yes = await confirmBox(`Delete "${deck.title}"?`, 'Its notes and progress are deleted too. You can\'t undo it.');
+      const yes = await confirmBox(`Delete "${deck.title}"?`, 'Its flow notes and progress are deleted too. Its simple Tasks move to Inbox. You can\'t undo it.');
       if (yes) { store.removeDeck(id); go(`#/p/${deck.projectId}`); }
     }
   }
@@ -94,20 +102,6 @@ export function deckView(id) {
 
 export function bindTaskDetails(root, deck) {
   const form = root.querySelector('[data-task-meta]');
-  const mode = form.elements.namedItem('mode');
-  function changeMode() {
-    const draft = { priority: form.elements.namedItem('priority').value, due: form.elements.namedItem('due').value };
-    const error = setTaskMode(deck, mode.value);
-    if (error) { mode.value = isQuick(deck) ? 'quick' : 'full'; notice('Could not change mode', error); return; }
-    const x = globalThis.scrollX || 0, y = globalThis.scrollY || 0;
-    store.save(deck);
-    rerender();
-    // Refresh the map/counts, but keep unsaved metadata and the user's position.
-    const nextForm = root.querySelector('[data-task-meta]');
-    for (const [name, value] of Object.entries(draft)) nextForm.elements.namedItem(name).value = value;
-    nextForm.elements.namedItem('mode').focus?.({ preventScroll: true });
-    globalThis.scrollTo?.(x, y);
-  }
   function saveDetails(e) {
     e.preventDefault();
     const data = new FormData(form);
@@ -115,9 +109,8 @@ export function bindTaskDetails(root, deck) {
     if (error) { notice('Could not save task details', error); return; }
     store.save(deck); rerender();
   }
-  mode.addEventListener('change', changeMode);
   form.addEventListener('submit', saveDetails);
-  return () => { mode.removeEventListener('change', changeMode); form.removeEventListener('submit', saveDetails); };
+  return () => { form.removeEventListener('submit', saveDetails); };
 }
 
 function notFound() {

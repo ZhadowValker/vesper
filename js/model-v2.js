@@ -17,7 +17,7 @@ export function normalizeV2(input) {
     if (!['areas', 'projects', 'tasks'].every((k) => Array.isArray(input[k]))) throw new Error('Invalid version 2 Vesper backup.');
     const s = structuredClone(input);
     s.deleted ||= {};
-    s.projects.forEach(flowAliases);
+    s.projects.forEach((p) => { p.mode = 'full'; flowAliases(p); });
     return s;
   }
   if (!isV1(input)) throw new Error('This file is not a Vesper backup.');
@@ -70,7 +70,7 @@ export function createModelDb(s, persist = () => {}) {
     },
     addFlowProject(areaId, text, mode = 'full', fixedId) {
       if (!db.area(areaId)) throw new Error('Choose an Area for the Project.');
-      if (!['full', 'quick'].includes(mode)) throw new Error('Mode must be full or quick.');
+      if (mode !== 'full') throw new Error('Quick mode was removed. Create a simple Task instead.');
       const p = flowAliases({ id: fixedId || id(), areaId, title: title(text), mode,
         order: appendOrder(db.projectsIn(areaId)), created: Date.now(), updated: Date.now(),
         slide: 0, reached: 0, notes: {}, ticks: {}, selah: {}, passes: 1, loops: 0, finished: null, timer: null });

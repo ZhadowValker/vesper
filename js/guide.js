@@ -13,7 +13,7 @@ function markSeen() {
 const PAGES = [
   {
     title: 'Welcome to Vesper',
-    text: 'A calm way to get any piece of work done, one stage at a time. Every task walks the same five stages, and after each one you pause for Selah: a single question to check before you move on.',
+    text: 'Keep small Tasks simple, and give larger Projects the full Vesper flow. Projects walk five stages, with a Selah pause after each. Areas group your related work.',
     art: `<div class="g-art g-stages" aria-hidden="true">
       <span class="chip s-vision">Vision</span><span class="chip s-research">Research</span><span class="chip s-plan">Plan</span>
       <span class="chip s-execute">Execute</span><span class="chip s-review">Review</span>
@@ -21,11 +21,11 @@ const PAGES = [
   },
   {
     title: 'How it is organised',
-    text: 'A project holds tasks. Each task is a deck of slides that you flip through, one stage after another. The map of a task shows every stage and slide, and Resume takes you back to where you stopped.',
+    text: 'An Area holds Projects and loose Tasks. Projects never nest: each belongs to one Area. A Project has 27 slides, 34 steps and its own simple Tasks. Tasks have a tick and note, with no slides or Selahs; they can live in Inbox, an Area or a Project. Resume opens your current Project.',
     art: `<div class="g-art g-levels" aria-hidden="true">
+      <div class="g-level"><b>Area</b><span>Work</span></div>${ICON.next}
       <div class="g-level"><b>Project</b><span>Office move</span></div>${ICON.next}
-      <div class="g-level"><b>Task</b><span>Plan it</span></div>${ICON.next}
-      <div class="g-level"><b>Slide</b><span>Findings</span></div></div>`,
+      <div class="g-level"><b>Task</b><span>Book a van</span></div></div>`,
   },
   {
     title: 'What you do on a slide',
@@ -38,7 +38,7 @@ const PAGES = [
   },
   {
     title: 'Ready to begin',
-    text: 'Everything is saved on this device only, so use Export backup now and then. Want to see it filled in first? The book-writing sample has four tasks at different points, with every step written out.',
+    text: 'Everything stays on this device unless you enable Sync, so export backups regularly. The book sample has an Area, four full Projects and simple Tasks in Inbox, the Area and a Project. Promote an open Task to a Project when it needs a flow. Only an empty Project can become a Task.',
     art: `<div class="g-art g-ready" aria-hidden="true"><img src="img/selah.webp" alt="" width="120" height="120"></div>`,
   },
 ];
