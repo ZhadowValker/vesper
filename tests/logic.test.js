@@ -1022,4 +1022,40 @@ await testAsync('v2 finish: open Tasks are mentioned with missing Selahs and nev
   assert.match(message, /All Selahs passed/); assert.match(message, /1 task still open/); assert.ok(p.finished);
 });
 
+await testAsync('v2 AI actions and exports: create/move/update/promote/demote, flow aliases and model context', async () => {
+  const { applyModelTurn, systemPrompt } = await import('../js/ai/agent.js');
+  const { modelOverview } = await import('../js/model-overview.js');
+  store.reset();
+  const run = (action) => { const out = applyModelTurn([action]); assert.deepEqual(out.skipped, []); return out; };
+  run({ type: 'create_area', name: 'A' }); const a = store.areas()[0];
+  run({ type: 'create_project', area: a.id, title: 'Flow' }); const p = store.flowProjects()[0];
+  run({ type: 'create_task', title: 'Small', note: 'My reason', priority: 'P1' }); const t = store.tasks()[0];
+  assert.match(iv.nextQuestion(t, [], null).text, /Only Full Projects/);
+  run({ type: 'update_task', task: t.id, due: '2030-01-01', done: true });
+  assert.equal(applyModelTurn([{ type: 'promote_task', task: t.id, area: a.id }]).changes.length, 0);
+  run({ type: 'update_task', task: t.id, done: false });
+  run({ type: 'move_task', task: t.id, project: p.id });
+  assert.match(taskMarkdown(p), /Small.*P1.*2030-01-01/); assert.match(taskMarkdown(p), /My reason/);
+  run({ type: 'move_task', task: t.id, area: a.id });
+  const { projectMarkdown } = await import('../js/export.js');
+  assert.match(projectMarkdown(a, [p]), /Area Tasks/);
+  run({ type: 'move_task', task: t.id, inbox: true });
+  run({ type: 'promote_task', task: t.id, area: a.id });
+  assert.equal(store.flowProject(t.promotedTo).notes['vision.why#0'], 'My reason');
+  assert.equal(applyModelTurn([{ type: 'finish', project: p.id }]).changes.length, 0);
+  run({ type: 'finish', project: p.id, force: true, reason: 'Owner approved early finish' });
+  assert.ok(p.finishedEarly.reason.includes('Owner approved'));
+  run({ type: 'reopen', task: p.id });
+  run({ type: 'set_project', project: p.id, priority: 'P2', due: '2031-02-03' });
+  run({ type: 'set_note', project: p.id, slide: 'vision.why', step: 0, text: 'Flow reason' });
+  assert.equal(p.notes['vision.why#0'], 'Flow reason');
+  run({ type: 'create_task', title: 'Inbox' });
+  const rows = modelOverview(store.snapshot());
+  assert.ok(rows.some((r) => r.kind === 'task')); assert.ok(rows.some((r) => r.kind === 'project'));
+  assert.equal(modelOverview(store.snapshot(), { kind: 'task' }).every((r) => r.kind === 'task'), true);
+  assert.match(systemPrompt(), /Never interview a simple Task/); assert.match(stateText(p.id), /Area/);
+  const empty = store.addFlowProject(a.id, 'Empty');
+  run({ type: 'demote_project', project: empty.id }); assert.ok(!store.flowProject(empty.id));
+});
+
 console.log(`\n${passed} tests passed`);

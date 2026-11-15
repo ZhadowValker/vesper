@@ -6,6 +6,7 @@ import { sortFilterTasks, getTaskPrefs, PRIORITIES, validDue, isOverdue } from '
 import { taskListControls, bindTaskListControls, stageBar } from './parts.js';
 import { themeControlHTML, bindThemeControl } from '../theme.js';
 import { syncDialog } from '../connect-ui.js';
+import { exportDialog } from '../connect-ui.js';
 import { syncReady } from '../sync.js';
 import { buildSample } from '../sample.js';
 
@@ -78,6 +79,10 @@ export function taskListHTML(kind = 'inbox', id = '') {
   </section>`;
 }
 
+function projectChips(project) {
+  return `<span class="model-task-tags">${project.priority ? `<span class="chip priority">${esc(project.priority)}</span>` : ''}${project.due ? `<span class="chip ${isOverdue(project) ? 'overdue' : ''}">${isOverdue(project) ? 'Overdue' : 'Due'} ${esc(project.due)}</span>` : ''}${project.finishedEarly ? '<span class="chip finished-early">finished early</span>' : ''}</span>`;
+}
+
 function projectCardHTML(project, siblingProjects) {
   const tasks = store.tasksAt('project', project.id);
   const idx = siblingProjects.findIndex((x) => x.id === project.id);
@@ -89,6 +94,7 @@ function projectCardHTML(project, siblingProjects) {
   return `<article class="model-project-card">
     <div class="model-project-main"><a class="model-project-link" href="#/d/${esc(project.id)}">
       <span class="model-project-kind">Project</span><span class="model-project-title">${esc(project.title)}</span>
+      ${projectChips(project)}
       <span class="model-project-sub">${tasks.length} ${tasks.length === 1 ? 'Task' : 'Tasks'}${project.finished ? ' · Finished' : ''}</span>
       ${stageBar(project.finished ? 26 : project.reached || 0, project)}
     </a></div>${controls}
@@ -146,7 +152,7 @@ function homeMixedHTML() {
   ];
   const sorted = sortFilterTasks(entries, getTaskPrefs());
   const markup = sorted.map((entry) => entry._modelType === 'project'
-    ? `<article class="model-project-card"><div class="model-project-main"><a class="model-project-link" href="#/d/${esc(entry.id)}"><span class="model-project-kind">Project · ${esc(areaName(store.area(entry.areaId)))}</span><span class="model-project-title">${esc(entry.title)}</span>${stageBar(entry.finished ? 26 : entry.reached || 0, entry)}</a></div><div class="model-project-actions"><button class="btn small" type="button" data-project-task="${esc(entry.id)}">Add Task</button></div></article>`
+    ? `<article class="model-project-card"><div class="model-project-main"><a class="model-project-link" href="#/d/${esc(entry.id)}"><span class="model-project-kind">Project · ${esc(areaName(store.area(entry.areaId)))}</span><span class="model-project-title">${esc(entry.title)}</span>${projectChips(entry)}${stageBar(entry.finished ? 26 : entry.reached || 0, entry)}</a></div><div class="model-project-actions"><button class="btn small" type="button" data-project-task="${esc(entry.id)}">Add Task</button></div></article>`
     : mixedTaskMarkup(entry, entry.location)).join('');
   return `<section class="model-section">
     <div class="model-section-head"><h2>On the table</h2><span class="model-count">${entries.length} items</span></div>
@@ -213,6 +219,7 @@ export function modelArea(areaId) {
       <button class="btn small" type="button" data-area-order="down" data-area-id="${esc(areaId)}" aria-label="Move ${esc(areaName(area))} down" ${areas.findIndex((item) => item.id === areaId) === areas.length - 1 ? 'disabled' : ''}>Move down</button>
       <button class="btn small" type="button" data-model-create-project data-area="${esc(areaId)}">New Project</button>
       <button class="btn small" type="button" data-model-create-task data-location="area:${esc(areaId)}">Add loose Task</button>
+      <button class="btn small" type="button" data-area-action="export" data-area-id="${esc(areaId)}">Export Area</button>
       <button class="btn small danger" type="button" data-area-action="delete" data-area-id="${esc(areaId)}">Delete Area</button>
     </div>
     <section class="model-section">
@@ -348,7 +355,7 @@ function formDialog({ title, submit, body, read }) {
     dlg.querySelector('form').addEventListener('submit', (event) => {
       event.preventDefault();
       const value = read(dlg);
-      if (!value.title) { dlg.querySelector('[name=title]').focus(); return; }
+      if (Object.hasOwn(value, 'title') && !value.title) { dlg.querySelector('[name=title]').focus(); return; }
       finish(value);
     });
     dlg.showModal();
@@ -516,6 +523,7 @@ async function createArea() {
 async function handleAreaAction(button) {
   const area = store.area(button.dataset.areaId);
   if (!area) return;
+  if (button.dataset.areaAction === 'export') { exportDialog({ project: area, decks: store.projectsIn(area.id) }); return; }
   if (button.dataset.areaAction === 'rename') {
     const name = await ask('Rename Area', { ok: 'Save name', value: areaName(area) });
     if (!name) return;

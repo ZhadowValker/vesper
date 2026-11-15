@@ -467,7 +467,7 @@ function taskSummary(state, d) {
 const obj = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
 
-const TOOLS = [
+const LEGACY_TOOLS = [
   { name: 'vesper_framework', description: 'The Vesper framework: five stages (Vision, Research, Plan, Execute, Review), their slides, steps, the question for each step, and the Selah pause question per stage. Read this first.', inputSchema: obj({}), annotations: { readOnlyHint: true } },
   { name: 'vesper_overview', description: 'Compact JSON, one line per task. Filter by project/task names, project id/name, current stage, status, priority or an exclusive due-date cutoff. Default 25 tasks; active means started and unfinished.', inputSchema: obj({ query: str('Matches project or task names'), project: str('Project id or exact name'), stage: { type: 'string', enum: ['vision', 'research', 'plan', 'execute', 'review'] }, status: { type: 'string', enum: ['active', 'finished', 'not started'] }, priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4', 'none'] }, dueBefore: { type: 'string', format: 'date' }, limit: { type: 'integer', minimum: 1, maximum: 1000, default: 25 } }), annotations: { readOnlyHint: true } },
   { name: 'vesper_list_projects', description: 'Only project ids, names and task counts, in manual order.', inputSchema: obj({}), annotations: { readOnlyHint: true } },
@@ -488,7 +488,81 @@ const TOOLS = [
   { name: 'vesper_delete', description: 'Delete a task or a whole project with its tasks. Cannot be undone. Ask the person first and only pass confirm true after they say yes.', inputSchema: obj({ task: str('Task id or exact title (to delete one task)'), project: str('Project id or name (to delete a whole project)'), confirm: { type: 'boolean', description: 'Must be true' } }, ['confirm']) },
 ];
 
+const modelPriority = { type: ['string', 'null'], enum: ['P1', 'P2', 'P3', 'P4', null] };
+const modelDue = { type: ['string', 'null'], format: 'date' };
+const modelPlace = { inbox: { type: 'boolean' }, area: str('Area id or unique name'), project: str('Project id or unique title') };
+const modelTool = (name, description, properties, required = []) => ({ name, description, inputSchema: obj(properties, required) });
+const TOOLS = [
+  ...LEGACY_TOOLS.filter((t) => !['vesper_create_project', 'vesper_create_task', 'vesper_move_task', 'vesper_rename', 'vesper_reorder', 'vesper_overview', 'vesper_list_projects'].includes(t.name)).map((t) => {
+    const props = { ...t.inputSchema.properties };
+    if (props.task) { props.project = str('Full Vesper Project id or unique title'); props.task = str('Deprecated alias for project'); }
+    if (t.name === 'vesper_set_task') delete props.mode;
+    return { ...t, description: t.name === 'vesper_set_note' ? 'Write a Full Project step/slide note. Retained Quick notes are read-only. Filling a step also ticks it; text appends unless mode=replace.' :
+      t.name === 'vesper_next_questions' ? 'Next empty Full Project step questions. Never interviews simple Tasks.' :
+      `Full Vesper Projects (27 slides, 34 steps). ${t.description.replaceAll('task', 'project')}`,
+      inputSchema: obj(props, t.inputSchema.required.filter((k) => k !== 'task' && k !== 'project')) };
+  }),
+  modelTool('vesper_create_area', 'Create a named Area, a group for Projects and loose Tasks.', { name: str('Area name') }, ['name']),
+  modelTool('vesper_create_project', 'Create a Full Vesper Project in exactly one Area. Projects never nest.', { area: str('Area id/name'), title: str('Project title'), priority: modelPriority, due: modelDue }, ['area', 'title']),
+  modelTool('vesper_create_task', 'Create a SIMPLE Task: title, tick, note and optional metadata. No slides/Selah. No location means Inbox.', { title: str('Task title'), ...modelPlace, priority: modelPriority, due: modelDue, note: str('Short note') }, ['title']),
+  modelTool('vesper_update_task', 'Update a simple Task; omitted fields stay unchanged. null clears priority/due.', { task: str('Simple Task id/title'), title: str('Title'), done: { type: 'boolean' }, priority: modelPriority, due: modelDue, note: str('Short note') }, ['task']),
+  modelTool('vesper_move_task', 'Move a SIMPLE Task to Inbox (inbox:true), an Area or a Project. Give exactly one destination.', { task: str('Simple Task id/title'), ...modelPlace }, ['task']),
+  modelTool('vesper_move_project', 'Move a Full Project into an Area, never another Project.', { project: str('Project id/title'), area: str('Area id/name') }, ['project', 'area']),
+  modelTool('vesper_promote_task', 'Make an open Task a Full Project. Inbox tasks require an Area. Note becomes Vision/Why first step; provenance is retained.', { task: str('Simple Task id/title'), area: str('Area for an Inbox task') }, ['task']),
+  modelTool('vesper_demote_project', 'Make an empty Full Project a simple Area Task. Refuses any notes, ticks or passed Selahs; children move to its Area.', { project: str('Project id/title') }, ['project']),
+  modelTool('vesper_list_areas', 'Only Areas with Project and loose-Task counts.', {}),
+  modelTool('vesper_list_projects', 'DEPRECATED: alias of vesper_list_areas (not a list of Full Projects). Use overview kind=project for Projects.', {}),
+  modelTool('vesper_get_project', 'Read all Full Project steps/notes and contained simple Tasks.', { project: str('Project id/title'), task: str('Deprecated project alias') }),
+  modelTool('vesper_set_project', 'Set Full Project priority/due; null clears, omitted values stay unchanged.', { project: str('Project id/title'), task: str('Deprecated project alias'), priority: modelPriority, due: modelDue }),
+  modelTool('vesper_rename', 'Rename one Area or Full Project. task is a deprecated alias for a Full Project. Use update_task for simple Tasks.', { area: str('Area'), project: str('Project'), task: str('Deprecated Project alias'), name: str('New name') }, ['name']),
+  modelTool('vesper_reorder', 'Reorder Areas, Projects in one Area, or simple Tasks in one location. Full order or item plus 1-based position.', { kind: { type: 'string', enum: ['areas', 'projects', 'tasks'] }, ...modelPlace, order: { type: 'array', items: { type: 'string' } }, item: str('Item id'), position: { type: 'integer', minimum: 1 } }, ['kind']),
+  modelTool('vesper_delete_area', 'Delete an Area and its Project flows. Simple Tasks move to Inbox. Requires explicit confirmation.', { area: str('Area id/name'), confirm: { type: 'boolean' } }, ['area', 'confirm']),
+  modelTool('vesper_delete_simple_task', 'Delete a simple Task after explicit confirmation.', { task: str('Simple Task id/title'), confirm: { type: 'boolean' } }, ['task', 'confirm']),
+  modelTool('vesper_overview', 'One compact JSON line per Full Project or simple Task, including kind. Default limit 25.', { ...modelPlace, kind: { type: 'string', enum: ['project', 'task'] }, query: str('Matches titles and Area names'), stage: str('vision/research/plan/execute/review'), status: { type: 'string', enum: ['active', 'finished', 'not started'] }, priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4', 'none'] }, dueBefore: { type: 'string', format: 'date' }, limit: { type: 'integer', minimum: 1, maximum: 1000, default: 25 } }),
+];
+
 async function callTool(env, name, a) {
+  const state = await loadState(env), db = makeDb(state);
+  const text = (value) => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
+  const fail = (message) => ({ isError: true, content: [{ type: 'text', text: message }] });
+  if (name === 'vesper_framework') {
+    const old = await callLegacyTool(env, name, a);
+    return text({ model: 'Area groups work. A Project belongs to one Area and has the full 27-slide / 34-step Vesper flow. A simple Task has a tick and note, lives in Inbox/Area/Project, and has no slides or Selah. Quick mode is removed. Flow tools accept project; task is a deprecated Project alias.', stages: JSON.parse(old.content[0].text) });
+  }
+  if (name === 'vesper_list_areas' || name === 'vesper_list_projects') return text(orderedItems(state.areas).map((area) => ({
+    id: area.id, name: area.name, projects: db.projectsIn(area.id).length, tasks: db.tasksAt('area', area.id).length,
+  })));
+  if (name === 'vesper_overview') {
+    try { return text('[\n' + modelOverview(state, a).map((row) => JSON.stringify(row)).join(',\n') + '\n]'); }
+    catch (e) { return fail(e.message); }
+  }
+  const actions = {
+    vesper_create_area: 'create_area', vesper_create_project: 'create_project', vesper_create_task: 'create_task',
+    vesper_update_task: 'update_task', vesper_move_task: 'move_task', vesper_move_project: 'move_project',
+    vesper_promote_task: 'promote_task', vesper_demote_project: 'demote_project',
+    vesper_rename: 'rename', vesper_reorder: 'reorder', vesper_delete_area: 'delete_area', vesper_delete_simple_task: 'delete_task',
+  };
+  if (actions[name]) {
+    const action = { ...a, type: actions[name] };
+    if (name === 'vesper_rename' && a.task && !a.project) { action.project = a.task; delete action.task; }
+    const out = applyModelActions([action], { db, by: 'claude' });
+    if (out.changes.length) await saveState(env, state);
+    return text({ changed: out.changes.map((c) => c.text), ids: out.changes.map((c) => c.id), notApplied: out.skipped });
+  }
+  const aliases = { vesper_get_project: 'vesper_get_task', vesper_set_project: 'vesper_set_task' };
+  const flowName = aliases[name] || name;
+  const p = findTask(state, a.project || a.task);
+  const result = await callLegacyTool(env, flowName, { ...a, project: undefined, task: p?.id || a.project || a.task });
+  if (!result.isError && p && ['vesper_get_task', 'vesper_finish'].includes(flowName)) {
+    const value = JSON.parse(result.content[0].text);
+    value.openTasks = db.tasksAt('project', p.id).filter((t) => !t.done).length;
+    if (flowName === 'vesper_get_task') { value.area = db.area(p.areaId)?.name; value.tasks = db.tasksAt('project', p.id); }
+    return text(value);
+  }
+  return result;
+}
+
+async function callLegacyTool(env, name, a) {
   const state = await loadState(env);
   const db = makeDb(state);
   const text = (v) => ({ content: [{ type: 'text', text: typeof v === 'string' ? v : JSON.stringify(v, null, 2) }] });

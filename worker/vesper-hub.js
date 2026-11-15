@@ -778,6 +778,127 @@ function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
   return { changes, skipped, focus };
 }
 
+// ---- from js/model-actions.js ----
+function resolveRecord(list, ref, field = 'title') {
+  if (typeof ref !== 'string' || !ref.trim()) return null;
+  const exact = list.find((x) => x.id === ref);
+  if (exact) return exact;
+  const matches = list.filter((x) => String(x[field] || '').toLowerCase() === ref.trim().toLowerCase());
+  return matches.length === 1 ? matches[0] : null;
+}
+function applyModelActions(actions, { db, focusId = null, by = 'ai' } = {}) {
+  const changes = [], skipped = [];
+  let focus = focusId;
+  const area = (ref) => resolveRecord(db.areas(), ref, 'name');
+  const project = (ref) => resolveRecord(db.flowProjects(), ref);
+  const task = (ref) => resolveRecord(db.tasks(), ref);
+  const required = (item, name) => { if (!item) throw new Error(`${name} not found or name is ambiguous.`); return item; };
+  const location = (a) => {
+    if ([!!a.inbox, !!a.area, !!a.project].filter(Boolean).length > 1) throw new Error('Choose exactly one location.');
+    if (a.project) return { kind: 'project', id: required(project(a.project), 'Project').id };
+    if (a.area) return { kind: 'area', id: required(area(a.area), 'Area').id };
+    return { kind: 'inbox' };
+  };
+  for (const a of actions) {
+    try {
+      if (!a || typeof a.type !== 'string') throw new Error('An action type is required.');
+      let item;
+      if (a.type === 'create_area') item = db.addArea(a.name);
+      else if (a.type === 'create_project') {
+        if (a.mode && a.mode !== 'full') throw new Error('Quick mode was removed; create a simple Task.');
+        const parent = required(area(a.area), 'Area');
+        if (a.priority !== undefined || a.due !== undefined) { const error = setTaskMeta({}, a); if (error) throw new Error(error); }
+        item = db.addFlowProject(parent.id, a.title);
+        if (a.priority !== undefined || a.due !== undefined) {
+          const error = setTaskMeta(item, a); if (error) { db.removeFlowProject(item.id); throw new Error(error); }
+          db.save(item);
+        }
+        focus = item.id;
+      } else if (a.type === 'create_task') {
+        if (a.mode !== undefined) throw new Error('Tasks have no mode, slides or Selahs.');
+        item = db.addTask(a.title, { location: location(a), priority: a.priority, due: a.due, note: a.note });
+      } else if (a.type === 'update_task') item = db.updateTask(required(task(a.task), 'Task').id, a);
+      else if (a.type === 'move_task') item = db.moveTask(required(task(a.task), 'Task').id, location(a));
+      else if (a.type === 'promote_task') {
+        item = db.promoteTask(required(task(a.task), 'Task').id, a.area ? required(area(a.area), 'Area').id : undefined);
+        focus = item.id;
+      } else if (a.type === 'demote_project') item = db.demoteProject(required(project(a.project || a.task), 'Project').id);
+      else if (a.type === 'move_project') {
+        item = required(project(a.project || a.task), 'Project');
+        const parent = required(area(a.area), 'Area');
+        item.areaId = parent.id; item.order = appendOrder(db.projectsIn(parent.id)); db.save(item);
+      } else if (a.type === 'rename') {
+        if ([a.area, a.project, a.task].filter(Boolean).length !== 1) throw new Error('Choose exactly one Area, Project or Task.');
+        item = a.area ? required(area(a.area), 'Area') : a.project ? required(project(a.project), 'Project') : required(task(a.task) || project(a.task), 'Task or Project');
+        const name = String(a.name || '').trim(); if (!name || name.length > 80) throw new Error('Name must be 1–80 characters.');
+        if (a.area) item.name = name; else item.title = name;
+        db.save(item);
+      } else if (a.type === 'reorder') {
+        const list = a.kind === 'areas' ? db.areas() : a.kind === 'projects' ? db.projectsIn(required(area(a.area), 'Area').id) :
+          a.kind === 'tasks' ? (() => { const place = location(a); return db.tasksAt(place.kind, place.id); })() : null;
+        if (!list) throw new Error('kind must be areas, projects or tasks.');
+        const error = reorderItems(list, a); if (error) throw new Error(error);
+        db.saveItems(list, a.kind); changes.push({ text: `Reordered ${a.kind}` }); continue;
+      } else if (a.type === 'delete_task' || a.type === 'delete_area' || a.type === 'delete_project') {
+        if (a.confirm !== true) throw new Error('Deletion needs confirm:true.');
+        item = a.type === 'delete_task' ? required(task(a.task), 'Task') : a.type === 'delete_area' ? required(area(a.area), 'Area') : required(project(a.project || a.task), 'Project');
+        if (a.type === 'delete_task') db.removeTask(item.id);
+        else if (a.type === 'delete_area') db.removeArea(item.id);
+        else db.removeFlowProject(item.id);
+      } else {
+        const p = required(project(a.project || a.task || focus), 'Project');
+        const legacy = { ...a, task: p.id };
+        if (a.type === 'set_project') legacy.type = 'set_task';
+        const result = applyActions([legacy], { db, focusId: p.id, by });
+        changes.push(...result.changes); skipped.push(...result.skipped); focus = result.focusId || p.id;
+        continue;
+      }
+      changes.push({ text: `${a.type.replaceAll('_', ' ')}: ${item.title || item.name}`, id: item.id, href: item.areaId ? `#/d/${item.id}` : '#/' });
+    } catch (error) { skipped.push(error.message); }
+  }
+  return { changes, skipped, focusId: focus, touched: [] };
+}
+
+// ---- from js/model-overview.js ----
+function modelOverview(state, filters = {}) {
+  if (filters.kind && !['project', 'task'].includes(filters.kind)) throw new Error('kind must be project or task.');
+  if (filters.stage && !['vision', 'research', 'plan', 'execute', 'review'].includes(filters.stage)) throw new Error('Unknown stage.');
+  if (filters.priority && !['none', ...PRIORITIES].includes(filters.priority)) throw new Error('Invalid priority.');
+  if (filters.status && !['active', 'finished', 'not started'].includes(filters.status)) throw new Error('Invalid status.');
+  if (filters.dueBefore && !validDue(filters.dueBefore)) throw new Error('dueBefore must be a calendar date.');
+  const area = filters.area ? resolveRecord(state.areas, filters.area, 'name') : null;
+  const parent = filters.project ? resolveRecord(state.projects, filters.project) : null;
+  if ((filters.area && !area) || (filters.project && !parent)) return [];
+  const query = String(filters.query || '').trim().toLowerCase();
+  const limit = filters.limit === undefined ? 25 : Number(filters.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('limit must be 1–1000.');
+  const rows = [];
+  for (const kind of ['project', 'task']) for (const item of orderedItems(kind === 'project' ? state.projects : state.tasks.filter((t) => !t.promotedTo))) {
+    if (filters.kind && filters.kind !== kind) continue;
+    if (filters.inbox && (kind !== 'task' || item.location?.kind !== 'inbox')) continue;
+    const containing = kind === 'task' && item.location?.kind === 'project' ? state.projects.find((p) => p.id === item.location.id) : null;
+    const areaId = kind === 'project' ? item.areaId : item.location?.kind === 'area' ? item.location.id : containing?.areaId;
+    const areaName = state.areas.find((a) => a.id === areaId)?.name || '';
+    const stage = kind === 'project' ? slideFor(item)?.stage?.id || '' : '';
+    const finished = kind === 'project' ? !!item.finished : !!item.done;
+    const started = kind === 'project' ? !!item.reached : true;
+    if (area && area.id !== areaId) continue;
+    if (parent && !(kind === 'project' ? item.id === parent.id : containing?.id === parent.id)) continue;
+    if (filters.stage && stage !== filters.stage) continue;
+    if (filters.status === 'finished' && !finished || filters.status === 'active' && (finished || !started) || filters.status === 'not started' && (finished || started)) continue;
+    if (filters.priority && (filters.priority === 'none' ? !!item.priority : item.priority !== filters.priority)) continue;
+    if (filters.dueBefore && !(item.due && item.due < filters.dueBefore)) continue;
+    if (query && ![item.title, areaName, containing?.title].filter(Boolean).join(' ').toLowerCase().includes(query)) continue;
+    const pr = kind === 'project' ? progress(item) : null;
+    rows.push({ id: item.id, kind, title: item.title, areaId: areaId || null, area: areaName || null,
+      project: containing?.title || null, stage: stage || null, priority: item.priority || null, due: item.due || null,
+      status: finished ? 'finished' : started ? 'active' : 'not started',
+      ...(pr ? { stepsFilled: `${pr.filled}/${pr.total}`, ...(taskCheck(item) ? { check: taskCheck(item) } : {}) } : { done: !!item.done, note: item.note || '', location: item.location }) });
+    if (rows.length === limit) return rows;
+  }
+  return rows;
+}
+
 // ---- from js/merge.js ----
 // Shared by the app and hub. Old task timestamps remain the fallback for old backups.
 const stamp = (x) => x.updated || x.created || 0;
@@ -1465,7 +1586,7 @@ function taskSummary(state, d) {
 const obj = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
 
-const TOOLS = [
+const LEGACY_TOOLS = [
   { name: 'vesper_framework', description: 'The Vesper framework: five stages (Vision, Research, Plan, Execute, Review), their slides, steps, the question for each step, and the Selah pause question per stage. Read this first.', inputSchema: obj({}), annotations: { readOnlyHint: true } },
   { name: 'vesper_overview', description: 'Compact JSON, one line per task. Filter by project/task names, project id/name, current stage, status, priority or an exclusive due-date cutoff. Default 25 tasks; active means started and unfinished.', inputSchema: obj({ query: str('Matches project or task names'), project: str('Project id or exact name'), stage: { type: 'string', enum: ['vision', 'research', 'plan', 'execute', 'review'] }, status: { type: 'string', enum: ['active', 'finished', 'not started'] }, priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4', 'none'] }, dueBefore: { type: 'string', format: 'date' }, limit: { type: 'integer', minimum: 1, maximum: 1000, default: 25 } }), annotations: { readOnlyHint: true } },
   { name: 'vesper_list_projects', description: 'Only project ids, names and task counts, in manual order.', inputSchema: obj({}), annotations: { readOnlyHint: true } },
@@ -1486,7 +1607,81 @@ const TOOLS = [
   { name: 'vesper_delete', description: 'Delete a task or a whole project with its tasks. Cannot be undone. Ask the person first and only pass confirm true after they say yes.', inputSchema: obj({ task: str('Task id or exact title (to delete one task)'), project: str('Project id or name (to delete a whole project)'), confirm: { type: 'boolean', description: 'Must be true' } }, ['confirm']) },
 ];
 
+const modelPriority = { type: ['string', 'null'], enum: ['P1', 'P2', 'P3', 'P4', null] };
+const modelDue = { type: ['string', 'null'], format: 'date' };
+const modelPlace = { inbox: { type: 'boolean' }, area: str('Area id or unique name'), project: str('Project id or unique title') };
+const modelTool = (name, description, properties, required = []) => ({ name, description, inputSchema: obj(properties, required) });
+const TOOLS = [
+  ...LEGACY_TOOLS.filter((t) => !['vesper_create_project', 'vesper_create_task', 'vesper_move_task', 'vesper_rename', 'vesper_reorder', 'vesper_overview', 'vesper_list_projects'].includes(t.name)).map((t) => {
+    const props = { ...t.inputSchema.properties };
+    if (props.task) { props.project = str('Full Vesper Project id or unique title'); props.task = str('Deprecated alias for project'); }
+    if (t.name === 'vesper_set_task') delete props.mode;
+    return { ...t, description: t.name === 'vesper_set_note' ? 'Write a Full Project step/slide note. Retained Quick notes are read-only. Filling a step also ticks it; text appends unless mode=replace.' :
+      t.name === 'vesper_next_questions' ? 'Next empty Full Project step questions. Never interviews simple Tasks.' :
+      `Full Vesper Projects (27 slides, 34 steps). ${t.description.replaceAll('task', 'project')}`,
+      inputSchema: obj(props, t.inputSchema.required.filter((k) => k !== 'task' && k !== 'project')) };
+  }),
+  modelTool('vesper_create_area', 'Create a named Area, a group for Projects and loose Tasks.', { name: str('Area name') }, ['name']),
+  modelTool('vesper_create_project', 'Create a Full Vesper Project in exactly one Area. Projects never nest.', { area: str('Area id/name'), title: str('Project title'), priority: modelPriority, due: modelDue }, ['area', 'title']),
+  modelTool('vesper_create_task', 'Create a SIMPLE Task: title, tick, note and optional metadata. No slides/Selah. No location means Inbox.', { title: str('Task title'), ...modelPlace, priority: modelPriority, due: modelDue, note: str('Short note') }, ['title']),
+  modelTool('vesper_update_task', 'Update a simple Task; omitted fields stay unchanged. null clears priority/due.', { task: str('Simple Task id/title'), title: str('Title'), done: { type: 'boolean' }, priority: modelPriority, due: modelDue, note: str('Short note') }, ['task']),
+  modelTool('vesper_move_task', 'Move a SIMPLE Task to Inbox (inbox:true), an Area or a Project. Give exactly one destination.', { task: str('Simple Task id/title'), ...modelPlace }, ['task']),
+  modelTool('vesper_move_project', 'Move a Full Project into an Area, never another Project.', { project: str('Project id/title'), area: str('Area id/name') }, ['project', 'area']),
+  modelTool('vesper_promote_task', 'Make an open Task a Full Project. Inbox tasks require an Area. Note becomes Vision/Why first step; provenance is retained.', { task: str('Simple Task id/title'), area: str('Area for an Inbox task') }, ['task']),
+  modelTool('vesper_demote_project', 'Make an empty Full Project a simple Area Task. Refuses any notes, ticks or passed Selahs; children move to its Area.', { project: str('Project id/title') }, ['project']),
+  modelTool('vesper_list_areas', 'Only Areas with Project and loose-Task counts.', {}),
+  modelTool('vesper_list_projects', 'DEPRECATED: alias of vesper_list_areas (not a list of Full Projects). Use overview kind=project for Projects.', {}),
+  modelTool('vesper_get_project', 'Read all Full Project steps/notes and contained simple Tasks.', { project: str('Project id/title'), task: str('Deprecated project alias') }),
+  modelTool('vesper_set_project', 'Set Full Project priority/due; null clears, omitted values stay unchanged.', { project: str('Project id/title'), task: str('Deprecated project alias'), priority: modelPriority, due: modelDue }),
+  modelTool('vesper_rename', 'Rename one Area or Full Project. task is a deprecated alias for a Full Project. Use update_task for simple Tasks.', { area: str('Area'), project: str('Project'), task: str('Deprecated Project alias'), name: str('New name') }, ['name']),
+  modelTool('vesper_reorder', 'Reorder Areas, Projects in one Area, or simple Tasks in one location. Full order or item plus 1-based position.', { kind: { type: 'string', enum: ['areas', 'projects', 'tasks'] }, ...modelPlace, order: { type: 'array', items: { type: 'string' } }, item: str('Item id'), position: { type: 'integer', minimum: 1 } }, ['kind']),
+  modelTool('vesper_delete_area', 'Delete an Area and its Project flows. Simple Tasks move to Inbox. Requires explicit confirmation.', { area: str('Area id/name'), confirm: { type: 'boolean' } }, ['area', 'confirm']),
+  modelTool('vesper_delete_simple_task', 'Delete a simple Task after explicit confirmation.', { task: str('Simple Task id/title'), confirm: { type: 'boolean' } }, ['task', 'confirm']),
+  modelTool('vesper_overview', 'One compact JSON line per Full Project or simple Task, including kind. Default limit 25.', { ...modelPlace, kind: { type: 'string', enum: ['project', 'task'] }, query: str('Matches titles and Area names'), stage: str('vision/research/plan/execute/review'), status: { type: 'string', enum: ['active', 'finished', 'not started'] }, priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4', 'none'] }, dueBefore: { type: 'string', format: 'date' }, limit: { type: 'integer', minimum: 1, maximum: 1000, default: 25 } }),
+];
+
 async function callTool(env, name, a) {
+  const state = await loadState(env), db = makeDb(state);
+  const text = (value) => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
+  const fail = (message) => ({ isError: true, content: [{ type: 'text', text: message }] });
+  if (name === 'vesper_framework') {
+    const old = await callLegacyTool(env, name, a);
+    return text({ model: 'Area groups work. A Project belongs to one Area and has the full 27-slide / 34-step Vesper flow. A simple Task has a tick and note, lives in Inbox/Area/Project, and has no slides or Selah. Quick mode is removed. Flow tools accept project; task is a deprecated Project alias.', stages: JSON.parse(old.content[0].text) });
+  }
+  if (name === 'vesper_list_areas' || name === 'vesper_list_projects') return text(orderedItems(state.areas).map((area) => ({
+    id: area.id, name: area.name, projects: db.projectsIn(area.id).length, tasks: db.tasksAt('area', area.id).length,
+  })));
+  if (name === 'vesper_overview') {
+    try { return text('[\n' + modelOverview(state, a).map((row) => JSON.stringify(row)).join(',\n') + '\n]'); }
+    catch (e) { return fail(e.message); }
+  }
+  const actions = {
+    vesper_create_area: 'create_area', vesper_create_project: 'create_project', vesper_create_task: 'create_task',
+    vesper_update_task: 'update_task', vesper_move_task: 'move_task', vesper_move_project: 'move_project',
+    vesper_promote_task: 'promote_task', vesper_demote_project: 'demote_project',
+    vesper_rename: 'rename', vesper_reorder: 'reorder', vesper_delete_area: 'delete_area', vesper_delete_simple_task: 'delete_task',
+  };
+  if (actions[name]) {
+    const action = { ...a, type: actions[name] };
+    if (name === 'vesper_rename' && a.task && !a.project) { action.project = a.task; delete action.task; }
+    const out = applyModelActions([action], { db, by: 'claude' });
+    if (out.changes.length) await saveState(env, state);
+    return text({ changed: out.changes.map((c) => c.text), ids: out.changes.map((c) => c.id), notApplied: out.skipped });
+  }
+  const aliases = { vesper_get_project: 'vesper_get_task', vesper_set_project: 'vesper_set_task' };
+  const flowName = aliases[name] || name;
+  const p = findTask(state, a.project || a.task);
+  const result = await callLegacyTool(env, flowName, { ...a, project: undefined, task: p?.id || a.project || a.task });
+  if (!result.isError && p && ['vesper_get_task', 'vesper_finish'].includes(flowName)) {
+    const value = JSON.parse(result.content[0].text);
+    value.openTasks = db.tasksAt('project', p.id).filter((t) => !t.done).length;
+    if (flowName === 'vesper_get_task') { value.area = db.area(p.areaId)?.name; value.tasks = db.tasksAt('project', p.id); }
+    return text(value);
+  }
+  return result;
+}
+
+async function callLegacyTool(env, name, a) {
   const state = await loadState(env);
   const db = makeDb(state);
   const text = (v) => ({ content: [{ type: 'text', text: typeof v === 'string' ? v : JSON.stringify(v, null, 2) }] });

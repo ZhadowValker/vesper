@@ -12,7 +12,33 @@ const test = async (name, fn) => { try { await fn(); n++; } catch (e) { failed++
 const call = (path, { method = 'GET', headers = {}, body } = {}) =>
   hub.fetch(new Request('https://hub.example' + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }), env);
 const rpc = async (method, params, id = 1) => (await call('/mcp/tok-123', { method: 'POST', body: { jsonrpc: '2.0', id, method, params } })).json();
-const tool = async (name, args) => { const r = await rpc('tools/call', { name, arguments: args }); return r.result; };
+const toolV2 = async (name, args = {}) => (await rpc('tools/call', { name, arguments: args })).result;
+// Keep the earlier flow regression scenarios meaningful through explicit v1 test
+// adapters. New model tests below call toolV2 directly, without any translation.
+const tool = async (name, args = {}) => {
+  const oldName = name;
+  if (name === 'vesper_create_project') { name = 'vesper_create_area'; }
+  else if (name === 'vesper_create_task') { name = 'vesper_create_project'; args = { ...args, area: args.project }; delete args.project; }
+  else if (name === 'vesper_move_task') { name = 'vesper_move_project'; args = { project: args.task, area: args.project }; }
+  else if (name === 'vesper_rename' && args.project) args = { area: args.project, name: args.name };
+  else if (name === 'vesper_reorder') args = { ...args, kind: args.kind === 'projects' ? 'areas' : 'projects', area: args.project, project: undefined };
+  else if (name === 'vesper_delete' && args.project) { name = 'vesper_delete_area'; args = { area: args.project, confirm: args.confirm }; }
+  else if (name === 'vesper_overview') args = { ...args, area: args.project, project: undefined };
+  const r = await toolV2(name, args);
+  if (r?.isError) return r;
+  if (oldName === 'vesper_framework') r.content[0].text = JSON.stringify(JSON.parse(r.content[0].text).stages);
+  if (oldName === 'vesper_list_projects') r.content[0].text = JSON.stringify(JSON.parse(r.content[0].text).map((a) => ({ id: a.id, name: a.name, tasks: a.projects })));
+  if (oldName === 'vesper_overview') {
+    const groups = [];
+    for (const row of JSON.parse(r.content[0].text).filter((x) => x.kind === 'project')) {
+      let group = groups.find((g) => g.id === row.areaId);
+      if (!group) { group = { project: row.area, id: row.areaId, tasks: [] }; groups.push(group); }
+      group.tasks.push({ ...row, mode: 'full', where: row.status === 'finished' ? 'finished' : `${row.stage || ''}, slide of 27` });
+    }
+    r.content[0].text = '[\n' + groups.map((g) => `{"project":${JSON.stringify(g.project)},"id":${JSON.stringify(g.id)},"tasks":[\n${g.tasks.map((t) => JSON.stringify(t)).join(',\n')}\n]}`).join(',\n') + '\n]';
+  }
+  return r;
+};
 const txt = (r) => JSON.parse(r.content[0].text);
 const app = { Origin: ORIGIN, Authorization: 'Bearer tok-123', 'Content-Type': 'application/json' };
 
@@ -282,7 +308,7 @@ await test('login: a person gets a session and a private space', async () => {
 
 await test('connector: Ann\'s personal link shows only Ann\'s projects, and Bob can turn his off', async () => {
   const link = await (await call('/me/mcp-link', { method: 'POST', headers: as(ann.token), body: {} })).json();
-  const over = await (await call(link.path, { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vesper_overview', arguments: {} } } })).json();
+  const over = await (await call(link.path, { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vesper_list_areas', arguments: {} } } })).json();
   const text = JSON.stringify(over);
   assert.ok(text.includes('Ann project'));
   const bl = await (await call('/me/mcp-link', { method: 'POST', headers: as(bob.token), body: {} })).json();
@@ -429,7 +455,7 @@ await test('connector: Claude can drive a task through a Selah, loop back, finis
   r = changed(await tool('vesper_delete', { task: 'Drive task', confirm: false }));
   assert.equal(r.changed.length, 0);
   r = changed(await tool('vesper_delete', { project: 'Drive proj', confirm: true }));
-  assert.match(r.changed[0], /Deleted project/);
+  assert.match(r.changed[0], /delete area/);
   assert.ok(!JSON.stringify(txt(await tool('vesper_overview', {}))).includes('Drive proj'));
 });
 
@@ -696,7 +722,7 @@ await test('Node server serves every cached asset with correct content type, acc
     assert.equal((await request('/sync', { headers: namedHeaders })).status, 401);
     const rpc = (id, name) => request('/mcp', {
       method: 'POST', headers,
-      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'vesper_create_project', arguments: { name } } }),
+      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'vesper_create_area', arguments: { name } } }),
     });
     const responses = await Promise.all([rpc(1, 'HTTP A'), rpc(2, 'HTTP B')]);
     for (const r of responses) {
@@ -1037,6 +1063,60 @@ await test('Node pre-v2 snapshot is kept outside daily backup rotation', async (
     const backup = JSON.parse(await fs.readFile(path.join(dir, 'backups/pre-v2.json'), 'utf8'));
     assert.equal(JSON.parse(backup.state).version, 1);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+await test('v2 connector: canonical tools, locations, promotion, aliases, mixed overview and per-location order', async () => {
+  const run = async (name, args) => {
+    const result = await toolV2(name, args); assert.ok(!result.isError, result.content?.[0]?.text);
+    const value = txt(result); if (value.notApplied) assert.deepEqual(value.notApplied, []); return value;
+  };
+  const area = (await run('vesper_create_area', { name: 'Canonical model' })).ids[0];
+  const p = (await run('vesper_create_project', { area, title: 'Canonical flow', priority: 'P2' })).ids[0];
+  const t = (await run('vesper_create_task', { title: 'Canonical action', note: 'Why this matters', priority: 'P1', due: '2030-01-02' })).ids[0];
+  await run('vesper_move_task', { task: t, area });
+  await run('vesper_move_task', { task: t, project: p });
+  await run('vesper_update_task', { task: t, done: true, note: 'Updated', priority: null, due: null });
+  assert.equal(txt(await toolV2('vesper_promote_task', { task: t })).changed.length, 0);
+  await run('vesper_update_task', { task: t, done: false });
+  await run('vesper_move_task', { task: t, inbox: true });
+  assert.equal(txt(await toolV2('vesper_promote_task', { task: t })).changed.length, 0);
+  const promoted = (await run('vesper_promote_task', { task: t, area })).ids[0];
+  const detail = await run('vesper_get_project', { project: promoted });
+  assert.equal(detail.steps[0].note, 'Updated');
+  assert.equal((await run('vesper_get_task', { task: promoted })).id, promoted);
+  assert.equal(txt(await toolV2('vesper_demote_project', { project: promoted })).changed.length, 0);
+  const child = (await run('vesper_create_task', { title: 'Flow child', project: p, priority: 'P3', due: '2031-01-01' })).ids[0];
+  await run('vesper_rename', { project: p, name: 'Canonical renamed' });
+  await run('vesper_set_project', { project: p, priority: 'P1', due: '2031-02-01' });
+  await run('vesper_set_note', { project: p, slide: 'vision.why', step: 0, text: 'Our answer' });
+  assert.equal((await run('vesper_get_project', { task: p })).steps[0].note, 'Our answer');
+  assert.equal(txt(await toolV2('vesper_finish', { project: p })).changed.length, 0);
+  const finished = await run('vesper_finish', { project: p, force: true, reason: 'Owner requested early completion.' });
+  assert.equal(finished.openTasks, 1);
+  assert.equal((await run('vesper_get_project', { project: p })).tasks[0].id, child);
+  const rows = await run('vesper_overview', { area });
+  assert.deepEqual(new Set(rows.map((x) => x.kind)), new Set(['project', 'task']));
+  assert.equal((await run('vesper_overview', { area, kind: 'task', project: p }))[0].id, child);
+  assert.equal((await run('vesper_overview', { area, query: 'Flow child', priority: 'P3', dueBefore: '2032-01-01', status: 'active', limit: 1 }))[0].id, child);
+  assert.equal((await run('vesper_overview', { area, stage: 'vision' })).every((x) => x.kind === 'project'), true);
+  const raw = (await toolV2('vesper_overview', { area })).content[0].text;
+  assert.equal(raw.split('\n').filter((line) => line.startsWith('{"id"')).length, rows.length);
+  const list = await run('vesper_list_areas', {});
+  assert.deepEqual(await run('vesper_list_projects', {}), list);
+  assert.equal(list.find((a) => a.id === area).projects, 2);
+  await run('vesper_reorder', { kind: 'projects', area, order: [promoted, p] });
+  await run('vesper_reorder', { kind: 'projects', area, item: p, position: 1 });
+  await run('vesper_reorder', { kind: 'tasks', project: p, order: [child] });
+  const second = (await run('vesper_create_area', { name: 'Canonical second' })).ids[0];
+  await run('vesper_move_project', { project: promoted, area: second });
+  await run('vesper_rename', { area: second, name: 'Renamed Area' });
+  const empty = (await run('vesper_create_project', { area, title: 'Empty canonical' })).ids[0];
+  await run('vesper_demote_project', { project: empty });
+  assert.ok((await run('vesper_overview', { area, kind: 'task' })).some((x) => x.title === 'Empty canonical'));
+  await run('vesper_delete_simple_task', { task: child, confirm: true });
+  await run('vesper_delete_area', { area: second, confirm: true });
+  const framework = await run('vesper_framework', {});
+  assert.match(framework.model, /Area.*Project.*Task/); assert.equal(framework.stages.length, 5);
 });
 
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);

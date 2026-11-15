@@ -1,10 +1,15 @@
 // Take a task or project out of Vesper: as Markdown (for Notion, Drive, GitHub, email) and as calendar entries.
 import { STAGES, slideFor, tickKey, quickKey, isQuick } from './framework.js';
 import { allSteps } from './ai/steps.js';
+import { store } from './store.js';
+
+export function simpleTaskMarkdown(task) {
+  return `- [${task.done ? 'x' : ' '}] ${task.title}${task.priority ? ` · ${task.priority}` : ''}${task.due ? ` · due ${task.due}` : ''}${task.note ? `\n  ${task.note.replace(/\n/g, '\n  ')}` : ''}`;
+}
 
 export function taskMarkdown(deck, projectName = '') {
   const out = [`# ${deck.title}`];
-  if (projectName) out.push(`Project: ${projectName}`);
+  if (projectName) out.push(`Area: ${projectName}`);
   if (isQuick(deck)) out.push('Mode: Quick');
   if (deck.priority) out.push(`Priority: ${deck.priority}`);
   if (deck.due) out.push(`Due: ${deck.due}`);
@@ -25,12 +30,16 @@ export function taskMarkdown(deck, projectName = '') {
     }
     out.push('', `*Selah: ${st.selah}* ${deck.selah[st.id] ? '(passed)' : '(not yet)'}`);
   }
+  const tasks = store.tasksAt('project', deck.id);
+  if (tasks.length) out.push('', '## Tasks', '', ...tasks.map(simpleTaskMarkdown));
   return out.join('\n').replace(/\n{3,}/g, '\n\n') + '\n';
 }
 
 export function projectMarkdown(project, decks) {
   const down = (md) => md.replace(/^(#{1,5}) /gm, '#$1 ');
-  return `# ${project.name}\n\n` + decks.map((d) => down(taskMarkdown(d))).join('\n---\n\n');
+  const tasks = store.tasksAt('area', project.id);
+  return `# ${project.name}\n\n` + decks.map((d) => down(taskMarkdown(d))).join('\n---\n\n') +
+    (tasks.length ? '\n## Area Tasks\n\n' + tasks.map(simpleTaskMarkdown).join('\n') + '\n' : '');
 }
 
 const pad = (n) => String(n).padStart(2, '0');

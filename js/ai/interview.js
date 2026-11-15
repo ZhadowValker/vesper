@@ -12,6 +12,7 @@ const label = (s) => `${s.slide.stage.name} › ${s.slide.sub.name}`;
 // The text of the next question, with a heading when the slide or stage changes and a
 // Selah reminder when a stage has just been completed. prev is the step just answered (or null).
 export function nextQuestion(deck, skipped, prev) {
+  if (!deck?.notes || !deck?.ticks || !deck?.selah) return { target: null, text: 'Only Full Projects have an interview. Simple Tasks have a tick and a short note.', links: [] };
   const rest = emptySteps(deck, skipped);
   const next = rest[0] || null;
   const links = [];

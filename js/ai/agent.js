@@ -4,6 +4,7 @@
 import { store } from '../store.js';
 import { STAGES, SLIDES, slideFor, slidesFor, slidePosition, isQuick } from '../framework.js';
 import { applyActions as applyWith } from './apply.js';
+import { applyModelActions } from '../model-actions.js';
 import { cleanReply, extractJSON } from './client.js';
 
 const MAX_ACTIONS = 40;
@@ -17,7 +18,7 @@ function frameworkText() {
   }).join('\n');
 }
 
-export function systemPrompt() {
+function legacySystemPrompt() {
   return `You are the assistant inside Vesper, a work framework. The person chats with you in plain words. You turn what they say into structured tasks and notes, then guide them through the framework one step at a time.
 
 THE FRAMEWORK. Work moves through five stages in order. Each stage has slides, and each slide has steps. Every step has a note box.
@@ -62,7 +63,7 @@ Finish requires all five Selahs. Only when the person explicitly chooses early f
 Use [] for actions when there is nothing to change.`;
 }
 
-export function stateText(focusId) {
+function legacyStateText(focusId) {
   const projects = store.projects();
   if (!projects.length) return 'There are no projects or tasks yet.';
   const lines = ['Projects and tasks:'];
@@ -124,4 +125,57 @@ export function parseTurn(text) {
 
 export function applyActions(actions, { focusId = null } = {}) {
   return applyWith(actions, { focusId, db: store });
+}
+
+export function applyModelTurn(actions, { focusId = null } = {}) {
+  return applyModelActions(actions, { focusId, db: store, by: 'ai' });
+}
+export function systemPrompt() {
+  return `You are Vesper, a calm planning assistant. Reply with JSON {"reply":"...","actions":[]}.
+Area is a named group. Project is a Full Vesper flow (27 slides, 34 steps), belongs to exactly one Area and never nests.
+A simple Task has title, done tick, priority, due and one short note; no slides/Selah. It lives in Inbox, an Area or a Project.
+Quick mode was removed. Never create it. Never interview a simple Task.
+Never invent personal answers. Preserve the person's words. Omit unchanged fields; null clears priority/due.
+Priority P1/P2/P3/P4 or null; due YYYY-MM-DD or null.
+Actions:
+{"type":"create_area","name":"Work"}
+{"type":"create_project","area":"area id/name","title":"Full project"}
+{"type":"create_task","title":"Small action","area":"optional area id","project":"OR optional project id","note":"optional"}
+With no location a Task goes to Inbox; never give both area and project.
+{"type":"update_task","task":"simple task id","done":true,"title":"optional","note":"optional","priority":"P1","due":null}
+{"type":"move_task","task":"simple task id","inbox":true} or area/project.
+{"type":"promote_task","task":"open simple task id","area":"required only for Inbox"}
+{"type":"demote_project","project":"empty Full Project id"}
+{"type":"rename","area":"id","name":"..."} or project or task.
+{"type":"move_project","project":"id","area":"id"}
+{"type":"reorder","kind":"areas|projects|tasks","area":"for projects/Area tasks","order":["all ids"]} or item and position.
+{"type":"delete_task","task":"simple task id","confirm":true}; delete_project uses project; delete_area uses area.
+Delete only after explicit confirmation from the person.
+For Full Project flow actions use project id (legacy task is accepted as a Project alias):
+{"type":"set_note","project":"id","slide":"vision.why","step":0,"text":"...","mode":"append"}
+{"type":"tick","project":"id","slide":"vision.why","step":0,"done":true}
+{"type":"pass_selah","project":"id","answer":"the person's answer"}
+{"type":"loop_back","project":"id","stage":"research"}
+{"type":"finish","project":"id"}; requires all Selahs, unless force:true and their short reason.
+{"type":"reopen","project":"id"}; {"type":"set_project","project":"id","priority":"P1","due":null}
+{"type":"focus","project":"id"}
+Only the person decides Selah answers. Do not pass one silently. Simple Tasks never block Project Finish.
+Full Project framework:\n${frameworkText()}`;
+}
+export function stateText(focusId) {
+  const lines = ['Areas, Projects and simple Tasks:'];
+  for (const area of store.areas()) {
+    lines.push(`Area ${area.id} "${area.name}"`);
+    for (const project of store.projectsIn(area.id)) lines.push(` Project ${project.id} "${project.title}" priority:${project.priority || 'none'} due:${project.due || 'none'} ${project.id === focusId ? '(focused)' : ''} ${project.finished ? 'finished' : 'open'}`);
+  }
+  for (const task of store.tasks()) lines.push(`Task ${task.id} "${task.title}" ${task.done ? 'done' : 'open'} ${JSON.stringify(task.location)} priority:${task.priority || 'none'} due:${task.due || 'none'} note:${task.note || ''}`);
+  const focused = store.flowProject(focusId);
+  if (focused) {
+    lines.push(`Focused Full Project notes: ${JSON.stringify(focused.notes)}; ticks:${JSON.stringify(focused.ticks)}; Selahs:${JSON.stringify(focused.selah)}`);
+    for (const slide of SLIDES.filter((s) => s.type === 'sub')) {
+      const notes = slide.sub.steps.map((_, i) => `[${i}] ${focused.notes[`${slide.key}#${i}`] || '(empty)'}`);
+      if (notes.length) lines.push(`${slide.key}: ${notes.join('; ')}`);
+    }
+  }
+  return lines.join('\n');
 }

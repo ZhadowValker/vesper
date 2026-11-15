@@ -8,7 +8,7 @@ import { rerender } from '../nav.js';
 import { slideName } from '../views/parts.js';
 import { aiReady } from './settings.js';
 import { askChat } from './client.js';
-import { buildMessages, parseTurn, applyActions } from './agent.js';
+import { buildMessages, parseTurn, applyModelTurn as applyActions } from './agent.js';
 import { loadChat, saveChat, clearChat } from './chatstate.js';
 import { aiSettingsDialog } from './ui.js';
 import { extractJSON } from './client.js';
@@ -59,7 +59,7 @@ export function openChatPanel({ focusId = null, mode = null } = {}) {
       const d = ivDeck(); const pr = progress(d);
       return `Interview · ${esc(d.title)} · ${pr.filled} of ${pr.total} filled`;
     }
-    if (chat.mode === 'iv') return 'Pick a task and I will ask the questions';
+    if (chat.mode === 'iv') return 'Pick a Project and I will ask the questions';
     if (!aiReady()) return 'Set up AI to start';
     const d = focusDeck();
     if (!d) return 'Tell me what you are working on';
@@ -80,7 +80,7 @@ export function openChatPanel({ focusId = null, mode = null } = {}) {
 
   const emptyHtml = () => (aiReady()
     ? `<div class="chat-empty"><h2>What are you working on?</h2>
-        <p class="muted">Tell me in your own words. I will set up the task and fill in the steps as we talk. You stay in charge of every Selah pause.</p>
+        <p class="muted">Create Areas, Full Projects or simple Tasks. Only Projects use slides and Selah. You stay in charge of every pause.</p>
         <div class="chips">${SUGGEST.map((s) => `<button class="btn small" data-say="${esc(s)}">${esc(s)}</button>`).join('')}</div></div>`
     : `<div class="chat-empty"><h2>Set up AI first</h2>
         <p class="muted">Tap the settings icon above and add an address, a key and a model. They stay on this device.</p>
@@ -115,14 +115,14 @@ export function openChatPanel({ focusId = null, mode = null } = {}) {
     const pre = (ivDeck() || focusDeck());
     const preP = pre ? pre.projectId : (projects[0] && projects[0].id) || '__new';
     const projOpts = projects.map((pj) => `<option value="${esc(pj.id)}" ${pj.id === preP ? 'selected' : ''}>${esc(pj.name)}</option>`).join('')
-      + `<option value="__new" ${preP === '__new' ? 'selected' : ''}>＋ New project</option>`;
+      + `<option value="__new" ${preP === '__new' ? 'selected' : ''}>New Area</option>`;
     return `<div class="iv-setup">
       <h2>Interview me</h2>
-      <p class="muted">Pick a task. I will ask one plain question at a time and fill in every step for you. Say "skip" to pass on a question, or "stop" to pause. Selah stays yours.</p>
-      <label class="ai-f"><span>Project</span><select id="iv-proj">${projOpts}</select></label>
-      <input id="iv-pname" class="iv-in" placeholder="Name the new project" maxlength="80" hidden>
-      <label class="ai-f"><span>Task</span><select id="iv-task"></select></label>
-      <input id="iv-tname" class="iv-in" placeholder="Name the new task" maxlength="80" hidden>
+      <p class="muted">Pick a Full Project, never a simple Task. I will ask one plain question at a time. Say "skip" to pass on a question, or "stop" to pause. Selah stays yours.</p>
+      <label class="ai-f"><span>Area</span><select id="iv-proj">${projOpts}</select></label>
+      <input id="iv-pname" class="iv-in" placeholder="Name the new Area" maxlength="80" hidden>
+      <label class="ai-f"><span>Project</span><select id="iv-task"></select></label>
+      <input id="iv-tname" class="iv-in" placeholder="Name the new Project" maxlength="80" hidden>
       <p class="sub" id="iv-prog"></p>
       <p class="ai-status" id="iv-err" data-kind="bad"></p>
       <button type="button" class="btn primary" data-act="iv-start" id="iv-start">Start interview</button>
@@ -140,7 +140,7 @@ export function openChatPanel({ focusId = null, mode = null } = {}) {
     const keep = ts.value;
     const want = (ivDeck() && ivDeck().projectId === ps.value && ivDeck().id) || (focusDeck() && focusDeck().projectId === ps.value && focusDeck().id) || '';
     ts.innerHTML = decks.map((d) => { const pr = progress(d); return `<option value="${esc(d.id)}">${esc(d.title)} (${pr.filled}/${pr.total})</option>`; }).join('')
-      + '<option value="__new">＋ New task</option>';
+      + '<option value="__new">New Project</option>';
     ts.value = decks.find((d) => d.id === keep) ? keep : (decks.find((d) => d.id === want) ? want : (decks[0] ? decks[0].id : '__new'));
     const newTask = ts.value === '__new';
     dlg.querySelector('#iv-tname').hidden = !newTask;
