@@ -1010,6 +1010,77 @@ await testAsync('v2 screens: Home, Area and Project show the new model, mixed fi
   saveTaskPrefs({});
 });
 
+await testAsync('v2 task cards: Move has an accessible name without a visible duplicate label and still moves', async () => {
+  const { taskListHTML, bindTaskList } = await import('../js/views/model-ui.js');
+  store.reset();
+  const area = store.addArea('Work'), project = store.addFlowProject(area.id, 'Project');
+  const task = store.addTask('Draft the message', { location: { kind: 'project', id: project.id } });
+  const html = taskListHTML('project', project.id);
+  assert.match(html, new RegExp(`data-task-move="${task.id}" aria-label="Move Draft the message"`));
+  assert.doesNotMatch(html, /<label[^>]*for="move-/);
+  assert.doesNotMatch(html.replace(/<[^>]*>/g, ''), /Move Draft the message/);
+  const handlers = {};
+  const root = {
+    addEventListener: (name, handler) => { (handlers[name] ||= []).push(handler); },
+    removeEventListener() {},
+    querySelectorAll: () => [],
+  };
+  const stop = bindTaskList(root);
+  const event = { target: { matches: () => false, closest: (selector) => selector === '[data-task-move]'
+    ? { value: `area:${area.id}`, dataset: { taskMove: task.id } } : null } };
+  for (const handler of handlers.change) await handler(event);
+  assert.deepEqual(task.location, { kind: 'area', id: area.id });
+  stop();
+});
+
+await testAsync('v2 reorder controls: every list shows Up/Down only in Manual order', async () => {
+  const { modelHome, modelArea, taskListHTML } = await import('../js/views/model-ui.js');
+  const { deckView } = await import('../js/views/deck.js');
+  store.reset();
+  const area = store.addArea('Work');
+  store.addArea('Home');
+  const projects = Array.from({ length: 5 }, (_, i) => {
+    const project = store.addFlowProject(area.id, `Project ${i}`);
+    project.due = `2030-01-0${5 - i}`; store.save(project);
+    return project;
+  });
+  for (const location of [{ kind: 'inbox' }, { kind: 'area', id: area.id }, { kind: 'project', id: projects[0].id }]) {
+    for (let i = 0; i < 2; i++) store.addTask(`Task ${location.kind} ${i}`, { location });
+  }
+  for (const sort of ['order', 'due', 'priority', 'updated']) {
+    saveTaskPrefs({ sort, priority: 'all' });
+    const screens = [modelHome().html, modelArea(area.id).html, taskListHTML('inbox'), deckView(projects[0].id).html];
+    for (const html of screens) {
+      if (sort === 'order') assert.match(html, /data-(?:task|project|area)-order=/);
+      else assert.doesNotMatch(html, /data-(?:task|project|area)-order=/);
+    }
+    if (sort === 'order') {
+      assert.match(modelHome().html, /data-area-order=/);
+      assert.match(modelArea(area.id).html, /data-project-order=/);
+      assert.match(modelArea(area.id).html, /data-task-order=/);
+    }
+  }
+  saveTaskPrefs({});
+});
+
+await testAsync('v2 Home: plain header, Inbox count, one mixed list and Resume only for progress', async () => {
+  const { modelHome, modelArea } = await import('../js/views/model-ui.js');
+  store.reset();
+  const area = store.addArea('Work'), project = store.addFlowProject(area.id, 'Untouched');
+  store.addTask('Inbox task');
+  const html = modelHome().html;
+  assert.match(html, /<h1[^>]*>Vesper<\/h1>/);
+  assert.match(html, /<summary>Inbox \(1\)<\/summary>/);
+  assert.match(html, /Areas, Projects and Tasks/);
+  assert.equal((html.match(/class="model-area-card"/g) || []).length, 1);
+  assert.doesNotMatch(html, /model-resume|model-hero|Make room|quiet landing|On the table|Your Areas/);
+  assert.doesNotMatch(modelArea(area.id).html, /Room for related work|longer journey/);
+  project.reached = 1; store.save(project);
+  assert.match(modelHome().html, /model-resume/);
+  project.finished = Date.now(); store.save(project);
+  assert.doesNotMatch(modelHome().html, /model-resume/);
+});
+
 await testAsync('v2 finish: open Tasks are mentioned with missing Selahs and never block confirmation', async () => {
   const { finishInApp } = await import('../js/views/task-actions.js');
   store.reset(); const a = store.addArea('A'), p = store.addFlowProject(a.id, 'Flow');

@@ -45,7 +45,6 @@ function mixedTaskMarkup(task, location) {
     </div>
     <div class="model-task-actions">
       <button type="button" class="btn small" data-task-edit="${esc(task.id)}">Edit</button>
-      <label class="sr-only" for="move-${esc(task.id)}">Move ${esc(task.title)}</label>
       <select id="move-${esc(task.id)}" data-task-move="${esc(task.id)}" aria-label="Move ${esc(task.title)}">${moves}</select>
       <button type="button" class="btn small" data-task-promote="${esc(task.id)}" data-area="${esc(areaForPromote || '')}" ${task.done ? 'disabled title="Done tasks cannot become Projects"' : ''}>Make this a project</button>
       <button type="button" class="btn small danger" data-task-delete="${esc(task.id)}">Delete</button>
@@ -75,7 +74,7 @@ export function taskListHTML(kind = 'inbox', id = '') {
   return `<section class="model-section" data-model-task-list="${esc(kind)}" data-list-id="${esc(id)}">
     <div class="model-section-head"><h2>${label}</h2><span class="model-count">${items.length} ${items.length === 1 ? 'Task' : 'Tasks'}</span></div>
     ${taskListControls(prefs)}
-    <div class="model-mixed-list">${sorted.length ? taskRows(sorted, kind, id) : `<div class="model-empty">${items.length ? 'No Tasks match this priority.' : 'Nothing here yet. Leave a Task here when you are ready.'}</div>`}</div>
+    <div class="model-mixed-list">${sorted.length ? taskRows(sorted, kind, id) : `<div class="model-empty">${items.length ? 'No Tasks match this priority.' : 'No Tasks yet.'}</div>`}</div>
   </section>`;
 }
 
@@ -88,8 +87,9 @@ function projectCardHTML(project, siblingProjects) {
   const idx = siblingProjects.findIndex((x) => x.id === project.id);
   const controls = `<div class="model-project-actions">
     <button type="button" class="btn small" data-project-task="${esc(project.id)}">Add Task</button>
-    <button type="button" class="btn small" data-project-order="up" data-project-id="${esc(project.id)}" data-area="${esc(project.areaId)}" aria-label="Move ${esc(project.title)} up" ${idx === 0 ? 'disabled' : ''}>Up</button>
+    ${getTaskPrefs().sort === 'order' ? `<button type="button" class="btn small" data-project-order="up" data-project-id="${esc(project.id)}" data-area="${esc(project.areaId)}" aria-label="Move ${esc(project.title)} up" ${idx === 0 ? 'disabled' : ''}>Up</button>
     <button type="button" class="btn small" data-project-order="down" data-project-id="${esc(project.id)}" data-area="${esc(project.areaId)}" aria-label="Move ${esc(project.title)} down" ${idx === siblingProjects.length - 1 ? 'disabled' : ''}>Down</button>
+    ` : ''}
   </div>`;
   return `<article class="model-project-card">
     <div class="model-project-main"><a class="model-project-link" href="#/d/${esc(project.id)}">
@@ -113,27 +113,28 @@ function areaCardHTML(area, areas) {
     </a>
     <div class="model-area-actions">
       <button type="button" class="btn small" data-area-action="rename" data-area-id="${esc(area.id)}" data-area-name="${esc(areaName(area))}">Rename</button>
-      <button type="button" class="btn small" data-area-order="up" data-area-id="${esc(area.id)}" aria-label="Move ${esc(areaName(area))} up" ${at === 0 ? 'disabled' : ''}>Up</button>
+      ${getTaskPrefs().sort === 'order' ? `<button type="button" class="btn small" data-area-order="up" data-area-id="${esc(area.id)}" aria-label="Move ${esc(areaName(area))} up" ${at === 0 ? 'disabled' : ''}>Up</button>
       <button type="button" class="btn small" data-area-order="down" data-area-id="${esc(area.id)}" aria-label="Move ${esc(areaName(area))} down" ${at === areas.length - 1 ? 'disabled' : ''}>Down</button>
+      ` : ''}
     </div>
   </div>`;
 }
 
-function taskOrderControl(task, collection, areaId) {
+function taskOrderControl(task, collection, id, kind = 'area') {
   if (getTaskPrefs().sort !== 'order') return '';
   const list = orderedItems(collection);
   const at = list.findIndex((item) => item.id === task.id);
   return `<div class="row model-order" aria-label="Reorder Task">
-    <button type="button" class="btn small" data-task-order="up" data-task-id="${esc(task.id)}" data-kind="area" data-location-id="${esc(areaId)}" aria-label="Move ${esc(task.title)} up" ${at === 0 ? 'disabled' : ''}>Up</button>
-    <button type="button" class="btn small" data-task-order="down" data-task-id="${esc(task.id)}" data-kind="area" data-location-id="${esc(areaId)}" aria-label="Move ${esc(task.title)} down" ${at === list.length - 1 ? 'disabled' : ''}>Down</button>
+    <button type="button" class="btn small" data-task-order="up" data-task-id="${esc(task.id)}" data-kind="${esc(kind)}" data-location-id="${esc(id || '')}" aria-label="Move ${esc(task.title)} up" ${at === 0 ? 'disabled' : ''}>Up</button>
+    <button type="button" class="btn small" data-task-order="down" data-task-id="${esc(task.id)}" data-kind="${esc(kind)}" data-location-id="${esc(id || '')}" aria-label="Move ${esc(task.title)} down" ${at === list.length - 1 ? 'disabled' : ''}>Down</button>
   </div>`;
 }
 
 export function modelHomePanelHTML() {
   return `<section class="model-section model-home-panel">
-    <div class="model-section-head"><h2>Preferences &amp; portability</h2><span class="model-count">This device</span></div>
+    <div class="model-section-head"><h2>Settings</h2></div>
     <div class="model-settings">
-      <div><p>Choose your reading light, keep a local backup, or connect Vesper to Sync.</p>${themeControlHTML()}</div>
+      <div>${themeControlHTML()}</div>
       <div class="footer-tools">
         <button class="btn small" type="button" data-model-setting="export">Export backup</button>
         <button class="btn small" type="button" data-model-setting="import">Import backup</button>
@@ -147,44 +148,41 @@ export function modelHomePanelHTML() {
 
 function homeMixedHTML() {
   const entries = [
+    ...store.areas().map((area) => ({ ...area, title: areaName(area), _modelType: 'area' })),
     ...store.flowProjects().map((project) => ({ ...project, _modelType: 'project', updated: project.updated || project.created })),
     ...store.tasks().map((task) => ({ ...task, _modelType: 'task' })),
   ];
   const sorted = sortFilterTasks(entries, getTaskPrefs());
-  const markup = sorted.map((entry) => entry._modelType === 'project'
-    ? `<article class="model-project-card"><div class="model-project-main"><a class="model-project-link" href="#/d/${esc(entry.id)}"><span class="model-project-kind">Project · ${esc(areaName(store.area(entry.areaId)))}</span><span class="model-project-title">${esc(entry.title)}</span>${projectChips(entry)}${stageBar(entry.finished ? 26 : entry.reached || 0, entry)}</a></div><div class="model-project-actions"><button class="btn small" type="button" data-project-task="${esc(entry.id)}">Add Task</button></div></article>`
-    : mixedTaskMarkup(entry, entry.location)).join('');
+  const markup = sorted.map((entry) => entry._modelType === 'area'
+    ? areaCardHTML(entry, orderedItems(store.areas()))
+    : entry._modelType === 'project'
+      ? projectCardHTML(entry, orderedItems(store.projectsIn(entry.areaId)))
+      : `${mixedTaskMarkup(entry, entry.location)}${taskOrderControl(entry, listFor(entry.location.kind, entry.location.id), entry.location.id, entry.location.kind)}`).join('');
   return `<section class="model-section">
-    <div class="model-section-head"><h2>On the table</h2><span class="model-count">${entries.length} items</span></div>
+    <div class="model-section-head"><h2>Areas, Projects and Tasks</h2><span class="model-count">${entries.length} items</span></div>
     ${taskListControls(getTaskPrefs())}
-    <div class="model-mixed-list">${markup || `<div class="model-empty">Your plan begins with one small thing. Add a Task or begin a Project.</div>`}</div>
+    <div class="model-mixed-list">${markup || `<div class="model-empty">No matching items.</div>`}</div>
   </section>`;
 }
 
 export function modelHome() {
-  const areas = orderedItems(store.areas());
   const inbox = store.tasksAt('inbox');
   const resume = store.flowProjects()
-    .filter((project) => !project.finished && project.mode !== 'quick')
+    .filter((project) => !project.finished && (project.reached > 0 ||
+      Object.values(project.notes || {}).some(Boolean) || Object.values(project.ticks || {}).some(Boolean) ||
+      Object.values(project.selah || {}).some(Boolean)))
     .sort((a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0))[0];
   const html = `<main class="page stack model-page">
-    <header class="model-hero">
-      <span class="model-kicker">Vesper · a personal planning notebook</span>
-      <h1>Make room for what matters.</h1>
-      <p>Five stages for the work, Selah pauses for the person doing it. Keep your next step close and let the rest unfold.</p>
-      <div class="model-head-actions"><button class="btn primary" type="button" data-model-create>New Task or Project</button><button class="btn" type="button" data-model-add-area>New Area</button></div>
+    <header class="top">
+      <h1 class="grow">Vesper</h1>
+      <div class="row"><button class="btn primary" type="button" data-model-create>New</button><button class="btn" type="button" data-model-add-area>New Area</button></div>
     </header>
-    ${resume ? `<section class="model-resume"><div><span class="model-kicker">Pick up where you left off</span><strong>${esc(resume.title)}</strong><span class="sub">${esc(areaName(store.area(resume.areaId)))}</span></div><a class="btn primary" href="#/d/${esc(resume.id)}/s/${Number.isInteger(resume.slide) ? resume.slide : 0}">Resume Project</a></section>` : ''}
-    <section class="model-inbox model-section">
-      <div class="model-section-head"><div><span class="model-kicker">A quiet landing place</span><h2>Inbox</h2></div><div class="row"><span class="model-count-pill"><i></i>${inbox.length} ${inbox.length === 1 ? 'Task' : 'Tasks'}</span><button class="btn small" type="button" data-model-create-task data-location="inbox">Add Task</button></div></div>
-      ${taskListControls(getTaskPrefs())}
-      <div class="model-mixed-list">${inbox.length ? taskRows(sortFilterTasks(inbox, getTaskPrefs()), 'inbox', '') : `<div class="model-empty">No loose ends in Inbox. A Task can wait here until it belongs somewhere.</div>`}</div>
-    </section>
+    <details class="model-inbox model-section"><summary>Inbox (${inbox.length})</summary>
+      <button class="btn small" type="button" data-model-create-task data-location="inbox">Add Task</button>
+      ${taskListHTML('inbox')}
+    </details>
+    ${resume ? `<section class="model-resume"><div><strong>${esc(resume.title)}</strong><span class="sub">${esc(areaName(store.area(resume.areaId)))}</span></div><a class="btn primary" href="#/d/${esc(resume.id)}/s/${Number.isInteger(resume.slide) ? resume.slide : 0}">Resume</a></section>` : ''}
     ${homeMixedHTML()}
-    <section class="model-section">
-      <div class="model-section-head"><h2>Your Areas</h2><span class="model-count">${areas.length} ${areas.length === 1 ? 'Area' : 'Areas'}</span></div>
-      ${areas.length ? `<div class="model-grid">${areas.map((area) => areaCardHTML(area, areas)).join('')}</div>` : `<div class="model-empty">Create an Area to give your Projects a place to grow.</div>`}
-    </section>
     ${modelHomePanelHTML()}
   </main>`;
   return { html, mount(root) {
@@ -210,13 +208,13 @@ export function modelArea(areaId) {
     <header class="top model-area-top">
       <a class="back model-back" href="#/" aria-label="Back to Vesper">${ICON.back}</a>
       <div class="grow"><span class="model-kicker">Area</span><h1>${esc(areaName(area))}</h1></div>
-      <button class="btn primary small" type="button" data-model-create data-location="area:${esc(areaId)}">New Task or Project</button>
+      <button class="btn primary small" type="button" data-model-create data-location="area:${esc(areaId)}">New</button>
     </header>
-    <div class="model-area-intro"><p class="model-kicker">Room for related work</p><p>${projects.length} ${projects.length === 1 ? 'Project' : 'Projects'} and ${looseTasks.length} loose ${looseTasks.length === 1 ? 'Task' : 'Tasks'} live here. Every Project belongs to exactly one Area and never nests inside another Project.</p></div>
     <div class="model-area-toolbar">
       <button class="btn small" type="button" data-area-action="rename" data-area-id="${esc(areaId)}" data-area-name="${esc(areaName(area))}">Rename Area</button>
-      <button class="btn small" type="button" data-area-order="up" data-area-id="${esc(areaId)}" aria-label="Move ${esc(areaName(area))} up" ${areas.findIndex((item) => item.id === areaId) === 0 ? 'disabled' : ''}>Move up</button>
+      ${getTaskPrefs().sort === 'order' ? `<button class="btn small" type="button" data-area-order="up" data-area-id="${esc(areaId)}" aria-label="Move ${esc(areaName(area))} up" ${areas.findIndex((item) => item.id === areaId) === 0 ? 'disabled' : ''}>Move up</button>
       <button class="btn small" type="button" data-area-order="down" data-area-id="${esc(areaId)}" aria-label="Move ${esc(areaName(area))} down" ${areas.findIndex((item) => item.id === areaId) === areas.length - 1 ? 'disabled' : ''}>Move down</button>
+      ` : ''}
       <button class="btn small" type="button" data-model-create-project data-area="${esc(areaId)}">New Project</button>
       <button class="btn small" type="button" data-model-create-task data-location="area:${esc(areaId)}">Add loose Task</button>
       <button class="btn small" type="button" data-area-action="export" data-area-id="${esc(areaId)}">Export Area</button>
@@ -225,7 +223,7 @@ export function modelArea(areaId) {
     <section class="model-section">
       <div class="model-section-head"><h2>Projects &amp; loose Tasks</h2><span class="model-count">${mixed.length} items</span></div>
       ${taskListControls(getTaskPrefs())}
-      <div class="model-project-list">${mixedRows || `<div class="model-empty">This Area is clear. Add a Project for a longer journey, or a loose Task for a single next step.</div>`}</div>
+      <div class="model-project-list">${mixedRows || `<div class="model-empty">No matching Projects or Tasks.</div>`}</div>
     </section>
   </main>`;
   return { html, mount(root) { return bindModelHomePanel(root); } };
@@ -256,7 +254,7 @@ export async function addTaskDialog(location = { kind: 'inbox' }) {
   if (typeof location === 'string') location = location.startsWith('area:') ? { kind: 'area', id: location.slice(5) } :
     location.startsWith('project:') ? { kind: 'project', id: location.slice(8) } : { kind: 'inbox' };
   const data = await formDialog({
-    title: 'A new Task',
+    title: 'New Task',
     submit: 'Add Task',
     body: taskFields(location),
     read: (dialog) => ({
@@ -279,13 +277,13 @@ function taskFields(location = { kind: 'inbox' }, task = {}) {
   const options = `<option value="inbox" ${currentKind === 'inbox' ? 'selected' : ''}>Inbox</option>
     <optgroup label="Areas">${orderedItems(store.areas()).map((a) => `<option value="area:${esc(a.id)}" ${currentKind === 'area' && currentId === a.id ? 'selected' : ''}>${esc(areaName(a))}</option>`).join('')}</optgroup>
     <optgroup label="Projects">${orderedItems(store.flowProjects()).map((p) => `<option value="project:${esc(p.id)}" ${currentKind === 'project' && currentId === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</optgroup>`;
-  return `<label>Task title<input name="title" required maxlength="200" autocomplete="off" placeholder="A small, clear next step" value="${esc(task.title || '')}"></label>
+  return `<label>Task title<input name="title" required maxlength="200" autocomplete="off" value="${esc(task.title || '')}"></label>
     <label>Location<select name="location">${options}</select></label>
     <div class="model-form-grid">
       <label>Priority<select name="priority"><option value="">No priority</option>${PRIORITIES.map((p) => `<option value="${p}" ${task.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
       <label>Due date<input type="date" name="due" value="${esc(task.due || '')}"></label>
     </div>
-    <label>Note<textarea name="note" maxlength="2000" placeholder="A little context, if useful">${esc(task.note || '')}</textarea></label>
+    <label>Note<textarea name="note" maxlength="2000">${esc(task.note || '')}</textarea></label>
     <p class="model-status" data-form-error aria-live="polite"></p>`;
 }
 
@@ -299,8 +297,8 @@ function getFormLocation(dialog) {
 async function chooseCreateType() {
   const dlg = document.createElement('dialog');
   dlg.className = 'modal model-modal';
-  dlg.innerHTML = `<form method="dialog"><span class="model-kicker">Start somewhere</span><h2>What are you making?</h2>
-    <div class="model-type-choice"><button class="model-choice" type="button" data-choice="task"><strong>Task</strong><span>One step, wherever it belongs.</span></button><button class="model-choice" type="button" data-choice="project"><strong>Project</strong><span>A longer journey through five stages.</span></button></div>
+  dlg.innerHTML = `<form method="dialog"><h2>Task or Project?</h2>
+    <div class="model-type-choice"><button class="model-choice" type="button" data-choice="task"><strong>Task</strong></button><button class="model-choice" type="button" data-choice="project"><strong>Project</strong></button></div>
     <div class="modal-actions"><button type="button" class="btn" data-cancel>Cancel</button></div></form>`;
   document.body.appendChild(dlg);
   return new Promise((resolve) => {
@@ -319,13 +317,13 @@ async function chooseCreateType() {
 async function addProjectDialog(areaId = '') {
   const areas = orderedItems(store.areas());
   if (!areas.length) {
-    await notice('An Area comes first', 'Create an Area before starting a Project.');
+    await notice('Create an Area first', 'Create an Area before starting a Project.');
     return null;
   }
-  const body = `<label>Project title<input name="title" required maxlength="200" autocomplete="off" placeholder="A meaningful piece of work"></label>
+  const body = `<label>Project title<input name="title" required maxlength="200" autocomplete="off"></label>
     <label>Area<select name="area" required>${areaOptions(areaId)}</select></label>
     <div class="model-form-grid"><label>Priority<select name="priority"><option value="">No priority</option>${PRIORITIES.map((p) => `<option value="${p}">${p}</option>`).join('')}</select></label><label>Due date<input type="date" name="due"></label></div>`;
-  const data = await formDialog({ title: 'Begin a Project', submit: 'Create Project', body, read: (dialog) => ({
+  const data = await formDialog({ title: 'New Project', submit: 'Create Project', body, read: (dialog) => ({
     title: dialog.querySelector('[name=title]').value.trim(),
     areaId: dialog.querySelector('[name=area]').value,
     priority: dialog.querySelector('[name=priority]').value,
@@ -346,7 +344,7 @@ async function addProjectDialog(areaId = '') {
 function formDialog({ title, submit, body, read }) {
   const dlg = document.createElement('dialog');
   dlg.className = 'modal model-modal';
-  dlg.innerHTML = `<form><span class="model-kicker">Vesper notebook</span><h2>${esc(title)}</h2>${body}<div class="modal-actions"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">${esc(submit)}</button></div></form>`;
+  dlg.innerHTML = `<form><h2>${esc(title)}</h2>${body}<div class="modal-actions"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">${esc(submit)}</button></div></form>`;
   document.body.appendChild(dlg);
   return new Promise((resolve) => {
     const finish = (value) => { if (dlg.open) dlg.close(); dlg.remove(); resolve(value); };
@@ -514,7 +512,7 @@ function selectDialog(title, submit, body, read) {
 }
 
 async function createArea() {
-  const name = await ask('Name this Area', { ok: 'Create Area', placeholder: 'Home, studio, next chapter' });
+  const name = await ask('Name this Area', { ok: 'Create Area' });
   if (!name) return;
   try { store.addArea(name); rerender(); }
   catch (error) { await notice('Area not created', error.message); }
