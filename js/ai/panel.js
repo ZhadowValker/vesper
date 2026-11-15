@@ -248,7 +248,7 @@ export function openChatPanel({ focusId = null, mode = null } = {}) {
     if (busy) busy.abort();
     const pr = progress(d);
     chat.iv.active = false; ivUndo = null;
-    chat.iv.msgs.push({ r: 'b', t: `${why || 'Paused.'} ${pr.filled} of ${pr.total} steps are filled in **${d.title}**. Come back anytime and I will continue with the empty ones.`, links: [{ text: 'Open the task map', href: `#/d/${d.id}` }] });
+    chat.iv.msgs.push({ r: 'b', t: `${why || 'Paused.'} ${pr.filled} of ${pr.total} steps are filled in **${d.title}**. Come back anytime and I will continue with the empty ones.`, links: [{ text: 'Open the Project map', href: `#/d/${d.id}` }] });
     saveChat(chat); draw();
   }
 

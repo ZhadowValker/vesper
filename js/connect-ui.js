@@ -127,7 +127,7 @@ export function syncDialog({ onChange } = {}) {
       const calBtn = (t) => `<button type="button" class="btn ghost small" data-act="calconnect">${t}</button>`;
       if (!g) cell('cal').textContent = 'Could not check';
       else if (!g.configured) cell('cal').textContent = 'Not set up on this hub';
-      else if (g.connected) cell('cal').innerHTML = 'Connected. Calendar: ' + esc(g.calendar || 'primary') + ' ' + calBtn('Reconnect') + '<br><span class="muted">Pick or create the calendar from Add to calendar on a task.</span>';
+      else if (g.connected) cell('cal').innerHTML = 'Connected. Calendar: ' + esc(g.calendar || 'primary') + ' ' + calBtn('Reconnect') + '<br><span class="muted">Pick or create the calendar from Add to calendar on a Project.</span>';
       else cell('cal').innerHTML = calBtn('Connect Google Calendar');
     }).catch(() => { cell('cal').textContent = 'Could not check'; });
   }
