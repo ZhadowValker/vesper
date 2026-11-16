@@ -3,7 +3,8 @@ const accessQueues = new WeakMap();
 const accessSeen = new WeakMap();
 const accessRevoked = new WeakMap();
 function accessQueue(kv, fn) {
-  const result = (accessQueues.get(kv) || Promise.resolve()).then(fn);
+  const result = (accessQueues.get(kv) || Promise.resolve()).then(() =>
+    kv.transaction ? kv.transaction(fn) : fn());
   accessQueues.set(kv, result.catch(() => {}));
   return result;
 }
@@ -77,7 +78,7 @@ const accessMethods = {
 };
 
 // Cloudflare KV cannot provide immediate cross-region revocation. A single DO is
-// authoritative for named credentials; Node's single-process store stays local.
+// authoritative for named credentials; Node uses the file store's process lock.
 export async function accessOperation(env, operation, args = {}) {
   if (env.VESPER?.dailyBackups) return accessMethods[operation](env.VESPER, args);
   if (!env.ACCESS_TOKENS) throw new Error('Named tokens require the ACCESS_TOKENS Durable Object binding. APP_TOKEN and Google sign-in still work.');

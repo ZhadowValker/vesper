@@ -101,6 +101,33 @@ deployment/build directories. Hostinger replaces deployment files on redeploy;
 back up hub data before a production release. Never commit data or secrets.
 This batch does not change hosting settings or deploy anything.
 
+### Persistent hub data and backups
+
+Set `DATA_DIR` in hPanel to an **absolute, persistent directory outside the
+deployment/release folder**, not a directory replaced by a Git redeploy. All Node
+copies must use that same directory on the same machine and local filesystem.
+Several upgraded server processes can now safely share it: an exclusive process
+lock covers writes, deletes and hub read/merge/save operations. Writes still use
+atomic rename; dead-process locks are recovered automatically, while a live
+owner is never evicted just because it is slow. Contention times out after five
+seconds rather than writing unlocked. This is not a distributed/network-filesystem
+lock.
+
+Before upgrading, stop **all old server copies** (old versions do not honor the
+new lock), back up the existing data directory, and point the new copies at the
+same persistent `DATA_DIR`. The storage format is unchanged.
+
+To download a hub backup, use hPanel **Files → File Manager**, navigate to
+`DATA_DIR/backups`, select a dated `YYYY-MM-DD.json` snapshot and choose
+**Download** (or download it over your usual SFTP connection). If this directory
+is outside File Manager's scope, use SFTP/SSH; never move it into a public folder.
+Snapshots keep the previous good file once per UTC day, with 14-day retention;
+`pre-v2.json` is kept separately. These are private full-hub recovery copies
+(potentially containing credentials), not public links or browser-import exports:
+store them securely. The app's **Export backup** remains the portable notebook
+export. Node retains KV expiry hints harmlessly; sign-in/session records still
+enforce their own embedded expiry times.
+
 Hostinger references:
 [manual redeploy](https://www.hostinger.com/support/how-to-redeploy-a-node-js-application/),
 [Git connection and automatic deployments](https://docs.hostinger.com/node.js/git-deployments).

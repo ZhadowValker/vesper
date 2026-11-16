@@ -1,6 +1,26 @@
 // Tests the built hub Worker (worker/vesper-hub.js) with a fake KV: auth, sync merge, Claude connector tools.
 import assert from 'node:assert/strict';
 import hub from '../worker/vesper-hub.js';
+import { fork } from 'node:child_process';
+
+function storeProcess(dir, mode, prefix = '', count = 50) {
+  const child = fork(new URL('./fixtures/store-process.mjs', import.meta.url), [dir, mode, prefix, String(count)], {
+    silent: true, env: { PATH: process.env.PATH },
+  });
+  let output = '', errors = '';
+  child.stdout.on('data', (chunk) => { output += chunk; });
+  child.stderr.on('data', (chunk) => { errors += chunk; });
+  const timer = setTimeout(() => child.kill('SIGKILL'), 60000);
+  const done = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      clearTimeout(timer);
+      if (code === 0) resolve(output);
+      else reject(new Error(`Test child failed (${code ?? signal}): ${errors}`));
+    });
+  });
+  return { child, done };
+}
 
 const kv = new Map();
 const env = { APP_TOKEN: 'tok-123', VESPER: { get: async (k, t) => (kv.has(k) ? (t === 'json' ? JSON.parse(kv.get(k)) : kv.get(k)) : null), put: async (k, v) => { kv.set(k, v); }, delete: async (k) => { kv.delete(k); } } };
@@ -551,6 +571,152 @@ await test('file KV never overwrites corrupt data with an empty state', async ()
     await assert.rejects(createFileStore(dir).put('state', '{}'));
     assert.equal(await fs.readFile(file, 'utf8'), 'broken JSON');
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+await test('file store across 4 processes: all 200 puts/deletes survive, readers always see JSON and daily backup stays immutable', async () => {
+  const { createFileStore } = await import('../server-store.mjs');
+  const fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vesper-processes-'));
+  const children = [];
+  try {
+    const disk = createFileStore(dir);
+    await disk.put('existing', '"keep"');
+    // Seed removable keys in one locked update, without 200 preliminary writes.
+    const file = path.join(dir, 'vesper-data.json');
+    const initial = JSON.parse(await fs.readFile(file, 'utf8'));
+    for (let writer = 0; writer < 4; writer++) for (let i = 0; i < 50; i++) initial[`remove:w${writer}:${i}`] = '"remove"';
+    await fs.writeFile(file, JSON.stringify(initial));
+    const day = new Date().toISOString().slice(0, 10);
+    const snapshot = path.join(dir, 'backups', `${day}.json`);
+    const beforeBackup = await fs.readFile(snapshot, 'utf8');
+    children.push(...Array.from({ length: 4 }, (_, i) => storeProcess(dir, 'writes', `w${i}`, 50)));
+    let complete = false, reads = 0;
+    const done = Promise.all(children.map((c) => c.done)).finally(() => { complete = true; });
+    // A raw filesystem reader in the parent competes with all separate writers.
+    while (!complete) {
+      JSON.parse(await fs.readFile(file, 'utf8')); reads++;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    await done;
+    assert.ok(reads > 10);
+    const all = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(all.existing, '"keep"');
+    assert.equal(Object.keys(all).length, 201);
+    for (let writer = 0; writer < 4; writer++) for (let i = 0; i < 50; i++) {
+      assert.deepEqual(JSON.parse(all[`w${writer}:${i}`]), { writer: `w${writer}`, i });
+      assert.equal(Object.hasOwn(all, `remove:w${writer}:${i}`), false);
+    }
+    assert.equal(await fs.readFile(snapshot, 'utf8'), beforeBackup);
+    assert.deepEqual(await fs.readdir(path.join(dir, 'backups')), [`${day}.json`]);
+    assert.deepEqual((await fs.readdir(dir)).sort(), ['backups', 'vesper-data.json']);
+  } finally {
+    for (const { child } of children) if (child.exitCode === null) child.kill('SIGKILL');
+    await Promise.allSettled(children.map((c) => c.done));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+await test('file store recovers a crashed owner and a stale empty initialization lock', async () => {
+  const { createFileStore } = await import('../server-store.mjs');
+  const fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vesper-crash-'));
+  try {
+    const crashed = storeProcess(dir, 'crash');
+    await crashed.done; // Process exits *inside* its lock, without releasing.
+    const lock = path.join(dir, 'vesper-data.json.lock');
+    assert.equal((await fs.readdir(lock)).length, 1);
+    const disk = createFileStore(dir);
+    await disk.put('recovered', '"yes"');
+    assert.equal(await disk.get('recovered', 'json'), 'yes');
+    await fs.mkdir(lock);
+    const old = new Date(Date.now() - 60000);
+    await fs.utimes(lock, old, old);
+    await disk.put('empty-recovered', '"yes"');
+    assert.equal(await disk.get('empty-recovered', 'json'), 'yes');
+    await assert.rejects(fs.access(lock), { code: 'ENOENT' });
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+await test('file store never steals a live old lock, times out safely, and recovers its queue after failure', async () => {
+  const { createFileStore } = await import('../server-store.mjs');
+  const fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vesper-live-lock-'));
+  let holder;
+  try {
+    const disk = createFileStore(dir, { lockTimeoutMs: 100, staleLockMs: 1 });
+    await disk.put('before', '"safe"');
+    const file = path.join(dir, 'vesper-data.json'), before = await fs.readFile(file, 'utf8');
+    holder = storeProcess(dir, 'hold');
+    await Promise.race([new Promise((resolve) => holder.child.once('message', resolve)), holder.done.then(() => { throw new Error('Holder exited early'); })]);
+    const old = new Date(Date.now() - 60000);
+    await fs.utimes(path.join(dir, 'vesper-data.json.lock'), old, old);
+    await assert.rejects(disk.put('unsafe', '"no"'), { code: 'ELOCKTIMEOUT' });
+    await assert.rejects(disk.delete('before'), { code: 'ELOCKTIMEOUT' });
+    assert.equal(await fs.readFile(file, 'utf8'), before);
+    holder.child.send('release'); await holder.done;
+    await disk.put('after', '"kept"');
+    assert.equal(await disk.get('after', 'json'), 'kept');
+    await disk.transaction(() => Promise.all(Array.from({ length: 10 }, (_, i) => disk.put(`nested:${i}`, String(i)))));
+    for (let i = 0; i < 10; i++) assert.equal(await disk.get(`nested:${i}`), String(i));
+    // Nested operations do not deadlock and an exception releases the lock.
+    await assert.rejects(disk.transaction(async () => { await disk.get('before'); throw new Error('synthetic'); }), /synthetic/);
+    await disk.put('after-error', '"kept"');
+  } finally {
+    if (holder?.child.exitCode === null) holder.child.kill('SIGKILL');
+    if (holder) await Promise.allSettled([holder.done]);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+await test('file store short-lived sign-in record is immediately readable by a separate process; expiry hints are harmless', async () => {
+  const { createFileStore } = await import('../server-store.mjs');
+  const fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vesper-login-'));
+  try {
+    await storeProcess(dir, 'login-write').done;
+    const rec = JSON.parse(await storeProcess(dir, 'login-read').done);
+    assert.equal(rec.kind, 'login'); assert.ok(rec.exp > Date.now());
+    const disk = createFileStore(dir);
+    // Node keeps the unchanged string KV format. Embedded exp, not KV TTL hints,
+    // is the hub's authority; hints must never erase an otherwise valid record.
+    await disk.put('hints', JSON.stringify(rec), { expiration: 1, expirationTtl: 0 });
+    assert.deepEqual(await disk.get('hints', 'json'), rec);
+    await disk.delete('gauth:synthetic');
+    assert.equal(JSON.parse(await storeProcess(dir, 'login-read').done), null);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+await test('file transactions protect cross-process read/modify/write and real hub state merges', async () => {
+  const { createFileStore } = await import('../server-store.mjs');
+  const fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vesper-transactions-'));
+  try {
+    await Promise.all(Array.from({ length: 4 }, (_, i) => storeProcess(dir, 'increment', `w${i}`, 25).done));
+    const disk = createFileStore(dir);
+    assert.equal(await disk.get('counter'), '100');
+    await Promise.all(Array.from({ length: 4 }, (_, i) => storeProcess(dir, 'hub-sync', `task${i}`).done));
+    const state = await disk.get('state', 'json');
+    assert.equal(state.version, 2);
+    assert.deepEqual(state.tasks.map((t) => t.id).sort(), ['task0', 'task1', 'task2', 'task3']);
+    assert.equal(await disk.get('counter'), '100');
+    await Promise.all(Array.from({ length: 4 }, (_, i) => storeProcess(dir, 'access-create', `Label ${i}`).done));
+    assert.equal((await disk.get('access:index', 'json')).length, 4);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+await test('Google callback logs only not found versus expired while keeping the same page text', async () => {
+  const originalWarn = console.warn, logs = [];
+  console.warn = (...args) => logs.push(args.join(' '));
+  try {
+    const missingPage = await (await call('/google/callback?code=synthetic-private-code&state=synthetic-missing')).text();
+    kv.set('gauth:synthetic-expired', JSON.stringify({ kind: 'login', exp: Date.now() - 1, email: 'private@example.invalid', token: 'synthetic-private-token' }));
+    const expiredPage = await (await call('/google/callback?code=synthetic-private-code&state=synthetic-expired')).text();
+    for (const page of [missingPage, expiredPage]) {
+      assert.match(page, /That sign-in link expired/); assert.match(page, /Start again from Vesper/);
+    }
+    assert.deepEqual(logs, ['[Google callback] sign-in record not found', '[Google callback] sign-in record expired']);
+    assert.doesNotMatch(logs.join('\n'), /synthetic|private|@|code=|state=/);
+  } finally { console.warn = originalWarn; kv.delete('gauth:synthetic-expired'); }
 });
 
 await test('file backups keep one immutable daily snapshot and rotate after 14 days', async () => {

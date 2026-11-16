@@ -67,7 +67,8 @@ async function loadState(env) {
   });
 }
 // Scope the save queue to the backing store and user, not the per-request env wrapper.
-// KV has no cross-isolate transaction: this queue protects one running hub instance.
+// KV has no cross-isolate transaction: the queue protects one Worker instance.
+// Node also holds its cross-process file transaction around the whole merge/save.
 const stateWrites = new WeakMap();
 const dailySnapshots = new WeakMap();
 async function migrationSnapshot(env, state) {
@@ -81,7 +82,8 @@ function stateWrite(env, action) {
   let queues = stateWrites.get(backing);
   if (!queues) { queues = new Map(); stateWrites.set(backing, queues); }
   const key = env.UID || 'owner';
-  const write = (queues.get(key) || Promise.resolve()).then(action);
+  const write = (queues.get(key) || Promise.resolve()).then(() =>
+    backing.transaction ? backing.transaction(action) : action());
   const settled = write.catch(() => {});
   queues.set(key, settled);
   settled.then(() => { if (queues.get(key) === settled) queues.delete(key); });
@@ -205,7 +207,10 @@ async function gCallback(request, env) {
   const u = new URL(request.url);
   const state = u.searchParams.get('state') || '';
   const rec = state ? await env.VESPER.get('gauth:' + state, 'json') : null;
-  if (!rec || rec.exp < Date.now()) return gPage('That sign-in link expired', 'Start again from Vesper.', env);
+  if (!rec || rec.exp < Date.now()) {
+    console.warn(rec ? '[Google callback] sign-in record expired' : '[Google callback] sign-in record not found');
+    return gPage('That sign-in link expired', 'Start again from Vesper.', env);
+  }
   await env.VESPER.delete('gauth:' + state);   // a sign-in link works once
   if (u.searchParams.get('error')) return gPage('Google sign-in was cancelled', 'Nothing was changed.', env);
   const code = u.searchParams.get('code');
