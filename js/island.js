@@ -9,7 +9,6 @@ import { esc, ask } from './util.js';
 import { showGuide } from './guide.js';
 import { createItem } from './views/model-ui.js';
 import { buildSample } from './sample.js';
-import { navigationHTML } from './views/navigation.js';
 
 const I = {
   home: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
@@ -60,12 +59,6 @@ function paint(el) {
   const home = !up && !s;
   document.body.classList.toggle('has-island', true);
   document.body.classList.toggle('on-slide', !!s);
-  if (!s) {
-    el.className = 'dashboard-nav-container no-print';
-    el.innerHTML = navigationHTML(hash, true);
-    return;
-  }
-  el.className = 'island no-print';
   el.innerHTML =
     (home ? btn('home', 'home', 'Home', 'aria-current="page"') : btn('home', 'home', 'Home') + btn('up', 'up', 'Back')) +
     (s ? btn('prev', 'prev', 'Previous', n === 0 ? 'disabled' : '') + `<span class="isl-count" aria-live="off">${slidePosition(deck || {}, n) + 1}/${slidesFor(deck).length}</span>` + btn('next', 'next', 'Next', n === last ? 'disabled' : '') : '') +

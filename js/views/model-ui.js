@@ -9,8 +9,6 @@ import { syncDialog } from '../connect-ui.js';
 import { exportDialog } from '../connect-ui.js';
 import { syncReady } from '../sync.js';
 import { buildSample } from '../sample.js';
-import { openChatPanel } from '../ai/panel.js';
-import { showGuide } from '../guide.js';
 
 const areaName = (area) => area?.name || area?.title || '';
 const listFor = (kind, id) => kind === 'inbox' ? store.tasksAt('inbox') :
@@ -142,9 +140,6 @@ export function modelHomePanelHTML() {
         <button class="btn small" type="button" data-model-setting="import">Import backup</button>
         <button class="btn small" type="button" data-model-setting="sync">${syncReady() ? 'Sync: on' : 'Sync'}</button>
         <button class="btn small" type="button" data-model-setting="sample">Book sample</button>
-        <button class="btn small" type="button" data-model-setting="ai">AI</button>
-        <button class="btn small" type="button" data-model-setting="help">Help</button>
-        <button class="btn small" type="button" data-model-setting="account">Account</button>
         <input type="file" accept="application/json,.json" data-model-import hidden>
       </div>
     </div>
@@ -432,16 +427,8 @@ async function handleSetting(action, root) {
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   } else if (action === 'import') {
     $( '[data-model-import]', root)?.click();
-  } else if (action === 'sync' || action === 'account') {
+  } else if (action === 'sync') {
     syncDialog({ onChange: rerender });
-  } else if (action === 'ai') {
-    openChatPanel({ focusId: null });
-  } else if (action === 'help') {
-    const result = await showGuide();
-    if (result === 'sample') {
-      const sampleArea = store.findSample('book') || store.insertSample(buildSample());
-      go(`#/p/${sampleArea.id}`);
-    }
   } else if (action === 'sample') {
     const sampleArea = store.findSample('book') || store.insertSample(buildSample());
     go(`#/p/${sampleArea.id}`);

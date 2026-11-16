@@ -5,13 +5,13 @@ import { dashboardSummary, dashboardColumns, projectTicks, STAGE_COLORS, PRIORIT
 import { bindModelHomePanel, modelHomePanelHTML } from './model-ui.js';
 
 const LEGEND = [
-  { key: 'vision', label: 'Vision', color: '#ffb067' },
-  { key: 'research', label: 'Research', color: '#ff7a9a' },
-  { key: 'plan', label: 'Plan', color: '#c98bff' },
-  { key: 'execute', label: 'Execute', color: '#7c9bff' },
-  { key: 'review', label: 'Review', color: '#52d6c4' },
-  { key: 'parked', label: 'Parked', color: '#8f89b8' },
-  { key: 'finished', label: 'Finished', color: '#6fd08c' },
+  { key: 'vision', label: 'Vision', color: STAGE_COLORS.vision },
+  { key: 'research', label: 'Research', color: STAGE_COLORS.research },
+  { key: 'plan', label: 'Plan', color: STAGE_COLORS.plan },
+  { key: 'execute', label: 'Execute', color: STAGE_COLORS.execute },
+  { key: 'review', label: 'Review', color: STAGE_COLORS.review },
+  { key: 'parked', label: 'Parked', color: STAGE_COLORS.parked },
+  { key: 'finished', label: 'Finished', color: STAGE_COLORS.finished },
 ];
 
 let activeLayer = 'open';
@@ -37,18 +37,13 @@ function selectedColumn(columns, layer) {
 }
 
 function priorityColor(priority) {
-  return PRIORITY_COLORS?.[priority || 'none'] || ({
-    P1: '#ff6b81', P2: '#ffa24d', P3: '#f4d35e', P4: '#8f89b8', none: '#6f6a94',
-  }[priority || 'none']);
+  return PRIORITY_COLORS[priority] || PRIORITY_COLORS.none;
 }
 
 function stageColor(column) {
   const id = normalized(column.id || column.name);
   const key = id.replace(/[^a-z]/g, '');
-  return STAGE_COLORS?.[column.id] || STAGE_COLORS?.[key] || column.color || ({
-    vision: '#ffb067', research: '#ff7a9a', plan: '#c98bff',
-    execute: '#7c9bff', review: '#52d6c4', parked: '#8f89b8', finished: '#6fd08c',
-  }[key]) || '#8f89b8';
+  return STAGE_COLORS[column.id] || STAGE_COLORS[key] || column.color || STAGE_COLORS.parked;
 }
 
 function summaryRing(summary) {
@@ -176,6 +171,10 @@ export function dashboardView() {
   const summary = dashboardSummary(projects);
   currentSummaryLastEditedId = summary?.lastEditedId ?? null;
   const html = `<main class="page dashboard-page">
+    <div class="dashboard-destinations" aria-label="Areas and Inbox">
+      <a class="btn" href="#/areas">Areas</a>
+      <a class="btn" href="#/inbox">Inbox <span class="chip dashboard-inbox-count">${store.tasksAt('inbox').length}</span></a>
+    </div>
     ${overviewHTML(summary)}
     ${layerControls(summary)}
     ${boardHTML(projects, activeLayer)}

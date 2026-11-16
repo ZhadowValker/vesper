@@ -2,14 +2,8 @@ import { store } from '../store.js';
 import { esc } from '../util.js';
 import { createItem } from './model-ui.js';
 
-export function navigationHTML(hash = '#/', mobile = false) {
-  const current = hash === '#/areas' || hash.startsWith('#/p/') ? 'areas' : hash === '#/inbox' ? 'inbox' : 'home';
-  return `<nav class="${mobile ? 'dashboard-mobile-nav' : 'dashboard-desktop-nav'}" aria-label="${mobile ? 'Mobile navigation' : 'Main navigation'}">${[
-    ['home', '#/', 'Home'], ['areas', '#/areas', 'Areas'], ['inbox', '#/inbox', `Inbox <span class="dashboard-inbox-count">${store.tasksAt('inbox').length}</span>`],
-  ].map(([id, href, label]) => `<a href="${href}" ${current === id ? 'aria-current="page"' : ''}>${label}</a>`).join('')}</nav>`;
-}
-export function dashboardHeaderHTML(hash) {
-  return `<header class="dashboard-header"><a class="dashboard-wordmark" href="#/">Vesper</a>${navigationHTML(hash)}
+export function dashboardHeaderHTML() {
+  return `<header class="dashboard-header"><a class="dashboard-wordmark" href="#/">Vesper</a>
     <div class="dashboard-header-actions"><button class="btn" type="button" data-dashboard-search>Search</button><button class="btn primary" type="button" data-header-new>New</button></div></header>`;
 }
 export function bindDashboardHeader(root) {

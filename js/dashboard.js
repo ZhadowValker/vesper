@@ -3,8 +3,8 @@ import { STAGES, tickKey } from './framework.js';
 import { orderedItems } from './organize.js';
 
 export const STAGE_COLORS = {
-  vision: '#ffb067', research: '#ff7a9a', plan: '#c98bff', execute: '#7c9bff',
-  review: '#52d6c4', parked: '#8f89b8', finished: '#6fd08c',
+  vision: 'var(--vision)', research: 'var(--research)', plan: 'var(--plan)', execute: 'var(--execute)',
+  review: 'var(--review)', parked: '#8f89b8', finished: '#6fd08c',
 };
 export const PRIORITY_COLORS = {
   P1: '#ff6b81', P2: '#ffa24d', P3: '#f4d35e', P4: '#8f89b8', none: '#6f6a94',

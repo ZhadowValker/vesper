@@ -1068,14 +1068,16 @@ await testAsync('v2 reorder controls: every list shows Up/Down only in Manual or
 
 await testAsync('dashboard: plain shell, Inbox badge and no old Home list, banner or Resume card', async () => {
   const { modelHome, modelArea, modelInbox } = await import('../js/views/model-ui.js');
-  const { dashboardHeaderHTML, navigationHTML } = await import('../js/views/navigation.js');
+  const { dashboardHeaderHTML } = await import('../js/views/navigation.js');
   store.reset();
   const area = store.addArea('Work'), project = store.addFlowProject(area.id, 'Untouched');
   store.addTask('Inbox task');
   const html = modelHome().html, header = dashboardHeaderHTML('#/');
   assert.match(header, />Vesper<\/a>/);
   assert.match(header, />Search<\/button>/); assert.match(header, />New<\/button>/);
-  assert.match(navigationHTML('#/'), /Inbox <span class="dashboard-inbox-count">1<\/span>/);
+  assert.match(html, /href="#\/areas">Areas<\/a>/);
+  assert.match(html, /href="#\/inbox">Inbox <span class="chip dashboard-inbox-count">1<\/span>/);
+  assert.doesNotMatch(header, /<nav|dashboard-desktop-nav|dashboard-mobile-nav/);
   assert.match(modelInbox().html, /Inbox \(1\)/);
   assert.doesNotMatch(html, /model-resume|model-hero|model-mixed-list|Make room|quiet landing|On the table|Your Areas|Areas, Projects and Tasks/);
   assert.doesNotMatch(modelArea(area.id).html, /Room for related work|longer journey/);
@@ -1086,6 +1088,61 @@ await testAsync('dashboard: plain shell, Inbox badge and no old Home list, banne
 });
 
 const dash = await import('../js/dashboard.js');
+await testAsync('dashboard glass bar: unchanged five Home items, Home highlight and circular Account initial', async () => {
+  const { mountIsland } = await import('../js/island.js');
+  const originalDocument = globalThis.document, originalLocation = globalThis.location;
+  const oldSync = mem.get('vesper.sync');
+  let island;
+  globalThis.location = { hash: '#/' };
+  globalThis.document = {
+    getElementById: () => island,
+    createElement: () => ({ setAttribute() {}, addEventListener() {} }),
+    body: { appendChild: (el) => { island = el; }, classList: { toggle() {} } },
+  };
+  try {
+    mem.set('vesper.sync', JSON.stringify({ email: 'avery@example.invalid' }));
+    mountIsland();
+    assert.equal(island.className, 'island no-print');
+    const actions = [...island.innerHTML.matchAll(/data-isl="([^"]+)"/g)].map((m) => m[1]);
+    assert.deepEqual(actions, ['home', 'new', 'ai', 'help', 'account']);
+    const labels = [...island.innerHTML.matchAll(/<span>([^<]+)<\/span>/g)].map((m) => m[1]);
+    assert.deepEqual(labels, ['Home', 'New', 'AI', 'Help', 'Account']);
+    assert.match(island.innerHTML, /data-isl="home"[^>]*aria-current="page"/);
+    assert.match(island.innerHTML, /<b class="isl-av">A<\/b>/);
+    assert.doesNotMatch(island.innerHTML, /Areas|Inbox|dashboard-nav/);
+    mem.delete('vesper.sync'); mountIsland();
+    assert.equal([...island.innerHTML.matchAll(/data-isl="/g)].length, 5);
+    assert.match(island.innerHTML, /data-isl="account"/);
+  } finally {
+    globalThis.document = originalDocument; globalThis.location = originalLocation;
+    if (oldSync === undefined) mem.delete('vesper.sync'); else mem.set('vesper.sync', oldSync);
+  }
+});
+
+await testAsync('dashboard glass theme: original theme sheets unchanged and no replacement palette or bar styling', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  // Approved pre-dashboard theme snapshots: protects the original glass bar,
+  // both palettes, fonts, gradients, corners, blur and shadows.
+  for (const [file, expected] of [
+    ['css/app.css', '28505c59bf9b29114941fc039e4f5714f7ebbd0c8fac5405ee3dc9a3905cb8c7'],
+    ['css/light.css', 'c38194a2d41e63d840aedca8ab735defa22cabcbf3fec3d0fe59411af19718dc'],
+  ]) {
+    const data = readFileSync(new URL('../' + file, import.meta.url));
+    assert.equal(createHash('sha256').update(data).digest('hex'), expected, file);
+  }
+  const css = readFileSync(new URL('../css/dashboard.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\s*\(/i);
+  assert.doesNotMatch(css, /(?:^|[;{])\s*--[\w-]+\s*:/m);
+  assert.doesNotMatch(css, /(?:^|[}\n])\s*(?:body|html|:root)\b/m);
+  assert.doesNotMatch(css, /\.island\b|\.isl-[\w-]+|dashboard-(?:mobile-nav|desktop-nav|nav-container)/);
+  for (const token of ['glass', 'glass-soft', 'edge', 'edge-strong', 'blur', 'shadow', 'ink', 'muted', 'font', 'display']) {
+    assert.ok(css.includes(`var(--${token})`), `Use original ${token} token`);
+  }
+  assert.match(css, /backdrop-filter:var\(--blur\)/);
+  for (const stage of STAGES) assert.equal(dash.STAGE_COLORS[stage.id], `var(--${stage.id})`);
+});
+
 test('dashboard counts: first unpassed Selah, parked precedence and exhaustive disjoint totals', () => {
   const projects = STAGES.map((stage, i) => ({ id: stage.id, selah: Object.fromEntries(STAGES.slice(0, i).map((s) => [s.id, true])) }));
   projects.push({ id: 'all', selah: Object.fromEntries(STAGES.map((s) => [s.id, true])) },

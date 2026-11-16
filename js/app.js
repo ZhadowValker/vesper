@@ -29,7 +29,7 @@ function render() {
     const m = hash.match(re);
     if (!m) continue;
     const result = view(...m.slice(1));
-    const shell = !/^#\/signin/.test(hash) && !/\/s\/\d+$/.test(hash);
+    const shell = /^#\/(overview)?$/.test(hash);
     root.innerHTML = (shell ? dashboardHeaderHTML(hash) : '') + result.html;
     window.scrollTo(0, 0);
     const stopView = result.mount ? result.mount(root) : null;
