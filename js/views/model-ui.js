@@ -9,6 +9,8 @@ import { syncDialog } from '../connect-ui.js';
 import { exportDialog } from '../connect-ui.js';
 import { syncReady } from '../sync.js';
 import { buildSample } from '../sample.js';
+import { openChatPanel } from '../ai/panel.js';
+import { showGuide } from '../guide.js';
 
 const areaName = (area) => area?.name || area?.title || '';
 const listFor = (kind, id) => kind === 'inbox' ? store.tasksAt('inbox') :
@@ -140,54 +142,33 @@ export function modelHomePanelHTML() {
         <button class="btn small" type="button" data-model-setting="import">Import backup</button>
         <button class="btn small" type="button" data-model-setting="sync">${syncReady() ? 'Sync: on' : 'Sync'}</button>
         <button class="btn small" type="button" data-model-setting="sample">Book sample</button>
+        <button class="btn small" type="button" data-model-setting="ai">AI</button>
+        <button class="btn small" type="button" data-model-setting="help">Help</button>
+        <button class="btn small" type="button" data-model-setting="account">Account</button>
         <input type="file" accept="application/json,.json" data-model-import hidden>
       </div>
     </div>
   </section>`;
 }
 
-function homeMixedHTML() {
-  const entries = [
-    ...store.areas().map((area) => ({ ...area, title: areaName(area), _modelType: 'area' })),
-    ...store.flowProjects().map((project) => ({ ...project, _modelType: 'project', updated: project.updated || project.created })),
-    ...store.tasks().map((task) => ({ ...task, _modelType: 'task' })),
-  ];
-  const sorted = sortFilterTasks(entries, getTaskPrefs());
-  const markup = sorted.map((entry) => entry._modelType === 'area'
-    ? areaCardHTML(entry, orderedItems(store.areas()))
-    : entry._modelType === 'project'
-      ? projectCardHTML(entry, orderedItems(store.projectsIn(entry.areaId)))
-      : `${mixedTaskMarkup(entry, entry.location)}${taskOrderControl(entry, listFor(entry.location.kind, entry.location.id), entry.location.id, entry.location.kind)}`).join('');
-  return `<section class="model-section">
-    <div class="model-section-head"><h2>Areas, Projects and Tasks</h2><span class="model-count">${entries.length} items</span></div>
-    ${taskListControls(getTaskPrefs())}
-    <div class="model-mixed-list">${markup || `<div class="model-empty">No matching items.</div>`}</div>
-  </section>`;
+export { dashboardView as modelHome } from './dashboard.js';
+
+export function modelAreas() {
+  const areas = orderedItems(store.areas());
+  return { html: `<main class="page stack model-page">
+    <header class="top"><h1 class="grow">Areas</h1><button type="button" class="btn" data-model-add-area>New Area</button></header>
+    <div class="model-grid">${areas.length ? areas.map((area) => areaCardHTML(area, areas)).join('') : '<p>No Areas yet.</p>'}</div>
+    ${modelHomePanelHTML()}
+  </main>`, mount: bindModelHomePanel };
 }
 
-export function modelHome() {
+export function modelInbox() {
   const inbox = store.tasksAt('inbox');
-  const resume = store.flowProjects()
-    .filter((project) => !project.finished && (project.reached > 0 ||
-      Object.values(project.notes || {}).some(Boolean) || Object.values(project.ticks || {}).some(Boolean) ||
-      Object.values(project.selah || {}).some(Boolean)))
-    .sort((a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0))[0];
-  const html = `<main class="page stack model-page">
-    <header class="top">
-      <h1 class="grow">Vesper</h1>
-      <div class="row"><button class="btn primary" type="button" data-model-create>New</button><button class="btn" type="button" data-model-add-area>New Area</button></div>
-    </header>
-    <details class="model-inbox model-section"><summary>Inbox (${inbox.length})</summary>
+  return { html: `<main class="page stack model-page">
+    <header class="top"><h1 class="grow">Inbox (${inbox.length})</h1>
       <button class="btn small" type="button" data-model-create-task data-location="inbox">Add Task</button>
-      ${taskListHTML('inbox')}
-    </details>
-    ${resume ? `<section class="model-resume"><div><strong>${esc(resume.title)}</strong><span class="sub">${esc(areaName(store.area(resume.areaId)))}</span></div><a class="btn primary" href="#/d/${esc(resume.id)}/s/${Number.isInteger(resume.slide) ? resume.slide : 0}">Resume</a></section>` : ''}
-    ${homeMixedHTML()}
-    ${modelHomePanelHTML()}
-  </main>`;
-  return { html, mount(root) {
-    return bindModelHomePanel(root);
-  } };
+    </header>${taskListHTML('inbox')}
+  </main>`, mount: bindModelHomePanel };
 }
 
 export function modelArea(areaId) {
@@ -451,8 +432,16 @@ async function handleSetting(action, root) {
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   } else if (action === 'import') {
     $( '[data-model-import]', root)?.click();
-  } else if (action === 'sync') {
+  } else if (action === 'sync' || action === 'account') {
     syncDialog({ onChange: rerender });
+  } else if (action === 'ai') {
+    openChatPanel({ focusId: null });
+  } else if (action === 'help') {
+    const result = await showGuide();
+    if (result === 'sample') {
+      const sampleArea = store.findSample('book') || store.insertSample(buildSample());
+      go(`#/p/${sampleArea.id}`);
+    }
   } else if (action === 'sample') {
     const sampleArea = store.findSample('book') || store.insertSample(buildSample());
     go(`#/p/${sampleArea.id}`);

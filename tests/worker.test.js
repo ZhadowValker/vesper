@@ -1088,6 +1088,14 @@ await test('v2 connector: canonical tools, locations, promotion, aliases, mixed 
   const child = (await run('vesper_create_task', { title: 'Flow child', project: p, priority: 'P3', due: '2031-01-01' })).ids[0];
   await run('vesper_rename', { project: p, name: 'Canonical renamed' });
   await run('vesper_set_project', { project: p, priority: 'P1', due: '2031-02-01' });
+  assert.equal((await run('vesper_get_project', { project: p })).parked, false);
+  await run('vesper_set_project', { project: p, parked: true });
+  assert.equal((await run('vesper_get_project', { project: p })).parked, true);
+  assert.equal((await run('vesper_get_task', { task: p })).parked, true);
+  const parkedState = await (await call('/sync', { headers: { Authorization: 'Bearer tok-123', 'X-Vesper-Version': '2' } })).json();
+  assert.equal(parkedState.state.projects.find((x) => x.id === p).parked, true);
+  await run('vesper_set_task', { task: p, parked: false });
+  assert.equal((await run('vesper_get_project', { project: p })).parked, false);
   await run('vesper_set_note', { project: p, slide: 'vision.why', step: 0, text: 'Our answer' });
   assert.equal((await run('vesper_get_project', { task: p })).steps[0].note, 'Our answer');
   assert.equal(txt(await toolV2('vesper_finish', { project: p })).changed.length, 0);

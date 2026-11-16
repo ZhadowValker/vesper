@@ -8,7 +8,7 @@ import { isFinishedEarly } from '../task-status.js';
 import { bindOrganize } from './organize-ui.js';
 import { applyActions } from '../ai/agent.js';
 import { resumeButton, stageBar, taskChips } from './parts.js';
-import { PRIORITIES, setTaskMeta } from '../task-meta.js';
+import { PRIORITIES, setProjectMeta } from '../task-meta.js';
 import { openChatPanel } from '../ai/panel.js';
 import { exportDialog, calendarDialog } from '../connect-ui.js';
 import { taskListHTML, bindTaskList, addTaskDialog } from './model-ui.js';
@@ -39,6 +39,7 @@ export function deckView(id) {
         <label>Priority<select name="priority"><option value="">No priority</option>${PRIORITIES.map((p) => `<option value="${p}" ${deck.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
         <label>Due date<input name="due" type="date" min="0001-01-01" max="9999-12-31" value="${esc(deck.due || '')}"></label>
       </div>
+      <label class="row"><input type="checkbox" name="parked" role="switch" ${deck.parked === true ? 'checked' : ''}>Parked</label>
       <button class="btn small primary" type="submit">Save details</button>
       <p class="sub">Choose no priority or clear the date to remove it.</p>
     </form>
@@ -105,7 +106,10 @@ export function bindTaskDetails(root, deck) {
   function saveDetails(e) {
     e.preventDefault();
     const data = new FormData(form);
-    const error = setTaskMeta(deck, { priority: data.get('priority') || null, due: data.get('due') || null });
+    const patch = { priority: data.get('priority') || null, due: data.get('due') || null };
+    // Guard also keeps external callers using the older details form compatible.
+    if (form.querySelector('[name=parked]')) patch.parked = data.get('parked') !== null;
+    const error = setProjectMeta(deck, patch);
     if (error) { notice('Could not save task details', error); return; }
     store.save(deck); rerender();
   }

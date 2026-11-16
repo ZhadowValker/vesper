@@ -2,6 +2,8 @@
 import { normalizeV2, flowAliases } from './model-v2.js';
 const stamp = (x) => x.updated || x.created || 0;
 const maps = ['notes', 'ticks', 'selah', 'selahBy'];
+// Optional Project fields such as parked use their own clocks, just like title,
+// due and priority. Never inject a false default while merging an older client.
 const fieldKeys = (d) => Object.keys(d).filter((k) => !['id', 'created', 'updated', '_changed', ...maps].includes(k));
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k);
 const stable = (v) => JSON.stringify(v && typeof v === 'object'

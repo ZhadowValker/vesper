@@ -5,6 +5,7 @@ import { setTaskMeta } from './task-meta.js';
 export const emptyV2 = () => ({ version: 2, areas: [], projects: [], tasks: [], deleted: {} });
 export const isV1 = (s) => !!s && s.version !== 2 && Array.isArray(s.projects) && Array.isArray(s.decks);
 export function flowAliases(project) {
+  // parked is an optional boolean. Absence stays absent in old v2 notebooks.
   if (!Object.hasOwn(project, 'projectId')) Object.defineProperty(project, 'projectId', {
     configurable: true, get() { return this.areaId; }, set(id) { this.areaId = id; },
   });

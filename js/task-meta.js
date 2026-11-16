@@ -14,6 +14,19 @@ export function setTaskMeta(deck, patch) {
   return null;
 }
 
+// Optional v2 Project field. Missing means not parked; do not backfill old data.
+export function setProjectMeta(project, patch) {
+  const metadata = Object.hasOwn(patch, 'priority') || Object.hasOwn(patch, 'due');
+  if (!metadata && !Object.hasOwn(patch, 'parked')) return 'Provide priority, due or parked.';
+  if (Object.hasOwn(patch, 'parked') && typeof patch.parked !== 'boolean') return 'parked must be true or false.';
+  if (metadata) {
+    const error = setTaskMeta(project, patch);
+    if (error) return error;
+  }
+  if (Object.hasOwn(patch, 'parked')) project.parked = patch.parked;
+  return null;
+}
+
 export function localCalendarDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }

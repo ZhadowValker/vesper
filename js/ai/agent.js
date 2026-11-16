@@ -136,7 +136,7 @@ Area is a named group. Project is a Full Vesper flow (27 slides, 34 steps), belo
 A simple Task has title, done tick, priority, due and one short note; no slides/Selah. It lives in Inbox, an Area or a Project.
 Quick mode was removed. Never create it. Never interview a simple Task.
 Never invent personal answers. Preserve the person's words. Omit unchanged fields; null clears priority/due.
-Priority P1/P2/P3/P4 or null; due YYYY-MM-DD or null.
+Priority P1/P2/P3/P4 or null; due YYYY-MM-DD or null. Projects also have an optional boolean parked flag. P4 or parked:true parks an unfinished Project; finished takes precedence.
 Actions:
 {"type":"create_area","name":"Work"}
 {"type":"create_project","area":"area id/name","title":"Full project"}
@@ -157,7 +157,7 @@ For Full Project flow actions use project id (legacy task is accepted as a Proje
 {"type":"pass_selah","project":"id","stage":"vision","answer":"the person's answer"}
 {"type":"loop_back","project":"id","stage":"research"}
 {"type":"finish","project":"id"}; requires all Selahs, unless force:true and their short reason.
-{"type":"reopen","project":"id"}; {"type":"set_project","project":"id","priority":"P1","due":null}
+{"type":"reopen","project":"id"}; {"type":"set_project","project":"id","priority":"P1","due":null,"parked":false}
 {"type":"focus","project":"id"}
 Only the person decides Selah answers. Do not pass one silently. Simple Tasks never block Project Finish.
 Full Project framework:\n${frameworkText()}`;
@@ -166,7 +166,7 @@ export function stateText(focusId) {
   const lines = ['Areas, Projects and simple Tasks:'];
   for (const area of store.areas()) {
     lines.push(`Area ${area.id} "${area.name}"`);
-    for (const project of store.projectsIn(area.id)) lines.push(` Project ${project.id} "${project.title}" priority:${project.priority || 'none'} due:${project.due || 'none'} ${project.id === focusId ? '(focused)' : ''} ${project.finished ? 'finished' : 'open'}`);
+    for (const project of store.projectsIn(area.id)) lines.push(` Project ${project.id} "${project.title}" priority:${project.priority || 'none'} due:${project.due || 'none'} parked:${project.parked === true} ${project.id === focusId ? '(focused)' : ''} ${project.finished ? 'finished' : 'open'}`);
   }
   for (const task of store.tasks()) lines.push(`Task ${task.id} "${task.title}" ${task.done ? 'done' : 'open'} ${JSON.stringify(task.location)} priority:${task.priority || 'none'} due:${task.due || 'none'} note:${task.note || ''}`);
   const focused = store.flowProject(focusId);

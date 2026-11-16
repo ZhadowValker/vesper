@@ -6,10 +6,13 @@ import { slideView } from './views/slide.js';
 import { startSync } from './sync.js';
 import { signinView } from './signin.js';
 import { mountIsland } from './island.js';
-import { modelHome, modelArea } from './views/model-ui.js';
+import { modelHome, modelArea, modelAreas, modelInbox } from './views/model-ui.js';
+import { dashboardHeaderHTML, bindDashboardHeader } from './views/navigation.js';
 
 const routes = [
   [/^#\/(overview)?$/, modelHome],
+  [/^#\/areas$/, modelAreas],
+  [/^#\/inbox$/, modelInbox],
   [/^#\/signin\?c=(\w+)$/, signinView],
   [/^#\/p\/([\w-]+)$/, modelArea],
   [/^#\/d\/([\w-]+)$/, deckView],
@@ -26,9 +29,12 @@ function render() {
     const m = hash.match(re);
     if (!m) continue;
     const result = view(...m.slice(1));
-    root.innerHTML = result.html;
+    const shell = !/^#\/signin/.test(hash) && !/\/s\/\d+$/.test(hash);
+    root.innerHTML = (shell ? dashboardHeaderHTML(hash) : '') + result.html;
     window.scrollTo(0, 0);
-    if (result.mount) cleanup = result.mount(root) || null;
+    const stopView = result.mount ? result.mount(root) : null;
+    const stopHeader = shell ? bindDashboardHeader(root) : null;
+    cleanup = () => { stopView?.(); stopHeader?.(); };
     mountIsland();
     return;
   }

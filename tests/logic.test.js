@@ -887,7 +887,7 @@ test('theme: init and controls follow system changes only in Auto and clean up l
   }
 });
 
-await testAsync('v2 Project details: no Mode control; Save details saves only priority and due', async () => {
+await testAsync('v2 Project details: Save details saves metadata and Parked without changing flow content', async () => {
   const { bindTaskDetails, deckView } = await import('../js/views/deck.js');
   const { setRenderer } = await import('../js/nav.js');
   store.reset();
@@ -903,8 +903,9 @@ await testAsync('v2 Project details: no Mode control; Save details saves only pr
     return { value, handlers, focus() {}, addEventListener: (n, fn) => handlers.set(n, fn), removeEventListener: (n) => handlers.delete(n) };
   };
   const makeForm = () => {
-    const form = element(), fields = { mode: element(d.mode), priority: element(d.priority), due: element(d.due) };
+    const form = element(), fields = { mode: element(d.mode), priority: element(d.priority), due: element(d.due), parked: element(d.parked ? 'on' : null) };
     form.elements = { namedItem: (name) => fields[name] };
+    form.querySelector = (selector) => selector === '[name=parked]' ? fields.parked : null;
     return form;
   };
   let current = makeForm(), renders = 0, stop;
@@ -916,10 +917,12 @@ await testAsync('v2 Project details: no Mode control; Save details saves only pr
     const old = current;
     current.elements.namedItem('priority').value = 'P2';
     current.elements.namedItem('due').value = '2029-02-03';
+    current.elements.namedItem('parked').value = 'on';
     assert.equal(current.elements.namedItem('mode').handlers.size, 0);
     assert.doesNotMatch(deckView(d.id).html, /name="mode"/);
+    assert.match(deckView(d.id).html, /name="parked" role="switch"/);
     current.handlers.get('submit')({ preventDefault() {} });
-    assert.equal(d.mode, 'full'); assert.equal(d.priority, 'P2'); assert.equal(d.due, '2029-02-03');
+    assert.equal(d.mode, 'full'); assert.equal(d.priority, 'P2'); assert.equal(d.due, '2029-02-03'); assert.equal(d.parked, true);
     assert.equal(renders, 1);
     stop(); assert.equal(old.handlers.size, 0);
     assert.deepEqual(preserved(), before);
@@ -992,14 +995,14 @@ test('v2 tasks: all move locations, promotion provenance and empty-flow demotion
 });
 
 await testAsync('v2 screens: Home, Area and Project show the new model, mixed filtering and task controls', async () => {
-  const { modelHome, modelArea, taskListHTML } = await import('../js/views/model-ui.js');
+  const { modelAreas, modelArea, taskListHTML } = await import('../js/views/model-ui.js');
   const { deckView } = await import('../js/views/deck.js');
   store.reset(); const a = store.addArea('Ministry'), p = store.addFlowProject(a.id, 'Full flow');
   const t = store.addTask('Inbox item', { priority: 'P1', due: '2000-01-01' });
   store.addTask('Area item', { location: { kind: 'area', id: a.id }, priority: 'P2' });
   store.addTask('Project item', { location: { kind: 'project', id: p.id }, note: 'A small action' });
   saveTaskPrefs({ sort: 'priority', priority: 'all' });
-  assert.match(modelHome().html, /Inbox/); assert.match(modelHome().html, /Ministry/);
+  assert.match(modelAreas().html, /Areas/); assert.match(modelAreas().html, /Ministry/);
   assert.match(modelArea(a.id).html, /Full flow/); assert.match(modelArea(a.id).html, /Area item/);
   assert.match(deckView(p.id).html, /Project item/); assert.match(deckView(p.id).html, /Add task/);
   assert.doesNotMatch(deckView(p.id).html, /name="mode"/);
@@ -1034,7 +1037,7 @@ await testAsync('v2 task cards: Move has an accessible name without a visible du
 });
 
 await testAsync('v2 reorder controls: every list shows Up/Down only in Manual order', async () => {
-  const { modelHome, modelArea, taskListHTML } = await import('../js/views/model-ui.js');
+  const { modelAreas, modelArea, taskListHTML } = await import('../js/views/model-ui.js');
   const { deckView } = await import('../js/views/deck.js');
   store.reset();
   const area = store.addArea('Work');
@@ -1049,13 +1052,13 @@ await testAsync('v2 reorder controls: every list shows Up/Down only in Manual or
   }
   for (const sort of ['order', 'due', 'priority', 'updated']) {
     saveTaskPrefs({ sort, priority: 'all' });
-    const screens = [modelHome().html, modelArea(area.id).html, taskListHTML('inbox'), deckView(projects[0].id).html];
+    const screens = [modelAreas().html, modelArea(area.id).html, taskListHTML('inbox'), deckView(projects[0].id).html];
     for (const html of screens) {
       if (sort === 'order') assert.match(html, /data-(?:task|project|area)-order=/);
       else assert.doesNotMatch(html, /data-(?:task|project|area)-order=/);
     }
     if (sort === 'order') {
-      assert.match(modelHome().html, /data-area-order=/);
+      assert.match(modelAreas().html, /data-area-order=/);
       assert.match(modelArea(area.id).html, /data-project-order=/);
       assert.match(modelArea(area.id).html, /data-task-order=/);
     }
@@ -1063,22 +1066,120 @@ await testAsync('v2 reorder controls: every list shows Up/Down only in Manual or
   saveTaskPrefs({});
 });
 
-await testAsync('v2 Home: plain header, Inbox count, one mixed list and Resume only for progress', async () => {
-  const { modelHome, modelArea } = await import('../js/views/model-ui.js');
+await testAsync('dashboard: plain shell, Inbox badge and no old Home list, banner or Resume card', async () => {
+  const { modelHome, modelArea, modelInbox } = await import('../js/views/model-ui.js');
+  const { dashboardHeaderHTML, navigationHTML } = await import('../js/views/navigation.js');
   store.reset();
   const area = store.addArea('Work'), project = store.addFlowProject(area.id, 'Untouched');
   store.addTask('Inbox task');
-  const html = modelHome().html;
-  assert.match(html, /<h1[^>]*>Vesper<\/h1>/);
-  assert.match(html, /<summary>Inbox \(1\)<\/summary>/);
-  assert.match(html, /Areas, Projects and Tasks/);
-  assert.equal((html.match(/class="model-area-card"/g) || []).length, 1);
-  assert.doesNotMatch(html, /model-resume|model-hero|Make room|quiet landing|On the table|Your Areas/);
+  const html = modelHome().html, header = dashboardHeaderHTML('#/');
+  assert.match(header, />Vesper<\/a>/);
+  assert.match(header, />Search<\/button>/); assert.match(header, />New<\/button>/);
+  assert.match(navigationHTML('#/'), /Inbox <span class="dashboard-inbox-count">1<\/span>/);
+  assert.match(modelInbox().html, /Inbox \(1\)/);
+  assert.doesNotMatch(html, /model-resume|model-hero|model-mixed-list|Make room|quiet landing|On the table|Your Areas|Areas, Projects and Tasks/);
   assert.doesNotMatch(modelArea(area.id).html, /Room for related work|longer journey/);
   project.reached = 1; store.save(project);
-  assert.match(modelHome().html, /model-resume/);
+  assert.doesNotMatch(modelHome().html, /model-resume/);
   project.finished = Date.now(); store.save(project);
   assert.doesNotMatch(modelHome().html, /model-resume/);
+});
+
+const dash = await import('../js/dashboard.js');
+test('dashboard counts: first unpassed Selah, parked precedence and exhaustive disjoint totals', () => {
+  const projects = STAGES.map((stage, i) => ({ id: stage.id, selah: Object.fromEntries(STAGES.slice(0, i).map((s) => [s.id, true])) }));
+  projects.push({ id: 'all', selah: Object.fromEntries(STAGES.map((s) => [s.id, true])) },
+    { id: 'p4', priority: 'P4' }, { id: 'flag', parked: true }, { id: 'both', priority: 'P4', parked: true },
+    { id: 'done', finished: 1, priority: 'P4', parked: true });
+  const summary = dash.dashboardSummary(projects);
+  assert.equal(Object.values(summary.counts).reduce((sum, n) => sum + n, 0), projects.length);
+  assert.deepEqual(summary.counts, { vision: 1, research: 1, plan: 1, execute: 1, review: 2, parked: 3, finished: 1 });
+  assert.equal(dash.projectStage({ selah: { research: true, plan: true, review: true } }), 'vision');
+  assert.equal(dash.projectLayer({ parked: false }), 'open');
+  assert.equal(dash.projectLayer({ parked: true, finished: 10 }), 'finished');
+  assert.deepEqual(dash.dashboardColumns(projects, 'parked').map((c) => c.projects.length), [2, 1]);
+  const ids = ['open', 'parked', 'finished'].flatMap((layer) => dash.dashboardColumns(projects, layer).flatMap((c) => c.projects.map((p) => p.id)));
+  assert.equal(ids.length, projects.length); assert.equal(new Set(ids).size, projects.length);
+  for (let mask = 0; mask < 32; mask++) for (const priority of [null, 'P1', 'P4']) for (const parked of [undefined, false, true]) for (const finished of [null, 1]) {
+    const project = { id: 'matrix', priority, parked, finished, selah: Object.fromEntries(STAGES.map((s, i) => [s.id, !!(mask & (1 << i))])) };
+    const result = dash.dashboardSummary([project]);
+    assert.equal(Object.values(result.counts).reduce((sum, n) => sum + n, 0), 1);
+    assert.equal(Object.values(result.layers).flat().length, 1);
+  }
+  assert.equal(dash.dashboardSummary([]).total, 0);
+});
+
+test('dashboard data safety: real-shaped old sample stays unchanged and tick counts ignore unknown keys', () => {
+  const legacy = buildSample();
+  const state = m2.normalizeV2({ version: 1, projects: [legacy.project], decks: legacy.decks, deleted: {} });
+  state.tasks.push({ id: 'loose', title: 'Keep this task', location: { kind: 'inbox' }, note: 'Unchanged', done: false });
+  const before = JSON.stringify(state);
+  const view = dash.dashboardSummary(state.projects);
+  for (const layer of ['open', 'parked', 'finished']) dash.dashboardColumns(state.projects, layer);
+  state.projects.forEach(dash.projectTicks);
+  assert.equal(JSON.stringify(state), before); assert.equal(state.version, 2);
+  assert.equal(view.total, legacy.decks.length);
+  assert.ok(state.projects.every((p) => !Object.hasOwn(p, 'parked')));
+  const p = { ticks: { 'not-a-real-step': true } };
+  assert.equal(dash.projectTicks(p), 0);
+  for (const stage of STAGES) for (const sub of stage.subs) sub.steps.forEach((_, i) => { p.ticks[tickKey(stage, sub, i)] = true; });
+  assert.equal(dash.projectTicks(p), 34);
+});
+
+await testAsync('dashboard cards: progress, exact stored title, saved slide, last edited and session-only controls', async () => {
+  const { dashboardView } = await import('../js/views/dashboard.js');
+  const { setRenderer } = await import('../js/nav.js');
+  store.reset(); const area = store.addArea('Books');
+  const p = store.addFlowProject(area.id, 'P1 · Keep my title');
+  p.priority = 'P1'; p.slide = 7; p.updated = 9999999999999;
+  p.ticks[tickKey(STAGES[0], STAGES[0].subs[0], 0)] = true;
+  const finished = store.addFlowProject(area.id, 'Finished project'); finished.finished = 1; finished.slide = 26;
+  for (let i = 0; i < 7; i++) store.addFlowProject(area.id, `Other ${i}`);
+  const before = store.exportJSON();
+  let html = dashboardView().html;
+  assert.match(html, /1 \/ 34/); assert.match(html, /Resume · slide 8 of 27/);
+  assert.match(html, new RegExp(`href="#/d/${p.id}/s/7"`));
+  assert.match(html, /P1 · Keep my title/); assert.equal((html.match(/>Last edited</g) || []).length, 1);
+  assert.match(html, /data-dashboard-column="execute" aria-pressed="true"/);
+  assert.match(html, /\+ 2 more/);
+  const handlers = [];
+  const root = { addEventListener: (name, fn) => { if (name === 'click') handlers.push(fn); }, removeEventListener() {}, querySelectorAll: () => [] };
+  const stop = dashboardView().mount(root);
+  setRenderer(() => {});
+  const click = (selector, dataset) => handlers.forEach((fn) => fn({ target: { closest: (s) => s === selector ? { dataset } : null } }));
+  try {
+    click('[data-dashboard-more]', { dashboardMore: 'vision' });
+    assert.doesNotMatch(dashboardView().html, /\+ 2 more/);
+    click('[data-dashboard-layer]', { dashboardLayer: 'finished' });
+    html = dashboardView().html;
+    assert.match(html, />Reopen<\/span>/); assert.match(html, new RegExp(`href="#/d/${finished.id}/s/26"`));
+    assert.doesNotMatch(html, /Resume · slide/);
+    click('[data-dashboard-layer]', { dashboardLayer: 'open' });
+    assert.equal(store.exportJSON(), before);
+  } finally { stop(); setRenderer(() => {}); }
+});
+
+await testAsync('parked field: independently merged, old clients cannot erase it, and AI can set and clear it', async () => {
+  const { setProjectMeta } = await import('../js/task-meta.js');
+  const { applyModelTurn } = await import('../js/ai/agent.js');
+  store.reset(); const area = store.addArea('Work'), p = store.addFlowProject(area.id, 'Keep flow');
+  const base = JSON.parse(store.exportJSON()), left = structuredClone(base), right = structuredClone(base);
+  left.projects[0].parked = true; stampDeck(left.projects[0], base.projects[0], p.updated + 10);
+  right.projects[0].notes['vision.why#0'] = 'Other device'; stampDeck(right.projects[0], base.projects[0], p.updated + 20);
+  const merged = mergeStates(left, right);
+  assert.equal(merged.projects[0].parked, true); assert.equal(merged.projects[0].notes['vision.why#0'], 'Other device');
+  assert.equal(mergeStates(merged, base).projects[0].parked, true);
+  const cleared = structuredClone(merged);
+  cleared.projects[0].parked = false;
+  stampDeck(cleared.projects[0], merged.projects[0], p.updated + 30);
+  assert.equal(mergeStates(cleared, left).projects[0].parked, false);
+  assert.deepEqual(applyModelTurn([{ type: 'set_project', project: p.id, parked: true }]).skipped, []);
+  assert.equal(p.parked, true);
+  assert.deepEqual(applyModelTurn([{ type: 'set_project', project: p.id, parked: false }]).skipped, []);
+  assert.equal(p.parked, false);
+  const before = JSON.stringify(p);
+  assert.match(setProjectMeta(p, { priority: 'P2', parked: 'yes' }), /boolean|true or false/);
+  assert.equal(JSON.stringify(p), before);
 });
 
 await testAsync('v2 finish: open Tasks are mentioned with missing Selahs and never block confirmation', async () => {

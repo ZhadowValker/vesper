@@ -236,6 +236,19 @@ function setTaskMeta(deck, patch) {
   return null;
 }
 
+// Optional v2 Project field. Missing means not parked; do not backfill old data.
+function setProjectMeta(project, patch) {
+  const metadata = Object.hasOwn(patch, 'priority') || Object.hasOwn(patch, 'due');
+  if (!metadata && !Object.hasOwn(patch, 'parked')) return 'Provide priority, due or parked.';
+  if (Object.hasOwn(patch, 'parked') && typeof patch.parked !== 'boolean') return 'parked must be true or false.';
+  if (metadata) {
+    const error = setTaskMeta(project, patch);
+    if (error) return error;
+  }
+  if (Object.hasOwn(patch, 'parked')) project.parked = patch.parked;
+  return null;
+}
+
 function localCalendarDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
@@ -308,6 +321,7 @@ const appendOrder = (items) => Math.max(-1, ...items.map((x) => Number.isFinite(
 const emptyV2 = () => ({ version: 2, areas: [], projects: [], tasks: [], deleted: {} });
 const isV1 = (s) => !!s && s.version !== 2 && Array.isArray(s.projects) && Array.isArray(s.decks);
 function flowAliases(project) {
+  // parked is an optional boolean. Absence stays absent in old v2 notebooks.
   if (!Object.hasOwn(project, 'projectId')) Object.defineProperty(project, 'projectId', {
     configurable: true, get() { return this.areaId; }, set(id) { this.areaId = id; },
   });
@@ -733,7 +747,7 @@ function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
       if (a.mode !== undefined && a.mode !== 'full') { skipped.push('Quick mode was removed.'); continue; }
-      const error = Object.hasOwn(a, 'priority') || Object.hasOwn(a, 'due') || a.mode === undefined ? setTaskMeta(deck, a) : null;
+      const error = Object.hasOwn(a, 'priority') || Object.hasOwn(a, 'due') || Object.hasOwn(a, 'parked') || a.mode === undefined ? setProjectMeta(deck, a) : null;
       if (error) { skipped.push(error); continue; }
       if (a.mode !== undefined) setTaskMode(deck, a.mode);
       db.save(deck);
@@ -903,6 +917,8 @@ function modelOverview(state, filters = {}) {
 // Shared by the app and hub. Old task timestamps remain the fallback for old backups.
 const stamp = (x) => x.updated || x.created || 0;
 const maps = ['notes', 'ticks', 'selah', 'selahBy'];
+// Optional Project fields such as parked use their own clocks, just like title,
+// due and priority. Never inject a false default while merging an older client.
 const fieldKeys = (d) => Object.keys(d).filter((k) => !['id', 'created', 'updated', '_changed', ...maps].includes(k));
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k);
 const stable = (v) => JSON.stringify(v && typeof v === 'object'
@@ -1580,7 +1596,7 @@ function whereIs(d) {
 function taskSummary(state, d) {
   const pr = progress(d);
   const p = state.areas.find((x) => x.id === d.areaId);
-  return { id: d.id, title: d.title, mode: isQuick(d) ? 'quick' : 'full', priority: d.priority || null, due: d.due || null, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
+  return { id: d.id, title: d.title, mode: isQuick(d) ? 'quick' : 'full', priority: d.priority || null, due: d.due || null, parked: d.parked === true, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
 }
 
 const obj = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
@@ -1615,7 +1631,7 @@ const TOOLS = [
   ...LEGACY_TOOLS.filter((t) => !['vesper_create_project', 'vesper_create_task', 'vesper_move_task', 'vesper_rename', 'vesper_reorder', 'vesper_overview', 'vesper_list_projects'].includes(t.name)).map((t) => {
     const props = { ...t.inputSchema.properties };
     if (props.task) { props.project = str('Full Vesper Project id or unique title'); props.task = str('Deprecated alias for project'); }
-    if (t.name === 'vesper_set_task') delete props.mode;
+    if (t.name === 'vesper_set_task') { delete props.mode; props.parked = { type: 'boolean', description: 'Mark or unmark this Project as parked' }; }
     return { ...t, description: t.name === 'vesper_set_note' ? 'Write a Full Project step/slide note. Retained Quick notes are read-only. Filling a step also ticks it; text appends unless mode=replace.' :
       t.name === 'vesper_next_questions' ? 'Next empty Full Project step questions. Never interviews simple Tasks.' :
       `Full Vesper Projects (27 slides, 34 steps). ${t.description.replaceAll('task', 'project')}`,
@@ -1632,7 +1648,7 @@ const TOOLS = [
   modelTool('vesper_list_areas', 'Only Areas with Project and loose-Task counts.', {}),
   modelTool('vesper_list_projects', 'DEPRECATED: alias of vesper_list_areas (not a list of Full Projects). Use overview kind=project for Projects.', {}),
   modelTool('vesper_get_project', 'Read all Full Project steps/notes and contained simple Tasks.', { project: str('Project id/title'), task: str('Deprecated project alias') }),
-  modelTool('vesper_set_project', 'Set Full Project priority/due; null clears, omitted values stay unchanged.', { project: str('Project id/title'), task: str('Deprecated project alias'), priority: modelPriority, due: modelDue }),
+  modelTool('vesper_set_project', 'Set Full Project priority/due or parked flag; null clears priority/due, omitted values stay unchanged.', { project: str('Project id/title'), task: str('Deprecated project alias'), priority: modelPriority, due: modelDue, parked: { type: 'boolean' } }),
   modelTool('vesper_rename', 'Rename one Area or Full Project. task is a deprecated alias for a Full Project. Use update_task for simple Tasks.', { area: str('Area'), project: str('Project'), task: str('Deprecated Project alias'), name: str('New name') }, ['name']),
   modelTool('vesper_reorder', 'Reorder Areas, Projects in one Area, or simple Tasks in one location. Full order or item plus 1-based position.', { kind: { type: 'string', enum: ['areas', 'projects', 'tasks'] }, ...modelPlace, order: { type: 'array', items: { type: 'string' } }, item: str('Item id'), position: { type: 'integer', minimum: 1 } }, ['kind']),
   modelTool('vesper_delete_area', 'Delete an Area and its Project flows. Simple Tasks move to Inbox. Requires explicit confirmation.', { area: str('Area id/name'), confirm: { type: 'boolean' } }, ['area', 'confirm']),

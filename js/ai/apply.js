@@ -1,5 +1,5 @@
 import { finishTask } from '../task-status.js';
-import { setTaskMeta } from '../task-meta.js';
+import { setTaskMeta, setProjectMeta } from '../task-meta.js';
 import { reorderItems, appendOrder } from '../organize.js';
 // Applies the assistant's actions to task data. It works on any "db" with the same small
 // interface as the app's store, so the app and the online connector share one set of rules:
@@ -175,7 +175,7 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
       if (a.mode !== undefined && a.mode !== 'full') { skipped.push('Quick mode was removed.'); continue; }
-      const error = Object.hasOwn(a, 'priority') || Object.hasOwn(a, 'due') || a.mode === undefined ? setTaskMeta(deck, a) : null;
+      const error = Object.hasOwn(a, 'priority') || Object.hasOwn(a, 'due') || Object.hasOwn(a, 'parked') || a.mode === undefined ? setProjectMeta(deck, a) : null;
       if (error) { skipped.push(error); continue; }
       if (a.mode !== undefined) setTaskMode(deck, a.mode);
       db.save(deck);
