@@ -9,9 +9,14 @@ export const STAGE_COLORS = {
 export const PRIORITY_COLORS = {
   P1: '#ff6b81', P2: '#ffa24d', P3: '#f4d35e', P4: '#8f89b8', none: '#6f6a94',
 };
+// Display-only fallback for notebooks that still keep priority in the title.
+// An explicit priority always wins; never backfill or rewrite saved records.
+export function effectivePriority(project) {
+  return project.priority || /^P[1-4] · /.exec(project.title || '')?.[0].slice(0, 2) || '';
+}
 export function projectLayer(project) {
   if (project.finished) return 'finished';
-  if (project.parked === true || project.priority === 'P4') return 'parked';
+  if (project.parked === true || effectivePriority(project) === 'P4') return 'parked';
   return 'open';
 }
 export function projectStage(project) {
@@ -38,8 +43,8 @@ export function dashboardColumns(projects, layer = 'open') {
   const { layers } = dashboardSummary(projects);
   if (layer === 'finished') return [{ id: 'finished', name: 'Finished', color: STAGE_COLORS.finished, projects: orderedItems(layers.finished) }];
   if (layer === 'parked') return [
-    { id: 'p4', name: 'P4', color: STAGE_COLORS.parked, projects: orderedItems(layers.parked.filter((p) => p.priority === 'P4')) },
-    { id: 'marked', name: 'Marked parked', color: STAGE_COLORS.parked, projects: orderedItems(layers.parked.filter((p) => p.priority !== 'P4')) },
+    { id: 'p4', name: 'P4', color: STAGE_COLORS.parked, projects: orderedItems(layers.parked.filter((p) => effectivePriority(p) === 'P4')) },
+    { id: 'marked', name: 'Marked parked', color: STAGE_COLORS.parked, projects: orderedItems(layers.parked.filter((p) => effectivePriority(p) !== 'P4')) },
   ];
   return STAGES.map((stage) => ({
     id: stage.id, name: stage.name, color: STAGE_COLORS[stage.id],

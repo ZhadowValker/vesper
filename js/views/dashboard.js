@@ -1,7 +1,7 @@
 import { store } from '../store.js';
 import { esc } from '../util.js';
 import { rerender } from '../nav.js';
-import { dashboardSummary, dashboardColumns, projectTicks, STAGE_COLORS, PRIORITY_COLORS } from '../dashboard.js';
+import { dashboardSummary, dashboardColumns, projectTicks, effectivePriority, STAGE_COLORS, PRIORITY_COLORS } from '../dashboard.js';
 import { bindModelHomePanel, modelHomePanelHTML } from './model-ui.js';
 
 const LEGEND = [
@@ -94,7 +94,9 @@ function layerControls(summary) {
 }
 
 function projectCard(project, column) {
-  const priority = project.priority || '';
+  const priority = effectivePriority(project);
+  const title = !project.priority && priority
+    ? project.title.slice(`${priority} · `.length) : project.title;
   const pColor = priorityColor(priority);
   const ticks = Math.max(0, Math.min(34, Number(projectTicks(project)) || 0));
   const slide = Number.isInteger(project.slide) && project.slide >= 0 ? Math.min(project.slide, 26) : 0;
@@ -107,13 +109,13 @@ function projectCard(project, column) {
     ? '<span class="dashboard-resume-label">Reopen</span>'
     : `<span class="dashboard-resume-label">Resume · slide ${displaySlide} of 27</span>`;
   const barColor = pColor || '#6f6a94';
-  return `<a class="dashboard-project-card${project.finished ? ' is-finished' : ''}" href="${esc(destination)}" style="--priority-color:${esc(barColor)}" aria-label="${esc(project.finished ? 'Reopen' : 'Resume')}: ${esc(project.title)}">
+  return `<a class="dashboard-project-card${project.finished ? ' is-finished' : ''}" href="${esc(destination)}" style="--priority-color:${esc(barColor)}" aria-label="${esc(project.finished ? 'Reopen' : 'Resume')}: ${esc(title)}">
     <span class="dashboard-card-meta">
       <span class="dashboard-priority" data-priority="${esc(priority || 'none')}">${esc(priority || 'No priority')}</span>
       <span class="dashboard-area">${esc(area?.name || area?.title || '')}</span>
       ${lastEdited}
     </span>
-    <span class="dashboard-project-title">${esc(project.title)}</span>
+    <span class="dashboard-project-title">${esc(title)}</span>
     <span class="dashboard-progress-line"><span class="dashboard-progress" role="progressbar" aria-label="Project progress" aria-valuemin="0" aria-valuemax="34" aria-valuenow="${ticks}"><i style="width:${(ticks / 34) * 100}%"></i></span><span class="dashboard-ticks">${ticks} / 34</span></span>
     <span class="dashboard-card-bottom">${resume}<span class="dashboard-arrow" aria-hidden="true">→</span></span>
   </a>`;

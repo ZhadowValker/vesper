@@ -1183,6 +1183,94 @@ test('dashboard data safety: real-shaped old sample stays unchanged and tick cou
   assert.equal(dash.projectTicks(p), 34);
 });
 
+test('dashboard priority fallback: exact leading prefix only; explicit field wins without mutations', () => {
+  for (const priority of ['P1', 'P2', 'P3', 'P4']) {
+    for (const field of [undefined, null, '']) {
+      const project = Object.freeze({ title: `${priority} · Legacy title`, priority: field });
+      assert.equal(dash.effectivePriority(project), priority);
+    }
+  }
+  for (const title of ['Done · Title', 'Discuss · Title', 'Recurring · Title', 'P1 Title', 'P1· Title', 'P1 - Title', ' P1 · Title', 'P5 · Title', 'Title P4 · Rest', 'p1 · Title']) {
+    assert.equal(dash.effectivePriority(Object.freeze({ title })), '');
+  }
+  assert.equal(dash.effectivePriority({}), '');
+  const explicit = Object.freeze({ title: 'P4 · Not parked', priority: 'P1' });
+  assert.equal(dash.effectivePriority(explicit), 'P1');
+  assert.equal(dash.projectLayer(explicit), 'open');
+  assert.equal(dash.projectLayer({ title: 'P1 · Parked', priority: 'P4' }), 'parked');
+  assert.equal(dash.projectLayer({ title: 'P4 · Finished', finished: 1 }), 'finished');
+});
+
+await testAsync('dashboard priority fallback: 55 projects across 9 Areas preserve data and render legacy colours', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { dashboardView } = await import('../js/views/dashboard.js');
+  store.reset();
+  const areas = Array.from({ length: 9 }, (_, i) => store.addArea(`Area ${i + 1}`));
+  const make = (title, stage = 'vision') => {
+    const p = store.addFlowProject(areas[store.flowProjects().length % areas.length].id, title);
+    p.order = store.flowProjects().length;
+    const index = STAGES.findIndex((s) => s.id === stage);
+    p.selah = Object.fromEntries(STAGES.slice(0, index).map((s) => [s.id, true]));
+    p.notes['vision.why#0'] = `Keep note for ${title}`;
+    p.ticks[tickKey(STAGES[0], STAGES[0].subs[0], 0)] = true;
+    return p;
+  };
+  for (let i = 0; i < 24; i++) make(`P4 · Parked ${i}`);
+  // The supplied 7 Vision + 2 Plan + 11 Execute describe 20 of 26 open
+  // projects. Keep that subset exact; give the six unspecified fixtures Vision
+  // so the complete ring remains exhaustive (13 + 0 + 2 + 11 + 0 = 26).
+  const stages = [...Array(7).fill('vision'), ...Array(2).fill('plan'), ...Array(11).fill('execute')];
+  const described = stages.map((stage, i) => make(
+    i < 5 ? `P1 · Urgent ${i}` : i < 15 ? `P${i % 2 + 2} · Project ${i}` :
+      ['Done · Keep this', 'Discuss · Keep this', 'Recurring · Keep this', 'Plain one', 'Plain two'][i - 15], stage));
+  for (let i = 0; i < 6; i++) make(`Unspecified ${i}`);
+  for (let i = 0; i < 5; i++) make(`P4 · Finished ${i}`).finished = 100 + i;
+  const projects = store.flowProjects();
+  assert.equal(projects.length, 55); assert.equal(store.areas().length, 9);
+  assert.equal(projects.filter((p) => /^P[1-4] · /.test(p.title)).length, 44);
+  assert.ok(projects.every((p) => !Object.hasOwn(p, 'priority')));
+  const before = store.exportJSON();
+  const summary = dash.dashboardSummary(projects);
+  assert.deepEqual(Object.fromEntries(Object.entries(summary.layers).map(([k, v]) => [k, v.length])),
+    { open: 26, parked: 24, finished: 5 });
+  assert.deepEqual(dash.dashboardSummary(described).counts,
+    { vision: 7, research: 0, plan: 2, execute: 11, review: 0, parked: 0, finished: 0 });
+  assert.deepEqual(summary.counts,
+    { vision: 13, research: 0, plan: 2, execute: 11, review: 0, parked: 24, finished: 5 });
+  assert.equal(Object.values(summary.counts).reduce((a, b) => a + b, 0), 55);
+  assert.deepEqual(dash.dashboardColumns(projects, 'parked').map((c) => c.projects.length), [24, 0]);
+  const html = dashboardView().html;
+  assert.match(html, /data-dashboard-layer="open"[^>]*><span>Open<\/span><b>26<\/b>/);
+  assert.match(html, /data-dashboard-layer="parked"[^>]*><span>Parked<\/span><b>24<\/b>/);
+  const cards = html.match(/<a class="dashboard-project-card[\s\S]*?<\/a>/g) || [];
+  const p1 = cards.filter((card) => card.includes('data-priority="P1"'));
+  assert.equal(p1.length, 5);
+  for (const card of p1) {
+    assert.match(card, /--priority-color:#ff6b81/);
+    assert.match(card, /class="dashboard-project-title">Urgent \d<\/span>/);
+    assert.doesNotMatch(card, /P1 · /);
+  }
+  const css = readFileSync(new URL('../css/dashboard.css', import.meta.url), 'utf8');
+  assert.match(css, /\.dashboard-project-card\s*\{[^}]*border-top:3px solid var\(--priority-color,/);
+  assert.match(css, /\.dashboard-priority\s*\{[^}]*background:color-mix\(in srgb,var\(--priority-color,/);
+  assert.match(css, /\.dashboard-progress i\s*\{[^}]*background:var\(--priority-color,/);
+  assert.equal(store.exportJSON(), before);
+  // Also exercise the card titles outside the capped columns.
+  store.reset(); const area = store.addArea('Title checks');
+  for (const title of ['Done · Keep this', 'Discuss · Keep this', 'Recurring · Keep this']) {
+    store.addFlowProject(area.id, title);
+  }
+  const explicit = store.addFlowProject(area.id, 'P4 · Explicit P1 wins'); explicit.priority = 'P1';
+  const titleBefore = store.exportJSON(), titleHTML = dashboardView().html;
+  for (const title of ['Done · Keep this', 'Discuss · Keep this', 'Recurring · Keep this', 'P4 · Explicit P1 wins']) {
+    assert.ok(titleHTML.includes(`class="dashboard-project-title">${title}</span>`));
+  }
+  const explicitCard = titleHTML.match(/<a class="dashboard-project-card[\s\S]*?<\/a>/g).find((card) => card.includes('Explicit P1 wins'));
+  assert.match(explicitCard, /--priority-color:#ff6b81/);
+  assert.match(explicitCard, /data-priority="P1"/);
+  assert.equal(store.exportJSON(), titleBefore);
+});
+
 await testAsync('dashboard cards: progress, exact stored title, saved slide, last edited and session-only controls', async () => {
   const { dashboardView } = await import('../js/views/dashboard.js');
   const { setRenderer } = await import('../js/nav.js');
