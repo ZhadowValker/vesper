@@ -1543,7 +1543,8 @@ async function vaultSave(kv, env, sub, entry) {
   // Only an answer that names the saved file counts as saved: the server copy is removed on the strength of it.
   if (!res.ok || !file.id) { vaultCache.delete(sub); throw new DriveError('Could not save to your Google Drive. Nothing was kept on this server.'); }
   entry.id = file.id || entry.id; entry.at = Date.now();
-  if (entry.id !== rec.fileId) await kv.put('drive', JSON.stringify({ ...rec, fileId: entry.id }));
+  // Remember only the file id and when it was last saved (a timestamp, not project data); the Account box shows it.
+  if (entry.id !== rec.fileId || entry.at - (rec.last || 0) > 60000) await kv.put('drive', JSON.stringify({ ...rec, fileId: entry.id, last: entry.at }));
   if (entry.legacy) {
     // Now only in Drive: remove what the server kept, including its recent daily snapshots.
     entry.legacy = false;
