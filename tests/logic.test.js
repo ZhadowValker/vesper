@@ -1242,6 +1242,9 @@ await testAsync('dashboard priority fallback: 55 projects across 9 Areas preserv
   const html = dashboardView().html;
   assert.match(html, /data-dashboard-layer="open"[^>]*><span>Open<\/span><b>26<\/b>/);
   assert.match(html, /data-dashboard-layer="parked"[^>]*><span>Parked<\/span><b>24<\/b>/);
+  assert.match(html, /data-dashboard-layer="areas"[^>]*><span>Areas<\/span><b>9<\/b>/);
+  assert.match(html, /data-dashboard-layer="projects"[^>]*><span>Projects<\/span><b>55<\/b>/);
+  assert.match(html, /data-dashboard-layer="tasks"[^>]*><span>Tasks<\/span><b>0<\/b>/);
   const cards = html.match(/<a class="dashboard-project-card[\s\S]*?<\/a>/g) || [];
   const p1 = cards.filter((card) => card.includes('data-priority="P1"'));
   assert.equal(p1.length, 5);

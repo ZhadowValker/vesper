@@ -72,7 +72,8 @@
 .model-modal textarea{min-height:92px;resize:vertical}
 .model-modal input::placeholder,.model-modal textarea::placeholder{color:var(--faint)}
 .model-modal .model-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.model-modal .model-type-choice{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.model-modal .model-type-choice{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media (max-width:520px){.model-modal .model-type-choice{grid-template-columns:1fr}.model-modal .model-choice{min-height:64px}}
 .model-modal .model-choice{display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-height:100px;padding:16px;border:1px solid var(--edge-strong);border-radius:17px;background:var(--glass-soft);text-align:left;cursor:pointer}
 .model-modal .model-choice strong{font-family:var(--display);font-size:19px}
 .model-modal .model-choice span{font-size:12.5px;color:var(--muted)}

@@ -1,8 +1,9 @@
 import { store } from '../store.js';
 import { esc } from '../util.js';
 import { rerender } from '../nav.js';
+import { orderedItems } from '../organize.js';
 import { dashboardSummary, dashboardColumns, projectTicks, effectivePriority, STAGE_COLORS, PRIORITY_COLORS } from '../dashboard.js';
-import { bindModelHomePanel, modelHomePanelHTML } from './model-ui.js';
+import { bindModelHomePanel, modelHomePanelHTML, areasListHTML, allTasksHTML } from './model-ui.js';
 
 const LEGEND = [
   { key: 'vision', label: 'Vision', color: STAGE_COLORS.vision },
@@ -87,8 +88,11 @@ function layerControls(summary) {
     { key: 'open', label: 'Open', count: (summary?.layers?.open || []).length },
     { key: 'parked', label: 'Parked', count: (summary?.layers?.parked || []).length },
     { key: 'finished', label: 'Finished', count: (summary?.layers?.finished || []).length },
+    { key: 'areas', label: 'Areas', count: store.areas().length },
+    { key: 'projects', label: 'Projects', count: summary?.total || 0 },
+    { key: 'tasks', label: 'Tasks', count: store.tasks().length },
   ];
-  return `<div class="dashboard-layers" role="group" aria-label="Project status">
+  return `<div class="dashboard-layers" role="group" aria-label="Show">
     ${items.map(({ key, label, count }) => `<button class="dashboard-layer-button" type="button" data-dashboard-layer="${key}" aria-pressed="${activeLayer === key}"><span>${label}</span><b>${count}</b></button>`).join('')}
   </div>`;
 }
@@ -158,7 +162,15 @@ function columnHTML(column, layer, selected) {
   </section>`;
 }
 
+function listHTML(projects, layer) {
+  if (layer === 'areas') return `<div class="dashboard-list" data-dashboard-board="areas">${areasListHTML()}</div>`;
+  if (layer === 'tasks') return `<div class="dashboard-list" data-dashboard-board="tasks">${allTasksHTML()}</div>`;
+  const all = { id: 'all', name: 'All projects', color: STAGE_COLORS.parked, projects: orderedItems(projects) };
+  return `<div class="dashboard-board" data-dashboard-board="projects"><div class="dashboard-columns dashboard-columns-single">${columnHTML(all, 'projects', all)}</div></div>`;
+}
+
 function boardHTML(projects, layer) {
+  if (layer === 'areas' || layer === 'projects' || layer === 'tasks') return listHTML(projects, layer);
   const columns = columnsForLayer(projects, layer);
   const selected = selectedColumn(columns, layer);
   const tabs = mobileColumnTabs(columns, layer, selected);

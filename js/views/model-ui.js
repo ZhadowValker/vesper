@@ -148,6 +148,19 @@ export function modelHomePanelHTML() {
 
 export { dashboardView as modelHome } from './dashboard.js';
 
+// Dashboard lists for the Areas / Tasks chips (Projects reuse the dashboard's own cards).
+export function areasListHTML() {
+  const areas = orderedItems(store.areas());
+  return areas.length ? `<div class="model-grid">${areas.map((area) => areaCardHTML(area, areas)).join('')}</div>`
+    : '<div class="model-empty">No Areas yet. Press New, then Area.</div>';
+}
+export function allTasksHTML() {
+  const tasks = [...store.tasks()].sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0) ||
+    (b.updated || b.created || 0) - (a.updated || a.created || 0) || String(a.id).localeCompare(String(b.id)));
+  return `<section class="model-section"><div class="model-section-head"><h2>All Tasks</h2><span class="model-count">${tasks.length} ${tasks.length === 1 ? 'Task' : 'Tasks'}</span></div>
+    <div class="model-mixed-list">${tasks.length ? tasks.map((task) => mixedTaskMarkup(task, task.location)).join('') : '<div class="model-empty">No Tasks yet. Press New, then Task.</div>'}</div></section>`;
+}
+
 export function modelAreas() {
   const areas = orderedItems(store.areas());
   return { html: `<main class="page stack model-page">
@@ -211,6 +224,7 @@ export async function createItem({ kind, location } = {}) {
     if (!selected) return null;
     kind = selected;
   }
+  if (kind === 'area') return createArea();
   if (kind === 'task') {
     const created = await addTaskDialog(location || { kind: 'inbox' });
     if (created) rerender();
@@ -273,8 +287,8 @@ function getFormLocation(dialog) {
 async function chooseCreateType() {
   const dlg = document.createElement('dialog');
   dlg.className = 'modal model-modal';
-  dlg.innerHTML = `<form method="dialog"><h2>Task or Project?</h2>
-    <div class="model-type-choice"><button class="model-choice" type="button" data-choice="task"><strong>Task</strong></button><button class="model-choice" type="button" data-choice="project"><strong>Project</strong></button></div>
+  dlg.innerHTML = `<form method="dialog"><h2>Area, Task or Project?</h2>
+    <div class="model-type-choice"><button class="model-choice" type="button" data-choice="area"><strong>Area</strong></button><button class="model-choice" type="button" data-choice="task"><strong>Task</strong></button><button class="model-choice" type="button" data-choice="project"><strong>Project</strong></button></div>
     <div class="modal-actions"><button type="button" class="btn" data-cancel>Cancel</button></div></form>`;
   document.body.appendChild(dlg);
   return new Promise((resolve) => {
@@ -489,9 +503,9 @@ function selectDialog(title, submit, body, read) {
 
 async function createArea() {
   const name = await ask('Name this Area', { ok: 'Create Area' });
-  if (!name) return;
-  try { store.addArea(name); rerender(); }
-  catch (error) { await notice('Area not created', error.message); }
+  if (!name) return null;
+  try { const area = store.addArea(name); rerender(); return area; }
+  catch (error) { await notice('Area not created', error.message); return null; }
 }
 
 async function handleAreaAction(button) {
