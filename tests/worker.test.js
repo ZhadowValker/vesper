@@ -291,6 +291,87 @@ const finish = async (back) => {
 const as = (token) => ({ Origin: ORIGIN, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' });
 const project = (id, name) => ({ id, name, created: 1, updated: 5 });
 
+async function replayFixture() {
+  const values = new Map();
+  const kv = {
+    get: async (k, t) => values.has(k) ? t === 'json' ? JSON.parse(values.get(k)) : values.get(k) : null,
+    put: async (k, v) => { values.set(k, v); }, delete: async (k) => { values.delete(k); },
+  };
+  const settings = { ...env, VESPER: kv, OWNER_EMAIL: 'replay@example.invalid', ALLOWED_EMAILS: '', MAX_USERS: '100' };
+  const request = (path, method = 'GET', body) => hub.fetch(new Request('https://hub.example' + path, {
+    method, headers: { Origin: ORIGIN, 'Content-Type': 'application/json', Authorization: 'Bearer tok-123' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }), settings);
+  const start = await (await request('/auth/google/start', 'POST')).json();
+  const state = new URL(start.url).searchParams.get('state');
+  const callback = (s = state, code = 'login:replay@example.invalid:replay-owner') =>
+    request(`/google/callback?state=${s}&code=${code}`);
+  return { values, state, callback, request };
+}
+const googleExchanges = () => gcalls.filter((r) => r.url === 'https://oauth2.googleapis.com/token' &&
+  new URLSearchParams(r.body).get('grant_type') === 'authorization_code').length;
+const handoffCode = (response) => new URL(response.headers.get('Location').replace('/#/', '/')).searchParams.get('c');
+
+await test('login replay: repeated and simultaneous callbacks reuse one hand-off, exchange and session', async () => {
+  const f = await replayFixture(), before = googleExchanges();
+  const callbacks = await Promise.all([f.callback(), f.callback(), f.callback()]);
+  const again = await f.callback();
+  for (const response of [...callbacks, again]) {
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('Location'), callbacks[0].headers.get('Location'));
+    assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  }
+  assert.equal(googleExchanges() - before, 1);
+  assert.equal([...f.values.keys()].filter((k) => k.startsWith('sess:')).length, 1);
+  assert.equal([...f.values.keys()].filter((k) => k.startsWith('login:')).length, 1);
+  assert.equal(f.values.has('gauth:' + f.state), false);
+  const completed = JSON.parse(f.values.get('gdone:' + f.state));
+  assert.deepEqual(Object.keys(completed).sort(), ['exp', 'handoff']);
+  assert.equal(completed.handoff, handoffCode(again));
+  assert.doesNotMatch(JSON.stringify(completed), /token|code|email|refresh|replay@example/);
+  assert.equal(completed.exp, JSON.parse(f.values.get('login:' + completed.handoff)).exp);
+});
+
+await test('login replay: at two minutes completion and hand-off are deleted without another exchange', async () => {
+  const f = await replayFixture(), before = googleExchanges(), first = await f.callback();
+  const done = JSON.parse(f.values.get('gdone:' + f.state)), now = Date.now;
+  try {
+    Date.now = () => done.exp; // The boundary itself is already expired.
+    assert.match(await (await f.callback()).text(), /That sign-in link expired/);
+    assert.equal(f.values.has('gdone:' + f.state), false);
+    assert.equal(f.values.has('login:' + handoffCode(first)), false);
+    assert.equal(googleExchanges() - before, 1);
+    assert.equal([...f.values.keys()].filter((k) => k.startsWith('sess:')).length, 1);
+  } finally { Date.now = now; }
+});
+
+await test('login replay: consuming a hand-off removes completion and prevents any further replay or exchange', async () => {
+  const f = await replayFixture(), before = googleExchanges(), first = await f.callback();
+  const code = handoffCode(first);
+  const exchanged = await Promise.all([f.request('/auth/exchange', 'POST', { code }), f.request('/auth/exchange', 'POST', { code })]);
+  assert.deepEqual(exchanged.map((r) => r.status).sort(), [200, 400]);
+  assert.equal(f.values.has('gdone:' + f.state), false); assert.equal(f.values.has('login:' + code), false);
+  assert.match(await (await f.callback()).text(), /That sign-in link expired/);
+  assert.equal(googleExchanges() - before, 1);
+  assert.equal([...f.values.keys()].filter((k) => k.startsWith('sess:')).length, 1);
+});
+
+await test('login replay: unknown state never exchanges a Google code', async () => {
+  const f = await replayFixture(), before = googleExchanges();
+  assert.match(await (await f.callback('unknown-state')).text(), /That sign-in link expired/);
+  assert.equal(googleExchanges(), before);
+  assert.equal([...f.values.keys()].filter((k) => k.startsWith('gdone:') || k.startsWith('sess:')).length, 0);
+});
+
+await test('login replay: calendar callbacks retain one-use behavior and never create completion records', async () => {
+  const f = await replayFixture(), before = googleExchanges();
+  const start = await (await f.request('/google/start', 'POST')).json(), state = new URL(start.url).searchParams.get('state');
+  assert.match(await (await f.callback(state, 'goodcode')).text(), /Google Calendar is connected/);
+  assert.match(await (await f.callback(state, 'goodcode')).text(), /That sign-in link expired/);
+  assert.equal(googleExchanges() - before, 1);
+  assert.equal([...f.values.keys()].filter((k) => k.startsWith('gdone:') || k.startsWith('sess:')).length, 0);
+});
+
 await test('login: start needs a known website, asks for sign-in and Drive-only permissions', async () => {
   const bad = await call('/auth/google/start', { method: 'POST', headers: { Origin: 'https://evil.example' } });
   assert.equal(bad.status, 403);
@@ -701,6 +782,66 @@ await test('file transactions protect cross-process read/modify/write and real h
     assert.equal(await disk.get('counter'), '100');
     await Promise.all(Array.from({ length: 4 }, (_, i) => storeProcess(dir, 'access-create', `Label ${i}`).done));
     assert.equal((await disk.get('access:index', 'json')).length, 4);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+await test('login replay works across four separate Node processes and hand-off consumption ends replay', async () => {
+  const { createFileStore } = await import('../server-store.mjs');
+  const fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vesper-callback-replay-'));
+  try {
+    const disk = createFileStore(dir);
+    await disk.put('gauth:cross-process-state', JSON.stringify({ kind: 'login', uid: 'owner', exp: Date.now() + 600000 }));
+    const replies = (await Promise.all(Array.from({ length: 4 }, () => storeProcess(dir, 'login-callback', 'cross-process-state').done))).map((r) => JSON.parse(r));
+    assert.ok(replies.every((r) => r.status === 302 && r.location === replies[0].location));
+    assert.equal(await disk.get('synthetic:exchanges'), '1');
+    const file = path.join(dir, 'vesper-data.json'), raw = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(Object.keys(raw).filter((k) => k.startsWith('sess:')).length, 1);
+    assert.equal(Object.keys(raw).filter((k) => k.startsWith('login:')).length, 1);
+    const done = await disk.get('gdone:cross-process-state', 'json');
+    assert.deepEqual(Object.keys(done).sort(), ['exp', 'handoff']);
+    const again = JSON.parse(await storeProcess(dir, 'login-callback', 'cross-process-state').done);
+    assert.equal(again.location, replies[0].location);
+    const exchanged = await hub.fetch(new Request('https://hub.example/auth/exchange', {
+      method: 'POST', headers: { Origin: ORIGIN, 'Content-Type': 'application/json' }, body: JSON.stringify({ code: done.handoff }),
+    }), { VESPER: disk, APP_TOKEN: 'synthetic-test' });
+    assert.equal(exchanged.status, 200);
+    assert.equal(await disk.get('gdone:cross-process-state'), null);
+    const used = JSON.parse(await storeProcess(dir, 'login-callback', 'cross-process-state').done);
+    assert.match(used.text, /That sign-in link expired/);
+    assert.equal(await disk.get('synthetic:exchanges'), '1');
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+await test('Node KV expiry removes completed-state memory while idle and restores cleanup after restart', async () => {
+  const { createFileStore } = await import('../server-store.mjs');
+  const fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vesper-idle-expiry-'));
+  try {
+    const file = path.join(dir, 'vesper-data.json'), disk = createFileStore(dir);
+    await disk.put('ordinary', 'keep');
+    await disk.put('gdone:idle', '{"handoff":"synthetic"}', { expirationTtl: 0.05 });
+    // Raw reads only: no KV reads/writes to trigger lazy cleanup.
+    let raw, deadline = Date.now() + 3000;
+    do {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      raw = JSON.parse(await fs.readFile(file, 'utf8'));
+    } while (Object.hasOwn(raw, 'gdone:idle') && Date.now() < deadline);
+    assert.equal(Object.hasOwn(raw, 'gdone:idle'), false);
+    assert.equal(raw.ordinary, 'keep');
+    // Simulate a stopped process leaving a future TTL entry; a new store must
+    // restore its timer from disk even without any subsequent application call.
+    raw['gdone:restart'] = { $vesperExpiry: 1, value: '{"handoff":"synthetic"}', expires: Date.now() + 50 };
+    await fs.writeFile(file, JSON.stringify(raw));
+    createFileStore(dir);
+    deadline = Date.now() + 3000;
+    do {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      raw = JSON.parse(await fs.readFile(file, 'utf8'));
+    } while (Object.hasOwn(raw, 'gdone:restart') && Date.now() < deadline);
+    assert.equal(Object.hasOwn(raw, 'gdone:restart'), false);
+    // Old-format values are never wrapped or lost.
+    assert.equal(await disk.get('ordinary'), 'keep'); assert.equal(raw.ordinary, 'keep');
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 

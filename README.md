@@ -115,7 +115,8 @@ lock.
 
 Before upgrading, stop **all old server copies** (old versions do not honor the
 new lock), back up the existing data directory, and point the new copies at the
-same persistent `DATA_DIR`. The storage format is unchanged.
+same persistent `DATA_DIR`. Existing plain-string records need no migration.
+New expiring entries carry private expiry metadata in the same JSON file.
 
 To download a hub backup, use hPanel **Files → File Manager**, navigate to
 `DATA_DIR/backups`, select a dated `YYYY-MM-DD.json` snapshot and choose
@@ -125,8 +126,10 @@ Snapshots keep the previous good file once per UTC day, with 14-day retention;
 `pre-v2.json` is kept separately. These are private full-hub recovery copies
 (potentially containing credentials), not public links or browser-import exports:
 store them securely. The app's **Export backup** remains the portable notebook
-export. Node retains KV expiry hints harmlessly; sign-in/session records still
-enforce their own embedded expiry times.
+export. Node now honors valid KV expiry hints, cleans up expired entries under
+the lock (including after restart), and retains embedded sign-in/session expiry
+checks. Successful Google login callbacks can repeat the same unused hand-off
+for at most two minutes; consuming it also deletes the completed-state record.
 
 Hostinger references:
 [manual redeploy](https://www.hostinger.com/support/how-to-redeploy-a-node-js-application/),

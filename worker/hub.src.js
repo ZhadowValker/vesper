@@ -183,6 +183,46 @@ async function ownerAccess(env, token) {
 }
 
 const gAccessCache = new Map();   // short-lived Google access tokens, per person
+const googleWrites = new WeakMap();
+function googleWrite(env, action) {
+  const backing = env.RAW || env.VESPER;
+  const write = (googleWrites.get(backing) || Promise.resolve()).then(() =>
+    backing.transaction ? backing.transaction(action) : action());
+  googleWrites.set(backing, write.catch(() => {}));
+  return write;
+}
+const loginRedirect = (env, handoff) => new Response(null, {
+  status: 302, headers: { Location: `${gBase(env)}/#/signin?c=${handoff}`, 'Cache-Control': 'no-store' },
+});
+
+// Only the hand-off identifier and expiry are remembered, never Google's code/tokens.
+// The Node transaction makes claim, completion and hand-off consumption exclusive
+// across processes. The fallback queue provides the same ordering within a Worker.
+async function claimGoogleState(env, state) {
+  const completedKey = 'gdone:' + state;
+  const done = state ? await env.VESPER.get(completedKey, 'json') : null;
+  if (done) {
+    const handoff = await env.VESPER.get('login:' + done.handoff, 'json');
+    if (done.exp <= Date.now() || (handoff && handoff.exp <= Date.now())) {
+      await env.VESPER.delete(completedKey);
+      if (handoff && handoff.exp <= Date.now()) await env.VESPER.delete('login:' + done.handoff);
+      return { reason: 'expired' };
+    }
+    if (handoff) return { handoff: done.handoff };
+    await env.VESPER.delete(completedKey);
+    return { reason: 'not found' };
+  }
+  const rec = state ? await env.VESPER.get('gauth:' + state, 'json') : null;
+  if (!rec || rec.exp <= Date.now()) {
+    if (rec) await env.VESPER.delete('gauth:' + state);
+    return { reason: rec ? 'expired' : 'not found' };
+  }
+  if (rec.claimed) return { wait: true };
+  if (rec.kind === 'login') {
+    await env.VESPER.put('gauth:' + state, JSON.stringify({ ...rec, claimed: true }));
+  } else await env.VESPER.delete('gauth:' + state);
+  return { rec };
+}
 
 // A one-time sign-in address. kind: "calendar" (connect a calendar) or "login" (sign in to Vesper).
 async function gStart(env, kind = 'calendar') {
@@ -206,23 +246,36 @@ async function gCallback(request, env) {
   if (!gConfigured(env)) return gPage('Google is not set up', 'The hub has no Google settings yet.', env);
   const u = new URL(request.url);
   const state = u.searchParams.get('state') || '';
-  const rec = state ? await env.VESPER.get('gauth:' + state, 'json') : null;
-  if (!rec || rec.exp < Date.now()) {
-    console.warn(rec ? '[Google callback] sign-in record expired' : '[Google callback] sign-in record not found');
+  let status;
+  const deadline = Date.now() + 2 * 60000;
+  for (;;) {
+    status = await googleWrite(env, () => claimGoogleState(env, state));
+    if (!status.wait) break;
+    if (Date.now() >= deadline) { status = { reason: 'expired' }; break; }
+    // Do not hold the data-file lock during Google's network exchange or this wait.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (status.handoff) return loginRedirect(env, status.handoff);
+  if (status.reason) {
+    console.warn(`[Google callback] sign-in record ${status.reason}`);
     return gPage('That sign-in link expired', 'Start again from Vesper.', env);
   }
-  await env.VESPER.delete('gauth:' + state);   // a sign-in link works once
-  if (u.searchParams.get('error')) return gPage('Google sign-in was cancelled', 'Nothing was changed.', env);
-  const code = u.searchParams.get('code');
-  if (!code) return gPage('Google sign-in failed', 'No code came back.', env);
-  const { ok, tok } = await gExchange(env, code);
-  if (rec.kind === 'login') return loginDone(env, ok, tok);
-  if (!ok || !tok.refresh_token) return gPage('Google sign-in failed', 'Google did not give a long-lasting permission. Remove Vesper from myaccount.google.com/permissions and try again.', env);
-  const uenv = rec.uid === 'owner' || !rec.uid ? ownerEnv(env) : userEnv(env, rec.uid);
-  await uenv.VESPER.put('google', JSON.stringify({ refresh: tok.refresh_token, scope: tok.scope || '', at: Date.now() }));
-  await uenv.VESPER.delete('gcal');   // a new sign-in starts with the default calendar
-  gAccessCache.set('cal:' + uenv.UID, { token: tok.access_token || '', exp: Date.now() + Math.max(0, (tok.expires_in || 0) - 60) * 1000 });
-  return gPage('Google Calendar is connected', 'You can close this tab and go back to Vesper.', env);
+  const { rec } = status;
+  try {
+    if (u.searchParams.get('error')) return gPage('Google sign-in was cancelled', 'Nothing was changed.', env);
+    const code = u.searchParams.get('code');
+    if (!code) return gPage('Google sign-in failed', 'No code came back.', env);
+    const { ok, tok } = await gExchange(env, code);
+    if (rec.kind === 'login') return await googleWrite(env, () => loginDone(env, ok, tok, state));
+    if (!ok || !tok.refresh_token) return gPage('Google sign-in failed', 'Google did not give a long-lasting permission. Remove Vesper from myaccount.google.com/permissions and try again.', env);
+    const uenv = rec.uid === 'owner' || !rec.uid ? ownerEnv(env) : userEnv(env, rec.uid);
+    await uenv.VESPER.put('google', JSON.stringify({ refresh: tok.refresh_token, scope: tok.scope || '', at: Date.now() }));
+    await uenv.VESPER.delete('gcal');   // a new sign-in starts with the default calendar
+    gAccessCache.set('cal:' + uenv.UID, { token: tok.access_token || '', exp: Date.now() + Math.max(0, (tok.expires_in || 0) - 60) * 1000 });
+    return gPage('Google Calendar is connected', 'You can close this tab and go back to Vesper.', env);
+  } finally {
+    if (rec.kind === 'login') await googleWrite(env, () => env.VESPER.delete('gauth:' + state));
+  }
 }
 
 // ---- Sign in with Google ----------------------------------------------------------------
@@ -238,7 +291,7 @@ function idClaims(idToken) {
   } catch (e) { return null; }
 }
 
-async function loginDone(env, ok, tok) {
+async function loginDone(env, ok, tok, state) {
   const claims = ok ? idClaims(tok.id_token) : null;
   // The token came straight from Google over a secure connection; still make sure it is for this app and a verified address.
   if (!claims || claims.aud !== env.GOOGLE_CLIENT_ID || !claims.sub || !claims.email || claims.email_verified === false) return gPage('Google sign-in failed', 'Google did not confirm who you are. Try again.', env);
@@ -265,8 +318,10 @@ async function loginDone(env, ok, tok) {
   const token = gRand() + gRand();
   await env.VESPER.put('sess:' + (await sha(token)), JSON.stringify({ sub, email, owner, exp: Date.now() + SESSION_DAYS * 86400000 }));
   const once = gRand();
-  await env.VESPER.put('login:' + once, JSON.stringify({ token, email, owner, exp: Date.now() + 2 * 60000 }));
-  return new Response(null, { status: 302, headers: { Location: `${gBase(env)}/#/signin?c=${once}`, 'Cache-Control': 'no-store' } });
+  const exp = Date.now() + 2 * 60000;
+  await env.VESPER.put('login:' + once, JSON.stringify({ token, email, owner, exp, state }), { expirationTtl: 120 });
+  await env.VESPER.put('gdone:' + state, JSON.stringify({ handoff: once, exp }), { expirationTtl: 120 });
+  return loginRedirect(env, once);
 }
 
 // ---- Your copy in your own Google Drive (a hidden app folder only Vesper can see) -------------
@@ -869,10 +924,16 @@ export default {
       let b;
       try { b = JSON.parse(await request.text()); } catch (e) { return json(400, { error: 'invalid JSON' }, origin); }
       const key = 'login:' + String((b && b.code) || '').replace(/[^0-9a-f]/g, '');
-      const rec = await env.VESPER.get(key, 'json');
-      await env.VESPER.delete(key);   // a one-time code
-      if (!rec || rec.exp < Date.now()) return json(400, { error: 'That sign-in expired. Try again.' }, origin);
-      return json(200, { token: rec.token, email: rec.email, owner: rec.owner }, origin);
+      return googleWrite(env, async () => {
+        const rec = await env.VESPER.get(key, 'json');
+        await env.VESPER.delete(key);   // a one-time code
+        if (rec?.state) {
+          const done = await env.VESPER.get('gdone:' + rec.state, 'json');
+          if (done?.handoff === key.slice(6)) await env.VESPER.delete('gdone:' + rec.state);
+        }
+        if (!rec || rec.exp <= Date.now()) return json(400, { error: 'That sign-in expired. Try again.' }, origin);
+        return json(200, { token: rec.token, email: rec.email, owner: rec.owner }, origin);
+      });
     }
 
     const ctx = await who(env, bearer(request));

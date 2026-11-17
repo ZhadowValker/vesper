@@ -9,6 +9,7 @@ export function createFileStore(dataDir, { now = Date.now, lockTimeoutMs = 5000,
   const backups = path.join(dataDir, 'backups');
   const lock = `${file}.lock`;
   const context = new AsyncLocalStorage();
+  const expiryTimers = new Map();
   let pending = Promise.resolve();
   let mutations = Promise.resolve();
   const inTransaction = () => context.getStore()?.active === true;
@@ -87,6 +88,31 @@ export function createFileStore(dataDir, { now = Date.now, lockTimeoutMs = 5000,
     try { return JSON.parse(await fs.readFile(file, 'utf8')); }
     catch (e) { if (e.code === 'ENOENT') return {}; throw e; }
   }
+  const expiring = (value) => value && typeof value === 'object' &&
+    value.$vesperExpiry === 1 && typeof value.value === 'string' && Number.isFinite(value.expires);
+  function scheduleExpiry(key, expires, delay = Math.min(2147483647, Math.max(1, expires - now()))) {
+    const existing = expiryTimers.get(key);
+    if (existing) clearTimeout(existing.timer);
+    const timer = context.exit(() => setTimeout(() => {
+      expiryTimers.delete(key);
+      // Re-read and recheck expiry under the process lock: another server may
+      // have replaced this key since this timer was scheduled.
+      transaction(() => update(() => {})).catch(() => {
+        console.warn('[File store] expired-entry cleanup deferred');
+        scheduleExpiry(key, expires, 1000);
+      });
+    }, delay));
+    timer.unref();
+    expiryTimers.set(key, { expires, timer });
+  }
+  function refreshExpiryTimers(all) {
+    for (const [key, { timer }] of expiryTimers) {
+      if (!expiring(all[key])) { clearTimeout(timer); expiryTimers.delete(key); }
+    }
+    for (const [key, value] of Object.entries(all)) {
+      if (expiring(value) && expiryTimers.get(key)?.expires !== value.expires) scheduleExpiry(key, value.expires);
+    }
+  }
   async function atomicWrite(target, value) {
     const tmp = `${target}.${randomUUID()}.tmp`;
     try {
@@ -117,13 +143,21 @@ export function createFileStore(dataDir, { now = Date.now, lockTimeoutMs = 5000,
   async function applyChange(change) {
     const all = await readAll();
     const previous = structuredClone(all);
+    for (const [key, value] of Object.entries(all)) {
+      if (expiring(value) && value.expires <= now()) delete all[key];
+    }
     change(all);
     await fs.mkdir(dataDir, { recursive: true });
     // Before the first write of the day, keep the previous good data. On a brand-new
     // install there is no prior file, so snapshot the first value instead.
     await backup(Object.keys(previous).length ? previous : all);
     await atomicWrite(file, all);
+    refreshExpiryTimers(all);
   }
+  // Restore cleanup timers after a restart. Existing plain-string records remain
+  // unchanged; only new puts with valid expiry hints use the tagged wrapper.
+  pending = readAll().then(refreshExpiryTimers);
+  pending.catch(() => {}); // The next get/put still reports an initial read failure.
   return {
     dailyBackups: true,
     // Hub read/merge/save and named-token read/modify/write must share the lock too.
@@ -138,13 +172,25 @@ export function createFileStore(dataDir, { now = Date.now, lockTimeoutMs = 5000,
       if (!inTransaction()) await pending;
       await mutations;
       // Atomic rename means even readers in other processes see a complete file.
-      const value = (await readAll())[key];
+      const all = await readAll();
+      refreshExpiryTimers(all);
+      let value = all[key];
+      if (expiring(value)) {
+        if (value.expires <= now()) {
+          await transaction(() => update(() => {}));
+          return null;
+        }
+        value = value.value;
+      }
       return value === undefined ? null : type === 'json' ? JSON.parse(value) : value;
     },
-    // KV expiration/expirationTtl hints are deliberately ignored on Node, as before:
-    // auth records enforce their embedded exp; daily backups rotate separately.
-    // This preserves the on-disk format and cannot prematurely discard sign-in data.
-    put: (key, value, _options) => transaction(() => update((all) => { all[key] = value; })),
+    put: (key, value, options) => transaction(() => update((all) => {
+      const seconds = options?.expirationTtl ?? null;
+      const expires = seconds !== null ? now() + seconds * 1000 : options?.expiration * 1000;
+      // Invalid hints remain harmless. Non-expiring, old-format values stay strings.
+      all[key] = Number.isFinite(expires) && (seconds === null || (Number.isFinite(seconds) && seconds > 0))
+        ? { $vesperExpiry: 1, value, expires } : value;
+    })),
     delete: (key) => transaction(() => update((all) => { delete all[key]; })),
   };
 }
