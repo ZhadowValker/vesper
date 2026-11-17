@@ -24,8 +24,14 @@
   </ul>
 
   <h2>Where it lives</h2>
-  <p>Your projects, tasks and notes are saved only in a hidden app folder in your own Google Drive, which only Vesper can open. This server does not keep a copy. While you sync, it passes your data between your device and your Drive and does not store it. The server keeps only your email address, a sign-in session, and the access key Google gives it so it can reach that folder (and your calendar, if you allowed it). The person who runs this Vesper keeps their own projects on the server. Vesper does not read any other file in your Drive, and does not read your calendar events.</p>
+  <p>Your projects, tasks and notes are saved only in a hidden app folder in your own Google Drive, which only Vesper can open. This server does not keep a copy. While you sync, it passes your data between your device and your Drive and does not store it. The server keeps only your email address, a sign-in session, and the access key Google gives it so it can reach that folder (and your calendar, if you allowed it). The person who runs this Vesper is treated the same way: their projects are in their own Drive too. Vesper does not read any other file in your Drive, and does not read your calendar events.</p>
 
+  <h2>Why each Google permission is asked</h2>
+  <ul>
+    <li><b>Sign-in (email, profile):</b> to know who you are and keep your projects apart from everyone else's.</li>
+    <li><b>Google Drive, app folder only:</b> to save and load your Vesper file in a hidden folder that only Vesper can open. It cannot see your other Drive files.</li>
+    <li><b>Google Calendar:</b> only when you press Add to calendar, to create or update the events you ask for, in the calendar you choose. Vesper also lists your calendars so you can choose one. You can leave this box unticked on Google's screen and still use Vesper.</li>
+  </ul>
   <h2>What Vesper does not do</h2>
   <ul>
     <li>It does not sell or share your data, and shows no ads.</li>
@@ -33,6 +39,10 @@
     <li>If you use the AI helper with your own key, the text of the note you ask about goes to the AI service you chose. Nothing is sent unless you press an AI button.</li>
   </ul>
 
+  <h2>How your information is protected</h2>
+  <p>Vesper is only served over HTTPS. Your projects are not kept on this server. The access keys the server holds are kept in private server storage that no other person can open, and are removed when you delete your data or remove Vesper at Google. Sign-in sessions end by themselves after 90 days.</p>
+  <h2>Google user data</h2>
+  <p>Vesper's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes">Google API Services User Data Policy</a>, including the Limited Use requirements. Data from Google is used only to provide the features described on this page. It is not used for advertising, not sold, and not read by people, except where you ask for support or the law requires it.</p>
   <h2>Your choices</h2>
   <ul>
     <li><b>Delete my data</b> in the Sync dialog removes your Vesper file from your Google Drive and your sign-in details from the server, and signs you out.</li>
