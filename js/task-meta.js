@@ -4,6 +4,18 @@ export const validDue = (value) => typeof value === 'string' && /^[0-9]{4}-[0-9]
   value.slice(0, 4) !== '0000' && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) &&
   new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 
+// Work status of a Project or simple Task. Only discuss/recurring are stored (field status);
+// the rest come from finished/done and parked.
+export const WORK_STATUSES = ['active', 'parked', 'discuss', 'recurring', 'finished'];
+export const STORED_STATUSES = ['discuss', 'recurring'];
+
+// Derived, never stored: finished/done > parked > stored status > active.
+export function workStatus(item) {
+  if (item.finished || item.done === true) return 'finished';
+  if (item.parked === true) return 'parked';
+  return STORED_STATUSES.includes(item.status) ? item.status : 'active';
+}
+
 export function setTaskMeta(deck, patch) {
   const has = (key) => Object.prototype.hasOwnProperty.call(patch, key);
   if (!has('priority') && !has('due')) return 'Provide priority or due; use null to clear a value.';

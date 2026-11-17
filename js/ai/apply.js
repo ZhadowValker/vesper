@@ -1,4 +1,4 @@
-import { finishTask } from '../task-status.js';
+import { finishTask, unpassSelahsFrom } from '../task-status.js';
 import { setTaskMeta, setProjectMeta } from '../task-meta.js';
 import { reorderItems, appendOrder } from '../organize.js';
 // Applies the assistant's actions to task data. It works on any "db" with the same small
@@ -25,6 +25,7 @@ function slideLabel(slide, step) {
 export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
   const changes = [];
   const skipped = [];
+  const warnings = [];
   const touched = new Map();   // deck id -> highest slide index touched
   const made = { projects: {}, decks: {} };
   let focus = focusId;
@@ -138,6 +139,13 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       if (stage.id !== next.id) { skipped.push(`Pass ${next.name} first, then ${stage.name}.`); continue; }
       const answer = String(a.answer || '').trim().slice(0, MAX_TEXT);
       if (answer.length < 3) { skipped.push(`Passing the ${stage.name} Selah needs the answer to: ${stage.selah}`); continue; }
+      // Selah gating: warn by default about steps with neither a note nor a tick; strict refuses.
+      const open = [];
+      for (const sub of stage.subs) sub.steps.forEach((step, i) => {
+        if (!String(deck.notes?.[`${stage.id}.${sub.id}#${i}`] || '').trim() && !deck.ticks?.[tickKey(stage, sub, i)]) open.push(`${sub.name} › ${step}`);
+      });
+      if (open.length && a.strict === true) { skipped.push(`Not passing the ${stage.name} Selah (strict): ${open.length} step${open.length === 1 ? '' : 's'} empty and unticked: ${open.join('; ')}.`); continue; }
+      if (open.length) warnings.push(`${stage.name} Selah passed with ${open.length} step${open.length === 1 ? '' : 's'} empty and unticked: ${open.join('; ')}.`);
       const key = `${stage.id}.selah`;
       deck.notes[key] = `${answer}${(deck.notes[key] || '').trim() ? '\n' + deck.notes[key].trim() : ''}`;
       deck.selah[stage.id] = true;
@@ -154,20 +162,7 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       const stage = STAGES.find((st) => st.id === norm(a.stage) || norm(st.name) === norm(a.stage));
       if (!stage) { skipped.push(`There is no stage "${a.stage}" to go back to.`); continue; }
       const from = STAGES.indexOf(stage);
-      for (let i = from; i < STAGES.length; i++) {
-        const id = STAGES[i].id;
-        // Archive the answer of each Selah being un-passed, so the next pass starts clean
-        // but the earlier answer is not lost. "#" keeps it out of slide notes and steps.
-        const key = `${id}.selah`;
-        const answer = String(deck.notes[key] || '').trim();
-        if (deck.selah[id] && answer) {
-          const archive = `${key}#pass${deck.passes || 1}`;
-          const kept = String(deck.notes[archive] || '').trim();
-          deck.notes[archive] = kept ? `${kept}\n${answer}` : answer;
-          delete deck.notes[key];
-        }
-        delete deck.selah[id]; if (deck.selahBy) delete deck.selahBy[id];
-      }
+      unpassSelahsFrom(deck, from);
       deck.loops += 1; deck.passes += 1; deck.finished = null;
       deck.slide = firstSlideOf(stage.id);
       db.save(deck);
@@ -244,5 +239,5 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
     deck.reached = Math.max(deck.reached, deck.slide);
     db.save(deck);
   }
-  return { changes, skipped, focus };
+  return { changes, skipped, focus, warnings };
 }

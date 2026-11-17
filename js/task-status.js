@@ -29,3 +29,23 @@ export function taskCheck(deck) {
   if (ahead.length) notes.push(`Current slide is at or before passed Selahs: ${ahead.map((s) => s.name).join(', ')}`);
   return notes.join('; ');
 }
+
+// Un-pass the Selahs from one stage on (loop back). Each passed Selah's answer is archived to
+// "<stage>.selah#pass<N>" so the next pass starts clean but the earlier answer is kept.
+// "#" keeps archived answers out of slide notes and steps. Shared by the app and the connector.
+export function unpassSelahsFrom(deck, fromIndex) {
+  deck.notes ||= {};
+  for (let i = Math.max(0, fromIndex); i < STAGES.length; i++) {
+    const id = STAGES[i].id;
+    const key = `${id}.selah`;
+    const answer = String(deck.notes[key] || '').trim();
+    if (deck.selah?.[id] && answer) {
+      const archive = `${key}#pass${deck.passes || 1}`;
+      const kept = String(deck.notes[archive] || '').trim();
+      deck.notes[archive] = kept ? `${kept}\n${answer}` : answer;
+      delete deck.notes[key];
+    }
+    if (deck.selah) delete deck.selah[id];
+    if (deck.selahBy) delete deck.selahBy[id];
+  }
+}

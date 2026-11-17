@@ -1,4 +1,5 @@
 import { finishInApp } from './task-actions.js';
+import { unpassSelahsFrom } from '../task-status.js';
 import { store } from '../store.js';
 import {
   CONFIG, STAGES, SLIDES, firstSlideOf, selahIndex, tickKey, stagePending, subDone, slideIndex, normalizedSlide, slideFor, slidesFor, adjacentSlide, isQuick, quickKey,
@@ -177,7 +178,7 @@ export function slideView(deckId, nStr) {
         return;
       }
       const from = STAGES.findIndex((s) => s.id === target);
-      for (let i = from; i < STAGES.length; i++) delete deck.selah[STAGES[i].id];
+      unpassSelahsFrom(deck, from);
       deck.loops += 1;
       deck.passes += 1;
       deck.finished = null;
