@@ -49,3 +49,16 @@ store.reset(); mem.delete('vesper.dataowner');
 assert.equal(D.claimDevice(store, A), 'same');
 assert.equal(D.getDataOwner(), A);
 console.log('data-owner tests passed');
+
+// Sign-out clears everything personal from the device, and keeps the theme.
+{
+  store.reset(); mem.clear();
+  const t2 = store.snapshot(); t2.projects.push({ id: 'ps', title: 'secret' }); store.applyMerged(t2);
+  for (const [k, v] of Object.entries({ 'vesper.ai': '{"key":"sk-x"}', 'vesper.chat': '[1]', 'vesper.sync': '{"token":"t"}', 'vesper.stash': '{}', 'vesper.pre-v2': '{}', 'vesper.dataowner': 'a@x.com', 'vesper.theme.v1': 'dark' })) localStorage.setItem(k, v);
+  D.clearDeviceData(store);
+  assert.equal(store.snapshot().projects.length, 0, 'projects gone');
+  for (const k of ['vesper.ai', 'vesper.chat', 'vesper.sync', 'vesper.stash', 'vesper.pre-v2', 'vesper.dataowner']) assert.equal(localStorage.getItem(k), null, k + ' removed');
+  assert.equal(localStorage.getItem('vesper.theme.v1'), 'dark', 'theme is kept');
+  assert.ok(!JSON.stringify([...mem.values()]).includes('secret'), 'no project text left in browser storage');
+  console.log('sign-out clear tests passed');
+}

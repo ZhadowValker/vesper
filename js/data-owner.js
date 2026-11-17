@@ -50,3 +50,11 @@ export function mayUpload(id) {
   const owner = getDataOwner();
   return !id || !owner || owner === id;
 }
+
+// Everything personal the browser keeps for Vesper (projects, old copies, AI key and chats, sign-in). Theme and
+// the sign-in screen choice are not personal and stay.
+const PERSONAL_KEYS = ['vesper.v1', 'vesper.pre-v2', 'vesper.stash', 'vesper.dataowner', 'vesper.ai', 'vesper.chat', 'vesper.task-list.v1', 'vesper.sync'];
+export function clearDeviceData(store) {
+  try { store.reset(); } catch (e) { /* nothing to reset */ }
+  for (const k of PERSONAL_KEYS) { try { localStorage.removeItem(k); } catch (e) { /* storage blocked */ } }
+}

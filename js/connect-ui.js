@@ -2,6 +2,7 @@ import { tokenManagerHTML, bindTokenManager } from './token-ui.js';
 // Dialogs for the hub (sync), exporting a task or project, and adding to a calendar.
 import { store } from './store.js';
 import { esc, confirmBox } from './util.js';
+import { clearDeviceData } from './data-owner.js';
 import { rerender } from './nav.js';
 import { getSync, saveSync, syncReady, syncNow, syncStatus, hubCall, googleSignIn, signOut } from './sync.js';
 import { taskMarkdown, projectMarkdown, googleCalendarLink, icsFile, calendarSuggestion } from './export.js';
@@ -186,8 +187,17 @@ export function syncDialog({ onChange } = {}) {
       if (r && r.ok) { await syncNow({ force: true }); say('Restored from Google Drive.'); rerender(); }
       else say((r && r.data && r.data.error) || 'Could not restore.', true);
     } else if (act === 'signout') {
+      // Save the latest changes to Drive first, then remove everything from this device so the next person sees nothing.
+      say('Saving your latest changes to Google Drive...');
+      const st = await syncNow({ force: true });
+      if (st.state !== 'ok') {
+        const yes = await confirmBox('Could not save to Google Drive', 'Your latest changes could not be saved, so signing out now will lose them. Sign out and remove everything from this device anyway?', { ok: 'Sign out and remove' });
+        if (!yes) { say('Not signed out.', true); return; }
+      }
       await signOut();
-      done();
+      clearDeviceData(store);
+      location.assign('#/');
+      location.reload();
     } else if (act === 'delete') {
       const yes = await confirmBox('Delete my data?', 'This removes your data from the hub and your Vesper copy in Google Drive, and signs you out. The projects on this device stay here.', { ok: 'Delete my data' });
       if (!yes) return;
