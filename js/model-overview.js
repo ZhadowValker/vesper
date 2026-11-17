@@ -1,13 +1,16 @@
 import { orderedItems } from './organize.js';
 import { validDue, PRIORITIES } from './task-meta.js';
-import { slideFor } from './framework.js';
+import { slideFor, STAGES } from './framework.js';
 import { taskCheck } from './task-status.js';
 import { progress } from './ai/steps.js';
 import { resolveRecord } from './model-actions.js';
 
 export function modelOverview(state, filters = {}) {
   if (filters.kind && !['project', 'task'].includes(filters.kind)) throw new Error('kind must be project or task.');
-  if (filters.stage && !['vision', 'research', 'plan', 'execute', 'review'].includes(filters.stage)) throw new Error('Unknown stage.');
+  // Stage ids and names match case-insensitively, like vesper_loop_back.
+  const stageRef = filters.stage === undefined || filters.stage === null || filters.stage === '' ? null : String(filters.stage).trim().toLowerCase();
+  const stageMatch = stageRef === null ? null : STAGES.find((st) => st.id === stageRef || st.name.toLowerCase() === stageRef);
+  if (stageRef !== null && !stageMatch) throw new Error('Unknown stage.');
   if (filters.priority && !['none', ...PRIORITIES].includes(filters.priority)) throw new Error('Invalid priority.');
   if (filters.status && !['active', 'finished', 'not started'].includes(filters.status)) throw new Error('Invalid status.');
   if (filters.dueBefore && !validDue(filters.dueBefore)) throw new Error('dueBefore must be a calendar date.');
@@ -29,7 +32,7 @@ export function modelOverview(state, filters = {}) {
     const started = kind === 'project' ? !!item.reached : true;
     if (area && area.id !== areaId) continue;
     if (parent && !(kind === 'project' ? item.id === parent.id : containing?.id === parent.id)) continue;
-    if (filters.stage && stage !== filters.stage) continue;
+    if (stageMatch && stage !== stageMatch.id) continue;
     if (filters.status === 'finished' && !finished || filters.status === 'active' && (finished || !started) || filters.status === 'not started' && (finished || started)) continue;
     if (filters.priority && (filters.priority === 'none' ? !!item.priority : item.priority !== filters.priority)) continue;
     if (filters.dueBefore && !(item.due && item.due < filters.dueBefore)) continue;

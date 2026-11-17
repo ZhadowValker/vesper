@@ -101,9 +101,23 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
         continue;
       }
       const text = String(a.text || '').trim().slice(0, MAX_TEXT);
-      if (!text) { skipped.push(`Empty text for ${slide.sub.name}.`); continue; }
       const nk = step === null ? slide.key : `${slide.key}#${step}`;
       const old = (deck.notes[nk] || '').trim();
+      // Clearing: clear: true, or empty text with mode "replace". Clearing a step note also
+      // unticks the step (the mirror of filling it), unless tick: true is passed.
+      if (a.clear === true || (a.mode === 'replace' && !text)) {
+        if (a.clear === true && text) { skipped.push(`Give text or clear: true for ${slide.sub.name}, not both.`); continue; }
+        const tk = step === null ? null : tickKey(slide.stage, slide.sub, step);
+        const untick = tk !== null && a.tick !== true && !!deck.ticks[tk];
+        if (!Object.hasOwn(deck.notes, nk) && !untick) continue;
+        delete deck.notes[nk];
+        if (untick) deck.ticks[tk] = false;
+        db.save(deck);
+        focus = deck.id;
+        changes.push({ text: `Cleared ${slideLabel(slide, step)}`, href: `#/d/${deck.id}/s/${idx}` });
+        continue;
+      }
+      if (!text) { skipped.push(`Empty text for ${slide.sub.name}. To clear a note, pass clear: true (or empty text with mode "replace").`); continue; }
       let next = text;
       if (old) {
         if (a.mode === 'replace') next = text;
@@ -140,7 +154,20 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       const stage = STAGES.find((st) => st.id === norm(a.stage) || norm(st.name) === norm(a.stage));
       if (!stage) { skipped.push(`There is no stage "${a.stage}" to go back to.`); continue; }
       const from = STAGES.indexOf(stage);
-      for (let i = from; i < STAGES.length; i++) { delete deck.selah[STAGES[i].id]; if (deck.selahBy) delete deck.selahBy[STAGES[i].id]; }
+      for (let i = from; i < STAGES.length; i++) {
+        const id = STAGES[i].id;
+        // Archive the answer of each Selah being un-passed, so the next pass starts clean
+        // but the earlier answer is not lost. "#" keeps it out of slide notes and steps.
+        const key = `${id}.selah`;
+        const answer = String(deck.notes[key] || '').trim();
+        if (deck.selah[id] && answer) {
+          const archive = `${key}#pass${deck.passes || 1}`;
+          const kept = String(deck.notes[archive] || '').trim();
+          deck.notes[archive] = kept ? `${kept}\n${answer}` : answer;
+          delete deck.notes[key];
+        }
+        delete deck.selah[id]; if (deck.selahBy) delete deck.selahBy[id];
+      }
       deck.loops += 1; deck.passes += 1; deck.finished = null;
       deck.slide = firstSlideOf(stage.id);
       db.save(deck);
@@ -173,13 +200,13 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       changes.push({ text: `Reordered ${a.kind}`, href: project ? `#/p/${project.id}` : '#/' });
     } else if (type === 'set_task') {
       const deck = findTask(a.task);
-      if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
+      if (!deck) { skipped.push(`Could not find the project "${a.task || ''}".`); continue; }
       if (a.mode !== undefined && a.mode !== 'full') { skipped.push('Quick mode was removed.'); continue; }
       const error = Object.hasOwn(a, 'priority') || Object.hasOwn(a, 'due') || Object.hasOwn(a, 'parked') || a.mode === undefined ? setProjectMeta(deck, a) : null;
       if (error) { skipped.push(error); continue; }
       if (a.mode !== undefined) setTaskMode(deck, a.mode);
       db.save(deck);
-      changes.push({ text: `Updated task details for "${deck.title}"`, href: `#/d/${deck.id}` });
+      changes.push({ text: `Updated project details for "${deck.title}"`, href: `#/d/${deck.id}` });
     } else if (type === 'finish' || type === 'reopen') {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }

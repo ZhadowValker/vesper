@@ -544,12 +544,16 @@ function gAddMinutes(local, minutes) {
 }
 
 // Creates the event, or updates it when the same key (task + kind) was scheduled before, so nothing doubles up.
-async function gEvent(env, { key, title, details, start, minutes }) {
+// With no title, a moved event keeps its current title and a new one gets fallbackTitle.
+async function gEvent(env, { key, title, fallbackTitle = 'Vesper', details, start, minutes }) {
   if (!G_LOCAL.test(String(start || ''))) throw new Error('start must look like 2026-10-28T18:00 (local time).');
   const mins = Math.max(5, Math.min(1440, parseInt(minutes, 10) || 30));
   const startAt = start.length === 16 ? start + ':00' : start;
   const tz = gTz(env);
-  const body = JSON.stringify({ summary: String(title || 'Vesper').slice(0, 200), description: String(details || '').slice(0, 4000), start: { dateTime: startAt, timeZone: tz }, end: { dateTime: gAddMinutes(startAt, mins), timeZone: tz } });
+  const given = title ? String(title).slice(0, 200) : '';
+  const fields = { description: String(details || '').slice(0, 4000), start: { dateTime: startAt, timeZone: tz }, end: { dateTime: gAddMinutes(startAt, mins), timeZone: tz } };
+  const newBody = JSON.stringify({ summary: given || String(fallbackTitle || 'Vesper').slice(0, 200), ...fields });
+  const moveBody = given ? newBody : JSON.stringify(fields);
   const access = await gAccessToken(env);
   const head = { Authorization: 'Bearer ' + access, 'Content-Type': 'application/json' };
   const cal = await gCal(env);
@@ -558,15 +562,15 @@ async function gEvent(env, { key, title, details, start, minutes }) {
   let res = null;
   let moved = false;
   if (map[key]) {
-    res = await fetch(`${gApi(cal.id)}/${encodeURIComponent(map[key])}`, { method: 'PATCH', headers: head, body });
+    res = await fetch(`${gApi(cal.id)}/${encodeURIComponent(map[key])}`, { method: 'PATCH', headers: head, body: moveBody });
     if (res.status === 404 || res.status === 410) res = null; else moved = true;
   }
-  if (!res) res = await fetch(gApi(cal.id), { method: 'POST', headers: head, body });
+  if (!res) res = await fetch(gApi(cal.id), { method: 'POST', headers: head, body: newBody });
   const ev = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? 'Google refused the calendar change. Connect Google Calendar again.' : 'Google Calendar could not save the event.');
   map[key] = ev.id;
   await env.VESPER.put('gevents', JSON.stringify(map));
-  return { id: ev.id, link: ev.htmlLink || '', moved };
+  return { id: ev.id, link: ev.htmlLink || '', moved, title: ev.summary || (moved ? given : JSON.parse(newBody).summary) };
 }
 
 async function googleRoutes(request, env, origin, path) {
@@ -642,6 +646,9 @@ function taskSummary(state, d) {
   return { id: d.id, title: d.title, mode: isQuick(d) ? 'quick' : 'full', priority: d.priority || null, due: d.due || null, parked: d.parked === true, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
 }
 
+// Tool output never carries internal sync metadata such as _changed.
+const publicItem = (item) => Object.fromEntries(Object.entries(item).filter(([k]) => !k.startsWith('_')));
+
 const obj = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
 
@@ -657,7 +664,7 @@ const LEGACY_TOOLS = [
   { name: 'vesper_rename', description: 'Rename exactly one task or project.', inputSchema: obj({ task: str('Task id or exact title'), project: str('Project id or exact name'), name: str('New name, 1–80 characters') }, ['name']) },
   { name: 'vesper_move_task', description: 'Move a task into another project.', inputSchema: obj({ task: str('Task id or exact title'), project: str('Destination project id or exact name') }, ['task', 'project']) },
   { name: 'vesper_reorder', description: 'Reorder projects or tasks in one project. Provide every id in order, or one item id and a 1-based position.', inputSchema: obj({ kind: { type: 'string', enum: ['projects', 'tasks'] }, project: str('Required for tasks'), order: { type: 'array', items: { type: 'string' } }, item: str('Item id to move'), position: { type: 'integer', minimum: 1 } }, ['kind']) },
-  { name: 'vesper_set_note', description: 'Write a step or slide note. For Quick stages use <stage>.quick and omit step (or use null). Filling a Full step also ticks it. Existing text is kept unless mode is "replace".', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why or vision.quick'), step: { type: ['integer', 'null'], description: 'Full step number. Omit or use null for slide/Quick notes.' }, text: str('The note, in the person\'s words, short'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked' } }, ['task', 'slide', 'text']) },
+  { name: 'vesper_set_note', description: 'Write a step or slide note. For Quick stages use <stage>.quick and omit step (or use null). Filling a Full step also ticks it. Existing text is kept unless mode is "replace".', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why or vision.quick'), step: { type: ['integer', 'null'], description: 'Full step number. Omit or use null for slide/Quick notes.' }, text: str('The note, in the person\'s words, short. Omit (or empty with mode "replace") together with clear to remove the note.'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked. When clearing, a step is unticked unless tick is true.' }, clear: { type: 'boolean', description: 'true to remove the note (and untick the step)' } }, ['task', 'slide']) },
   { name: 'vesper_schedule', description: 'Put a task on the person\'s Google Calendar (once they have connected it in Vesper). Use kind "work" for a work block and "selah" for the pause at the end of a stage. Scheduling the same task and kind again moves the existing event. Scheduling a Selah does not pass it; use vesper_pass_selah for that.', inputSchema: obj({ task: str('Task id or exact title'), when: str('Local start time like 2026-10-28T18:00'), minutes: { type: 'integer', description: 'Length, default 30' }, kind: { type: 'string', enum: ['work', 'selah'] }, title: str('Optional event title') }, ['task', 'when']) },
   { name: 'vesper_tick', description: 'Tick or untick one step.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer' }, done: { type: 'boolean' } }, ['task', 'slide', 'step']) },
   { name: 'vesper_pass_selah', description: 'Pass the next Selah of a task (stages go in order) and move the task on. Selah is the pause that ends each stage, with one question per stage (see vesper_framework). Give the answer to that question in the person\'s words; it is saved on the Selah slide and the stage is marked "passed by Claude". Only do this when the person has asked you to drive the task forward or you have asked and they agreed.', inputSchema: obj({ task: str('Task id or exact title'), answer: str('The answer to the stage pause question'), stage: str('Optional stage id; must be the next unpassed one') }, ['task', 'answer']) },
@@ -675,8 +682,8 @@ const TOOLS = [
     const props = { ...t.inputSchema.properties };
     if (props.task) { props.project = str('Full Vesper Project id or unique title'); props.task = str('Deprecated alias for project'); }
     if (t.name === 'vesper_set_task') { delete props.mode; props.parked = { type: 'boolean', description: 'Mark or unmark this Project as parked' }; }
-    return { ...t, description: t.name === 'vesper_set_note' ? 'Write a Full Project step/slide note. Retained Quick notes are read-only. Filling a step also ticks it; text appends unless mode=replace.' :
-      t.name === 'vesper_next_questions' ? 'Next empty Full Project step questions. Never interviews simple Tasks.' :
+    return { ...t, description: t.name === 'vesper_set_note' ? 'Write or clear a Full Project step/slide note. Retained Quick notes are read-only. Filling a step also ticks it; text appends unless mode=replace. To clear, pass clear:true (or empty text with mode=replace); clearing a step also unticks it unless tick:true.' :
+      t.name === 'vesper_next_questions' ? 'Next empty, unticked Full Project step questions, starting at the current stage (stages whose Selah is passed are skipped). Returns nothing for finished Projects. Never interviews simple Tasks.' :
       `Full Vesper Projects (27 slides, 34 steps). ${t.description.replaceAll('task', 'project')}`,
       inputSchema: obj(props, t.inputSchema.required.filter((k) => k !== 'task' && k !== 'project')) };
   }),
@@ -725,7 +732,7 @@ async function callTool(env, name, a) {
     if (name === 'vesper_rename' && a.task && !a.project) { action.project = a.task; delete action.task; }
     const out = applyModelActions([action], { db, by: 'claude' });
     if (out.changes.length) await saveState(env, state);
-    return text({ changed: out.changes.map((c) => c.text), ids: out.changes.map((c) => c.id), notApplied: out.skipped });
+    return text({ changed: out.changes.map((c) => c.text), ids: out.changes.flatMap((c) => c.ids || (c.id ? [c.id] : [])), notApplied: out.skipped });
   }
   const aliases = { vesper_get_project: 'vesper_get_task', vesper_set_project: 'vesper_set_task' };
   const flowName = aliases[name] || name;
@@ -734,7 +741,7 @@ async function callTool(env, name, a) {
   if (!result.isError && p && ['vesper_get_task', 'vesper_finish'].includes(flowName)) {
     const value = JSON.parse(result.content[0].text);
     value.openTasks = db.tasksAt('project', p.id).filter((t) => !t.done).length;
-    if (flowName === 'vesper_get_task') { value.area = db.area(p.areaId)?.name; value.tasks = db.tasksAt('project', p.id); }
+    if (flowName === 'vesper_get_task') { value.area = db.area(p.areaId)?.name; value.tasks = db.tasksAt('project', p.id).map(publicItem); }
     return text(value);
   }
   return result;
@@ -767,12 +774,19 @@ async function callLegacyTool(env, name, a) {
     if (!d) return fail(`No task found for "${a.task}". Use vesper_overview to see the ids.`);
     if (name === 'vesper_next_questions') {
       const n = Math.max(1, Math.min(20, parseInt(a.limit, 10) || 5));
-      return text({ ...taskSummary(state, d), next: emptySteps(d).slice(0, n).map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, question: s.question })), reminder: 'When a stage is filled, ask the person the stage Selah question (or, if they asked you to drive the task, answer it with them and call vesper_pass_selah).' });
+      const summary = taskSummary(state, d);
+      if (d.finished) return text({ ...summary, next: [], reminder: 'This is finished; there is nothing to ask. Reopen it with vesper_finish (reopen: true) or loop back with vesper_loop_back first.' });
+      const open = STAGES.find((st) => !d.selah?.[st.id]);
+      const next = nextQuestionSteps(d).slice(0, n).map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, question: s.question }));
+      return text({ ...summary, currentStage: open ? open.name : null, next, reminder: !open ? 'Every Selah is passed. Finish it with vesper_finish, or loop back with vesper_loop_back.' :
+        next.length ? 'When a stage is filled, ask the person the stage Selah question (or, if they asked you to drive the task, answer it with them and call vesper_pass_selah).' :
+        `${open.name} has no empty unticked steps left. Ask the ${open.name} Selah question: ${open.selah}` });
     }
     return text({
       ...taskSummary(state, d),
       steps: allSteps(d).map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, note: d.notes[s.key] || '', ticked: isQuick(d) ? filled(d, s.key) : !!d.ticks[tickKey(s.slide.stage, s.slide.sub, s.step)] })),
       slideNotes: Object.fromEntries(Object.entries(d.notes).filter(([k, v]) => !k.includes('#') && String(v).trim())),
+      ...(() => { const old = Object.entries(d.notes).filter(([k, v]) => /\.selah#pass\d+$/.test(k) && String(v).trim()); return old.length ? { selahArchive: Object.fromEntries(old) } : {}; })(),
     });
   }
   if (name === 'vesper_create_project') return run([{ type: 'create_project', name: a.name }]);
@@ -784,7 +798,7 @@ async function callLegacyTool(env, name, a) {
   if (name === 'vesper_set_note') {
     const d = findTask(state, a.task);
     if (!d) return fail(`No task found for "${a.task}".`);
-    return run([{ type: 'set_note', task: d.id, slide: a.slide, step: a.step, text: a.text, mode: a.mode, tick: a.tick }]);
+    return run([{ type: 'set_note', task: d.id, slide: a.slide, step: a.step, text: a.text, mode: a.mode, tick: a.tick, clear: a.clear }]);
   }
   if (name === 'vesper_tick') {
     const d = findTask(state, a.task);
@@ -806,11 +820,13 @@ async function callLegacyTool(env, name, a) {
     const kind = a.kind === 'selah' ? 'selah' : 'work';
     const stage = slideFor(d)?.stage || STAGES[0];
     const base = gBase(env);
-    const title = a.title || (kind === 'selah' ? `Selah: ${d.title} (${stage.name})` : `${d.title}: ${whereIs(d)}`);
+    // No title given: a new event gets the default title, a moved event keeps its current one.
+    const title = typeof a.title === 'string' && a.title.trim() ? a.title.trim() : undefined;
+    const fallbackTitle = kind === 'selah' ? `Selah: ${d.title} (${stage.name})` : `${d.title}: ${whereIs(d)}`;
     const details = `Vesper task "${d.title}".${kind === 'selah' ? ` Pause and ask: ${stage.selah}` : ''}\n${base}/#/d/${d.id}`;
     try {
-      const out = await gEvent(env, { key: `${d.id}:${kind}`, title, details, start: a.when, minutes: a.minutes });
-      return text({ scheduled: title, when: a.when, link: out.link });
+      const out = await gEvent(env, { key: `${d.id}:${kind}`, title, fallbackTitle, details, start: a.when, minutes: a.minutes });
+      return text({ scheduled: out.title || '(existing title kept)', when: a.when, link: out.link, moved: out.moved });
     } catch (e) { return fail(e.message); }
   }
   return fail(`Unknown tool "${name}".`);
