@@ -1628,5 +1628,187 @@ await test('fixes 2026-11-17: reorder ids and set_project wording (bug 7)', asyn
   assert.match(missing.notApplied[0], /^Could not find the project "No such project"/);
 });
 
+// ---- Planning tools (enhancements 2026-11-17) ----
+const plan = async (name, args) => { const r = await toolV2(name, args); assert.ok(!r.isError, r.content?.[0]?.text); return txt(r); };
+const kolkataToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const dayPlus = (n) => { const [y, m, d] = kolkataToday.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+
+await test('enh: set_stage moves the slide without touching Selahs and guards conflicts', async () => {
+  const area = (await plan('vesper_create_area', { name: 'Stage area' })).ids[0];
+  const p = (await plan('vesper_create_project', { area, title: 'Stage flow' })).ids[0];
+  await plan('vesper_pass_selah', { project: p, answer: 'Clear in two sentences.' });
+  // Make a live-style mismatch: slide back on Vision although Vision is passed.
+  let r = await plan('vesper_set_stage', { project: p, stage: 'Vision' });
+  assert.equal(r.changed.length, 0); assert.match(r.notApplied[0], /Vision Selah is already passed/);
+  r = await plan('vesper_set_stage', { project: p, stage: 'execute' });
+  assert.match(r.notApplied[0], /past the open Research Selah/);
+  r = await plan('vesper_set_stage', { project: p, stage: 'vision', force: true, reason: 'Re-reading the goal' });
+  assert.match(r.changed[0], /to vision\.why \(forced: Re-reading the goal\)/);
+  let d = await plan('vesper_get_project', { project: p });
+  assert.deepEqual(d.selahPassed, ['Vision']); assert.equal(d.slideNotes['vision.selah'], 'Clear in two sentences.');
+  assert.match(d.check, /before passed Selahs: Vision/);
+  // No stage: go to the open stage, which fixes the mismatch.
+  r = await plan('vesper_set_stage', { project: p });
+  assert.match(r.changed[0], /to research\.questions/); assert.equal(r.taskCheck, null);
+  r = await plan('vesper_set_stage', { project: p, slide: 'research.selah' });
+  assert.match(r.changed[0], /to research\.selah/);
+  assert.match((await plan('vesper_set_stage', { project: p, slide: 'nope.x' })).notApplied[0], /no slide/);
+  assert.match((await plan('vesper_set_stage', { project: p, stage: 'plan', force: true })).notApplied[0], /reason/);
+  d = await plan('vesper_get_project', { project: p });
+  assert.equal(d.check, undefined); assert.deepEqual(d.selahPassed, ['Vision']);
+});
+
+await test('enh: set_status, workStatus everywhere and title-prefix migration (dry run, then apply)', async () => {
+  const area = (await plan('vesper_create_area', { name: 'Status area' })).ids[0];
+  const p = (await plan('vesper_create_project', { area, title: 'Discuss · Roof plan' })).ids[0];
+  const q = (await plan('vesper_create_project', { area, title: 'Done · Old flow' })).ids[0];
+  const t = (await plan('vesper_create_task', { area, title: 'Recurring: Weekly review' })).ids[0];
+  const u = (await plan('vesper_create_task', { area, title: 'P1 · Done · Pay bill' })).ids[0];
+  const plain = (await plan('vesper_create_task', { area, title: 'Plain task' })).ids[0];
+  const dry = await plan('vesper_migrate_title_prefixes', {});
+  assert.equal(dry.dryRun, true);
+  const byId = Object.fromEntries(dry.changed.map((c) => [c.id, c]));
+  assert.deepEqual([byId[p].title, byId[p].set], ['Roof plan', ['status discuss']]);
+  assert.deepEqual([byId[t].title, byId[t].set], ['Weekly review', ['status recurring']]);
+  assert.deepEqual([byId[u].title, byId[u].set], ['Pay bill', ['priority P1', 'done']]);
+  assert.ok(!byId[plain]);
+  assert.ok(dry.notApplied.some((x) => x.includes(q) && /Selahs not passed/.test(x)));
+  // Dry run saved nothing.
+  assert.equal((await plan('vesper_get_project', { project: p })).title, 'Discuss · Roof plan');
+  const applied = await plan('vesper_migrate_title_prefixes', { apply: true });
+  assert.equal(applied.dryRun, false); assert.equal(applied.changed.length, dry.changed.length);
+  const rows = await plan('vesper_overview', { area, limit: 50 });
+  const row = (id) => rows.find((r) => r.id === id);
+  assert.deepEqual([row(p).title, row(p).workStatus], ['Roof plan', 'discuss']);
+  assert.deepEqual([row(t).title, row(t).workStatus], ['Weekly review', 'recurring']);
+  assert.deepEqual([row(u).title, row(u).priority, row(u).workStatus, row(u).done], ['Pay bill', 'P1', 'finished', true]);
+  assert.equal(row(q).title, 'Done · Old flow');
+  assert.ok(rows.every((r) => 'priority' in r && 'due' in r && 'workStatus' in r && 'parked' in r && typeof r.updated === 'string'));
+  // set_status
+  assert.match((await plan('vesper_set_status', { project: p, status: 'parked' })).changed[0], /to parked/);
+  assert.equal((await plan('vesper_get_project', { project: p })).workStatus, 'parked');
+  await plan('vesper_set_status', { project: p, status: 'active' });
+  const d = await plan('vesper_get_project', { project: p });
+  assert.deepEqual([d.workStatus, d.parked], ['active', false]);
+  assert.match((await plan('vesper_set_status', { project: p, status: 'finished' })).notApplied[0], /vesper_finish/);
+  assert.match((await plan('vesper_set_status', { task: t, status: 'parked' })).notApplied[0], /cannot be parked/);
+  await plan('vesper_set_status', { task: t, status: 'finished' });
+  assert.equal((await plan('vesper_overview', { area, workStatus: 'finished', kind: 'task' })).some((r) => r.id === t), true);
+  assert.equal((await toolV2('vesper_set_status', { project: p, task: t, status: 'active' })).isError, true);
+  // Status survives sync as an ordinary field.
+  await plan('vesper_set_status', { project: p, status: 'recurring' });
+  const synced = await (await call('/sync', { headers: app })).json();
+  assert.equal(synced.state.decks.find((x) => x.id === p).status, 'recurring');
+});
+
+await test('enh: pass_selah warns about empty, unticked steps; strict refuses', async () => {
+  const area = (await plan('vesper_create_area', { name: 'Gate area' })).ids[0];
+  const p = (await plan('vesper_create_project', { area, title: 'Gate flow' })).ids[0];
+  for (const [slide, n] of [['vision.why', 2], ['vision.goal', 2], ['vision.check', 2]]) for (let i = 0; i < n; i++) await plan('vesper_set_note', { project: p, slide, step: i, text: 'Noted' });
+  let r = await plan('vesper_pass_selah', { project: p, answer: 'Yes, clear.', strict: true });
+  assert.equal(r.changed.length, 0); assert.match(r.notApplied[0], /strict.*Limits › List what stays out/);
+  r = await plan('vesper_pass_selah', { project: p, answer: 'Yes, clear.' });
+  assert.equal(r.changed.length, 1); assert.match(r.warnings[0], /1 step empty and unticked: Limits › List what stays out/);
+  await plan('vesper_tick', { project: p, slide: 'research.timelimit', step: 0, done: true });
+  const d = await plan('vesper_get_project', { project: p });
+  assert.deepEqual([d.stepsFilled, d.stepsTicked, d.stepsAnswered], ['6/34', '7/34', '7/34']);
+  const nq = await plan('vesper_next_questions', { project: p, limit: 20 });
+  assert.equal(34 - Number(d.stepsAnswered.split('/')[0]) >= nq.next.length, true);
+  assert.ok(!nq.next.some((x) => x.slide === 'research.timelimit'));
+});
+
+await test('enh: overview filters (overdue, dueSoon, workStatus) and sort; summary and agenda', async () => {
+  const area = (await plan('vesper_create_area', { name: 'Agenda area' })).ids[0];
+  const late = (await plan('vesper_create_project', { area, title: 'Late flow', priority: 'P2', due: dayPlus(-3) })).ids[0];
+  const soon = (await plan('vesper_create_task', { area, title: 'Soon task', priority: 'P3', due: dayPlus(2) })).ids[0];
+  const far = (await plan('vesper_create_task', { area, title: 'Far task', due: dayPlus(40) })).ids[0];
+  const urgent = (await plan('vesper_create_task', { area, title: 'Urgent task', priority: 'P1' })).ids[0];
+  const doneLate = (await plan('vesper_create_task', { area, title: 'Done late', due: dayPlus(-5) })).ids[0];
+  await plan('vesper_update_task', { task: doneLate, done: true });
+  assert.deepEqual((await plan('vesper_overview', { area, overdue: true })).map((r) => r.id), [late]);
+  assert.equal((await plan('vesper_overview', { area })).find((r) => r.id === late).overdue, true);
+  assert.deepEqual((await plan('vesper_overview', { area, dueSoon: 7 })).map((r) => r.id), [soon]);
+  assert.deepEqual((await plan('vesper_overview', { area, sort: 'priority' })).map((r) => r.id).slice(0, 3), [urgent, late, soon]);
+  assert.deepEqual((await plan('vesper_overview', { area, sort: 'due', limit: 2 })).map((r) => r.id), [doneLate, late]);
+  assert.equal((await plan('vesper_overview', { area, sort: 'updated', limit: 1 }))[0].id, doneLate);
+  assert.equal((await toolV2('vesper_overview', { sort: 'size' })).isError, true);
+  assert.equal((await toolV2('vesper_overview', { dueSoon: -1 })).isError, true);
+  const sum = await plan('vesper_summary', { area });
+  assert.equal(sum.today, kolkataToday);
+  assert.deepEqual([sum.projects, sum.tasks, sum.overdue, sum.dueNext7Days], [1, 4, 1, 1]);
+  assert.equal(sum.byPriority.P1, 1); assert.equal(sum.byWorkStatus.finished, 1);
+  const ag = await plan('vesper_agenda', { days: 7 });
+  assert.ok(ag.overdue.some((r) => r.id === late)); assert.ok(!ag.overdue.some((r) => r.id === doneLate));
+  assert.ok(ag.dueSoon.some((r) => r.id === soon)); assert.ok(!ag.dueSoon.some((r) => r.id === far));
+  assert.ok(ag.p1Open.some((r) => r.id === urgent));
+  const nextStep = ag.projectNextSteps.find((x) => x.id === late);
+  assert.deepEqual([nextStep.currentStage, nextStep.nextStep.slide, nextStep.nextStep.step], ['Vision', 'vision.why', 0]);
+});
+
+await test('enh: bulk dry run, apply and per-item refusals', async () => {
+  const area = (await plan('vesper_create_area', { name: 'Bulk area' })).ids[0];
+  const other = (await plan('vesper_create_area', { name: 'Bulk other' })).ids[0];
+  const p = (await plan('vesper_create_project', { area, title: 'Bulk flow' })).ids[0];
+  const t1 = (await plan('vesper_create_task', { area, title: 'Bulk one' })).ids[0];
+  const t2 = (await plan('vesper_create_task', { area, title: 'Bulk two' })).ids[0];
+  let r = await plan('vesper_bulk', { ids: [p, t1, t2, 'missing-id'], set: { priority: 'P2', due: '2031-05-06' } });
+  assert.equal(r.dryRun, true); assert.equal(r.changed.length, 3); assert.match(r.notApplied[0], /missing-id: not found/);
+  assert.equal((await plan('vesper_overview', { area })).every((x) => x.priority === null), true, 'dry run saved nothing');
+  r = await plan('vesper_bulk', { ids: [p, t1, t2], set: { priority: 'P2', status: 'parked' }, move: { area: other }, dryRun: false });
+  assert.equal(r.changed.length, 1); assert.match(r.changed[0], /Bulk flow.*priority P2; status parked; moved to Area "Bulk other"/);
+  assert.equal(r.notApplied.length, 2); assert.ok(r.notApplied.every((x) => /cannot be parked/.test(x)));
+  const rows = await plan('vesper_overview', { area: other });
+  assert.deepEqual(rows.map((x) => [x.id, x.priority, x.workStatus]), [[p, 'P2', 'parked']]);
+  assert.equal((await plan('vesper_overview', { area, kind: 'task' })).every((x) => x.priority === null), true, 'refused items untouched');
+  r = await plan('vesper_bulk', { ids: [t1, t2], set: { status: 'discuss', due: null }, move: { project: p }, dryRun: false });
+  assert.equal(r.changed.length, 2);
+  assert.deepEqual((await plan('vesper_get_project', { project: p })).tasks.map((x) => [x.title, x.status]), [['Bulk one', 'discuss'], ['Bulk two', 'discuss']]);
+  assert.match((await plan('vesper_bulk', { ids: [p], move: { inbox: true }, dryRun: false })).notApplied[0], /only to an Area/);
+  assert.equal((await toolV2('vesper_bulk', { ids: [p] })).isError, true);
+});
+
+await test('enh: search finds step notes, slide notes, archived Selah answers and task notes', async () => {
+  const area = (await plan('vesper_create_area', { name: 'Search area' })).ids[0];
+  const p = (await plan('vesper_create_project', { area, title: 'Search flow' })).ids[0];
+  await plan('vesper_set_note', { project: p, slide: 'plan.map', step: 0, text: 'Order the cedar planks from the yard' });
+  await plan('vesper_pass_selah', { project: p, answer: 'Cedar beds, two sentences.' });
+  await plan('vesper_loop_back', { project: p, stage: 'vision' });
+  await plan('vesper_create_task', { area, title: 'Buy screws', note: 'Stainless for the cedar' });
+  const hits = await plan('vesper_search', { query: 'CEDAR', area });
+  assert.deepEqual(hits.map((h) => h.where).sort(), ['Plan › Map › List every action', 'Vision Selah (archived pass1)', 'note'].sort());
+  assert.match(hits.find((h) => h.where === 'note').snippet, /Stainless for the cedar/);
+  assert.deepEqual((await plan('vesper_search', { query: 'cedar yard' })).map((h) => h.id), [p]);
+  assert.deepEqual(await plan('vesper_search', { query: 'nothing-like-this' }), []);
+  assert.equal((await toolV2('vesper_search', { query: '  ' })).isError, true);
+});
+
+await test('enh: history logs connector changes and undo restores the latest', async () => {
+  const area = (await plan('vesper_create_area', { name: 'Undo area' })).ids[0];
+  const p = (await plan('vesper_create_project', { area, title: 'Undo flow', priority: 'P3' })).ids[0];
+  await plan('vesper_set_project', { project: p, priority: 'P1', due: '2032-02-02' });
+  let h = await plan('vesper_history', { limit: 3 });
+  assert.equal(h[0].tool, 'vesper_set_project'); assert.equal(h[0].undoable, true);
+  assert.match(h[0].changed[0], /Updated project details/);
+  assert.equal(h[1].tool, 'vesper_create_project');
+  assert.equal((await toolV2('vesper_undo', {})).isError, true);
+  let r = await plan('vesper_undo', { confirm: true });
+  assert.match(r.changed[0], /Restored project "Undo flow"/);
+  let d = await plan('vesper_get_project', { project: p });
+  assert.deepEqual([d.priority, d.due], ['P3', null]);
+  // Next undo removes the created project.
+  r = await plan('vesper_undo', { confirm: true });
+  assert.match(r.changed[0], /Removed project "Undo flow"/);
+  assert.equal((await toolV2('vesper_get_project', { project: p })).isError, true);
+  // A change that deleted something cannot be undone.
+  const t = (await plan('vesper_create_task', { area, title: 'Undo victim' })).ids[0];
+  await plan('vesper_delete_simple_task', { task: t, confirm: true });
+  assert.equal((await plan('vesper_history', {}))[0].undoable, false);
+  assert.match((await plan('vesper_undo', { confirm: true })).notApplied[0], /cannot be undone/);
+  // Read-only tools and dry runs are not logged.
+  const before = (await plan('vesper_history', { limit: 30 })).length;
+  await plan('vesper_overview', {}); await plan('vesper_bulk', { ids: [area], set: { priority: 'P1' } });
+  assert.equal((await plan('vesper_history', { limit: 30 })).length, before);
+});
+
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);
 process.exit(failed ? 1 : 0);
