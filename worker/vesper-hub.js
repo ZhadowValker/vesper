@@ -1288,7 +1288,7 @@ const ownerEnv = (env) => ({ ...env, RAW: env.VESPER, UID: 'owner', OWNER: true 
 function scopedKV(kv, prefix) {
   return { get: (k, t) => kv.get(prefix + k, t), put: (k, v, options) => kv.put(prefix + k, v, options), delete: (k) => kv.delete(prefix + k) };
 }
-const userEnv = (env, sub) => ({ ...env, RAW: env.VESPER, VESPER: scopedKV(env.VESPER, `u:${sub}:`), UID: sub, OWNER: false });
+const userEnv = (env, sub) => { const kv = scopedKV(env.VESPER, `u:${sub}:`); return { ...env, RAW: env.VESPER, VESPER: vaultKV(env, sub, kv), UID: sub, OWNER: false }; };
 
 async function sha(text) {
   const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
@@ -1425,8 +1425,113 @@ async function driveFileId(env, access, rec) {
   return (data.files && data.files[0] && data.files[0].id) || '';
 }
 
+// ---- Everyone else: their projects live ONLY in their own Google Drive -------------------------
+// A person who is not the owner has no copy of their projects on this server. Their data sits in one
+// file in their hidden Drive app folder; this server keeps only the sign-in session and the key it
+// needs to reach that folder. The server's per-person store is wrapped so the rest of the code does not change.
+class DriveError extends Error {}
+const VAULT_KEYS = new Set(['state', 'settings', 'gevents', 'gcal']);
+const VAULT_TTL = 15000;      // a few seconds of memory so one sync is not five Drive calls
+const vaultCache = new Map();
+
+async function vaultAccess(kv, env, sub) {
+  const e = { ...env, VESPER: kv, UID: sub };
+  const rec = await kv.get('drive', 'json');
+  if (!rec || !rec.refresh) throw new DriveError('Google Drive is not connected. Sign in with Google again and allow the Drive permission.');
+  const access = await driveToken(e);
+  if (!access) throw new DriveError('Google no longer lets Vesper reach your Drive. Sign in with Google again.');
+  return { e, rec, access };
+}
+
+async function vaultLoad(kv, env, sub, { fresh = false } = {}) {
+  const hit = vaultCache.get(sub);
+  if (!fresh && hit && Date.now() - hit.at < VAULT_TTL) return hit;
+  const { e, rec, access } = await vaultAccess(kv, env, sub);
+  const id = await driveFileId(e, access, rec);
+  let doc = {}, legacy = false;
+  if (id) {
+    const res = await fetch(`${DRIVE}/files/${id}?alt=media`, { headers: { Authorization: 'Bearer ' + access } });
+    if (!res.ok) throw new DriveError('Could not read your copy in Google Drive. Try again in a moment.');
+    const data = await res.json().catch(() => null);
+    if (!data || typeof data !== 'object') throw new DriveError('The copy in your Google Drive could not be read, so Vesper did not change it.');
+    doc = data;
+  } else {
+    // First time on Drive: bring across anything an earlier version kept on this server, then it is removed.
+    for (const k of VAULT_KEYS) {
+      const v = await kv.get(k, 'json');
+      if (v == null) continue;
+      legacy = true;
+      if (k === 'state') doc = { ...doc, ...v }; else if (k === 'settings') doc.settings = v; else doc._x = { ...(doc._x || {}), [k]: v };
+    }
+  }
+  const entry = { doc, id, rec, at: Date.now(), legacy };
+  vaultCache.set(sub, entry);
+  if (vaultCache.size > 200) { for (const [k, v] of vaultCache) if (Date.now() - v.at > VAULT_TTL) vaultCache.delete(k); }
+  return entry;
+}
+
+async function vaultSave(kv, env, sub, entry) {
+  const { e, rec, access } = await vaultAccess(kv, env, sub);
+  const boundary = 'vesper' + gRand();
+  const meta = entry.id ? { name: DRIVE_FILE } : { name: DRIVE_FILE, parents: ['appDataFolder'] };
+  const body = `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(entry.doc)}\r\n--${boundary}--`;
+  const res = await fetch(entry.id ? `${DRIVE_UP}/files/${entry.id}?uploadType=multipart` : `${DRIVE_UP}/files?uploadType=multipart`, { method: entry.id ? 'PATCH' : 'POST', headers: { Authorization: 'Bearer ' + access, 'Content-Type': `multipart/related; boundary=${boundary}` }, body });
+  const file = await res.json().catch(() => ({}));
+  if (!res.ok) { vaultCache.delete(sub); throw new DriveError('Could not save to your Google Drive. Nothing was kept on this server.'); }
+  entry.id = file.id || entry.id; entry.at = Date.now();
+  if (entry.id !== rec.fileId) await kv.put('drive', JSON.stringify({ ...rec, fileId: entry.id }));
+  if (entry.legacy) { entry.legacy = false; for (const k of VAULT_KEYS) await kv.delete(k); }   // now only in Drive
+  vaultCache.set(sub, entry);
+}
+
+function vaultKV(env, sub, kv) {
+  const view = (doc, k) => {
+    if (k === 'settings') return doc.settings;
+    if (k === 'gevents' || k === 'gcal') return doc._x && doc._x[k];
+    const { settings, _x, ...state } = doc;
+    return Object.keys(state).length ? state : undefined;
+  };
+  let tail = Promise.resolve();   // one change at a time per person
+  const change = (fn) => { const run = tail.then(fn); tail = run.catch(() => {}); return run; };
+  return {
+    async get(k, type) {
+      if (!VAULT_KEYS.has(k)) return kv.get(k, type);
+      const v = view((await vaultLoad(kv, env, sub)).doc, k);
+      if (v == null) return null;
+      return type === 'json' ? JSON.parse(JSON.stringify(v)) : JSON.stringify(v);
+    },
+    put(k, v, options) {
+      if (!VAULT_KEYS.has(k)) {
+        if (k.startsWith('backup:') || k === 'migration:v1') return Promise.resolve();   // Drive keeps its own history
+        return kv.put(k, v, options);
+      }
+      return change(async () => {
+        const entry = await vaultLoad(kv, env, sub, { fresh: true });
+        const val = typeof v === 'string' ? JSON.parse(v) : v;
+        if (k === 'state') { const { settings, _x } = entry.doc; entry.doc = { ...val, ...(settings ? { settings } : {}), ...(_x ? { _x } : {}) }; }
+        else if (k === 'settings') entry.doc = { ...entry.doc, settings: val };
+        else entry.doc = { ...entry.doc, _x: { ...(entry.doc._x || {}), [k]: val } };
+        await vaultSave(kv, env, sub, entry);
+      });
+    },
+    delete(k) {
+      if (!VAULT_KEYS.has(k)) return kv.delete(k);
+      return change(async () => {
+        const entry = await vaultLoad(kv, env, sub, { fresh: true });
+        const doc = { ...entry.doc };
+        if (k === 'settings') delete doc.settings;
+        else if (k === 'gevents' || k === 'gcal') { const x = { ...(doc._x || {}) }; if (!(k in x)) return; delete x[k]; doc._x = x; }
+        else for (const f of Object.keys(doc)) if (f !== 'settings' && f !== '_x') delete doc[f];
+        entry.doc = doc;
+        await vaultSave(kv, env, sub, entry);
+      });
+    },
+  };
+}
+
 // Saves a copy at most every five minutes. Never stops a sync if Google is slow or says no.
 async function driveBackup(env, state, { force = false } = {}) {
+  if (!env.OWNER) return true;   // everyone else's projects already live in their Drive: nothing separate to back up
   try {
     const rec = await env.VESPER.get('drive', 'json');
     if (!rec || !rec.refresh) return false;
@@ -1934,7 +2039,9 @@ async function accountRoutes(request, ctx, origin, path) {
     if (lk) await env.RAW.delete('mcp:' + lk.hash);
     await driveDelete(env);
     await gDisconnect(env);
-    for (const k of ['state', 'google', 'gcal', 'gevents', 'drive', 'settings', 'mcplink']) await env.VESPER.delete(k);
+    for (const k of ['google', 'drive', 'mcplink']) await env.VESPER.delete(k);
+    vaultCache.delete(env.UID);
+    for (const k of ['state', 'gcal', 'gevents', 'settings']) await env.RAW.delete(`u:${env.UID}:${k}`);   // anything an older version kept here
     await env.RAW.delete('user:' + env.UID);
     await env.RAW.put('usercount', String(Math.max(0, (Number(await env.RAW.get('usercount')) || 1) - 1)));
     if (ctx.sessKey) await env.RAW.delete(ctx.sessKey);
@@ -2008,9 +2115,14 @@ export default {
     const ctx = await who(env, bearer(request));
     if (!ctx) return json(401, { error: 'bad token' }, origin);
 
-    if (path === '/sync') return sync(request, ctx.env, origin);
-    if (path.startsWith('/google/') || path === '/calendar/event') return googleRoutes(request, ctx.env, origin, path);
-    if (path === '/me' || path.startsWith('/me/') || path === '/auth/logout') return accountRoutes(request, ctx, origin, path);
+    try {
+      if (path === '/sync') return await sync(request, ctx.env, origin);
+      if (path.startsWith('/google/') || path === '/calendar/event') return await googleRoutes(request, ctx.env, origin, path);
+      if (path === '/me' || path.startsWith('/me/') || path === '/auth/logout') return await accountRoutes(request, ctx, origin, path);
+    } catch (e) {
+      if (e instanceof DriveError) return json(409, { error: e.message, code: 'drive' }, origin);
+      throw e;
+    }
     if (request.method === 'POST' && (path === '/v1/chat/completions' || path === '/chat/completions')) return aiProxy(request, ctx.env, origin);
     return json(404, { error: 'not found' }, origin);
   },

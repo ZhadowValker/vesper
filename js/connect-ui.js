@@ -84,7 +84,7 @@ export function syncDialog({ onChange } = {}) {
   const { dlg, close } = open(`<form>
     <h2>${google ? 'Your account' : 'Sign in'}</h2>
     ${google
-      ? `<p class="ai-note">Signed in as <b>${esc(cfg.email)}</b>. Your projects sync across devices and a copy is kept in your own Google Drive.</p>`
+      ? `<p class="ai-note">Signed in as <b>${esc(cfg.email)}</b>. Your projects sync across devices and are kept in your own Google Drive.</p>`
       : '<p class="ai-note muted">Sign in with Google to keep your projects on every device, with a copy in your own Google Drive. Or use a hub token (advanced).</p>'}
     ${google ? '' : '<button type="button" class="btn" data-act="google">Continue with Google</button>'}
     <p class="ai-status" data-kind="${syncStatus().state === 'error' ? 'bad' : ''}" role="status">${esc(when(syncStatus()))}</p>

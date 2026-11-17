@@ -126,7 +126,11 @@ await test('ai proxy needs key and checks models', async () => {
 
 // ---- Google Calendar (Google is faked) ----
 const gcalls = [];
-const drive = { id: '', data: '', uploads: 0, deleted: false };
+// Each person has their own fake Drive, found by their access token (dacc:<sub> / dacc2:<sub>).
+const drives = new Map();
+const driveOf = (sub) => { if (!drives.has(sub)) drives.set(sub, { id: '', data: '', uploads: 0, deleted: false }); return drives.get(sub); };
+const drive = new Proxy({}, { get: (_, k) => driveOf('sub-ann')[k], set: (_, k, v) => { driveOf('sub-ann')[k] = v; return true; } });
+const subOf = (init) => { const h = init && init.headers; const a = (h && (h.Authorization || h.authorization)) || ''; const m = /Bearer dacc2?:(.+)$/.exec(a); return m ? m[1] : 'owner-drive'; };
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const idToken = (email, sub, aud = 'cid') => `${b64({ alg: 'RS256' })}.${b64({ aud, sub, email, email_verified: true })}.sig`;
 const realFetch = globalThis.fetch;
@@ -136,21 +140,22 @@ globalThis.fetch = async (url, init = {}) => {
   const ok = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json' } });
   if (url === 'https://oauth2.googleapis.com/token') {
     const p = new URLSearchParams(init.body);
-    if (p.get('grant_type') === 'authorization_code' && p.get('code').startsWith('login:')) { const [, email, sub, aud] = p.get('code').split(':'); return ok({ access_token: 'dacc', refresh_token: 'dref', expires_in: 3600, id_token: idToken(email, sub, aud || 'cid') }); }
+    if (p.get('grant_type') === 'authorization_code' && p.get('code').startsWith('login:')) { const [, email, sub, aud] = p.get('code').split(':'); return ok({ access_token: 'dacc:' + sub, refresh_token: 'dref:' + sub, expires_in: 3600, id_token: idToken(email, sub, aud || 'cid') }); }
     if (p.get('grant_type') === 'authorization_code') return p.get('code') === 'goodcode' ? ok({ access_token: 'acc1', refresh_token: 'ref1', expires_in: 3600 }) : ok({ error: 'invalid_grant' }, 400);
-    if (p.get('refresh_token') === 'dref') return ok({ access_token: 'dacc2', expires_in: 3600 });
+    if (String(p.get('refresh_token')).startsWith('dref:')) return ok({ access_token: 'dacc2:' + String(p.get('refresh_token')).slice(5), expires_in: 3600 });
     return p.get('refresh_token') === 'ref1' ? ok({ access_token: 'acc2', expires_in: 3600 }) : ok({ error: 'invalid_grant' }, 400);
   }
   if (url.startsWith('https://oauth2.googleapis.com/revoke')) return ok({});
-  if (url.startsWith('https://www.googleapis.com/drive/v3/files?')) return ok({ files: drive.id ? [{ id: drive.id }] : [] });
+  if (url.startsWith('https://www.googleapis.com/drive/v3/files?')) { const d = driveOf(subOf(init)); return ok({ files: d.id ? [{ id: d.id }] : [] }); }
   if (url.startsWith('https://www.googleapis.com/upload/drive/v3/files')) {
-    drive.uploads++;
+    const d = driveOf(subOf(init));
+    d.uploads++;
     const json = String(init.body).split('\r\n').filter((l) => l.startsWith('{')).pop();
-    drive.data = json; drive.id = drive.id || 'drivefile1';
-    return ok({ id: drive.id });
+    d.data = json; d.id = d.id || 'drivefile-' + subOf(init);
+    return ok({ id: d.id });
   }
-  if (/^https:\/\/www\.googleapis\.com\/drive\/v3\/files\/[^?]+\?alt=media$/.test(url)) return drive.data ? new Response(drive.data, { status: 200 }) : ok({}, 404);
-  if (/^https:\/\/www\.googleapis\.com\/drive\/v3\/files\/[^?]+$/.test(url) && init.method === 'DELETE') { drive.id = ''; drive.data = ''; drive.deleted = true; return new Response(null, { status: 204 }); }
+  if (/^https:\/\/www\.googleapis\.com\/drive\/v3\/files\/[^?]+\?alt=media$/.test(url)) { const d = driveOf(subOf(init)); return d.data ? new Response(d.data, { status: 200 }) : ok({}, 404); }
+  if (/^https:\/\/www\.googleapis\.com\/drive\/v3\/files\/[^?]+$/.test(url) && init.method === 'DELETE') { const d = driveOf(subOf(init)); d.id = ''; d.data = ''; d.deleted = true; return new Response(null, { status: 204 }); }
   if (url.startsWith('https://www.googleapis.com/calendar/v3/users/me/calendarList')) return ok({ items: [{ id: 'me@x.com', summary: 'Diet Schedule', primary: true }, { id: 'abc123@group.calendar.google.com', summary: 'Team' }] });
   if (url === 'https://www.googleapis.com/calendar/v3/calendars') return ok({ id: 'newcal@group.calendar.google.com', summary: JSON.parse(init.body).summary });
   if (/^https:\/\/www\.googleapis\.com\/calendar\/v3\/calendars\/[^/]+\/events$/.test(url)) return ok({ id: 'ev' + gcalls.length, htmlLink: 'https://calendar.google.com/event?eid=x' });
@@ -348,22 +353,42 @@ await test('login: calendar connect works per person', async () => {
   assert.ok(gcalls.some((c) => c.url.includes('showHidden=true')));
 });
 
-await test('drive: copy is saved to the person\'s Drive, at most every five minutes, and can be restored', async () => {
-  assert.equal(drive.uploads, 1);   // Ann's first sync already saved a copy
+await test('drive: a person\'s projects live only in their own Drive, never in the hub store', async () => {
   assert.deepEqual(JSON.parse(drive.data).areas.map((x) => x.name), ['Ann project']);
+  assert.ok(![...kv.keys()].some((k) => /^u:sub-ann:(state|settings|gevents|gcal)$/.test(k)), 'no project data under the person\'s server keys');
+  assert.ok(![...kv.values()].some((v) => String(v).includes('Ann project')), 'no project name anywhere on the server');
   await call('/sync', { method: 'PUT', headers: as(ann.token), body: { state: { projects: [project('pa', 'Ann project'), project('pb', 'Second')], decks: [], deleted: {} } } });
-  assert.equal(drive.uploads, 1);   // too soon, not saved again
-  const forced = await call('/me/backup', { method: 'POST', headers: as(ann.token) });
-  assert.equal(forced.status, 200);
-  assert.equal(drive.uploads, 2);
   assert.deepEqual(JSON.parse(drive.data).areas.map((x) => x.name).sort(), ['Ann project', 'Second']);
-  // the hub copy is replaced by an older one, then restored from Drive
-  const saved = drive.data;
-  await call('/sync', { method: 'PUT', headers: as(ann.token), body: { state: { projects: [], decks: [], deleted: { pa: 1, pb: 1 } } } });
+  assert.ok(![...kv.values()].some((v) => String(v).includes('Second')));
+  assert.equal((await call('/me/backup', { method: 'POST', headers: as(ann.token) })).status, 200);
   const r = await (await call('/me/restore', { method: 'POST', headers: as(ann.token) })).json();
   assert.equal(r.state.areas.length, 2);
-  assert.equal(drive.data, saved);
   assert.equal((await call('/me/restore', { method: 'POST', headers: app })).status, 400);   // the owner token has no Drive link
+});
+
+await test('drive: nobody else\'s Drive is touched, and a person without Drive access gets a clear answer, not a server copy', async () => {
+  assert.ok(!driveOf('sub-bob').data.includes('Ann project'));
+  const t = 'no-drive-token';
+  const h = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t))).toString('hex');
+  kv.set(`sess:${h}`, JSON.stringify({ sub: 'nodrive', email: 'nd@x.com', owner: false, exp: Date.now() + 60000 }));
+  const r = await call('/sync', { method: 'PUT', headers: as(t), body: { state: { projects: [project('pn', 'Nodrive project')], decks: [], deleted: {} } } });
+  assert.equal(r.status, 409);
+  assert.equal((await r.json()).code, 'drive');
+  assert.ok(![...kv.values()].some((v) => String(v).includes('Nodrive project')), 'nothing was kept on the server');
+});
+
+await test('drive: data an older version kept on the server moves to Drive and is removed from the server', async () => {
+  const t = 'legacy-token';
+  const h = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t))).toString('hex');
+  kv.set(`sess:${h}`, JSON.stringify({ sub: 'legacy', email: 'lg@x.com', owner: false, exp: Date.now() + 60000 }));
+  kv.set('u:legacy:drive', JSON.stringify({ refresh: 'dref:legacy' }));
+  kv.set('u:legacy:state', JSON.stringify({ version: 2, areas: [{ id: 'la', name: 'Old on server', created: 1, updated: 1 }], projects: [], tasks: [], deleted: {} }));
+  const r = await call('/sync', { headers: as(t) });
+  assert.equal(r.status, 200);
+  assert.deepEqual((await r.json()).state.projects.map((x) => x.name), ['Old on server']);
+  await call('/sync', { method: 'PUT', headers: as(t), body: { state: { projects: [project('lb', 'Another')], decks: [], deleted: {} } } });
+  assert.ok(JSON.parse(driveOf('legacy').data).areas.some((x) => x.name === 'Old on server'));
+  assert.ok(!kv.has('u:legacy:state'), 'removed from the server once safe in Drive');
 });
 
 await test('login: sign out ends the session', async () => {
@@ -466,6 +491,7 @@ await test('login: not set up means a clear message', async () => {
   env.GOOGLE_CLIENT_ID = saved;
 });
 
+const mockedFetch = globalThis.fetch;
 globalThis.fetch = realFetch;
 
 await test('concurrent connector calls retain both new projects', async () => {
@@ -609,10 +635,11 @@ await test('Worker snapshots are daily, immutable, expire in 14 days and isolate
   const token = 'scoped-snapshot-test';
   const hash = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))).toString('hex');
   values.set(`sess:${hash}`, JSON.stringify({ sub: 'backup-user', email: 'test@example.invalid', owner: false, exp: Date.now() + 60000 }));
-  assert.equal((await request('/sync', { state }, token)).status, 200);
-  const scoped = `u:backup-user:${key}`;
-  assert.ok(values.has(scoped));
-  assert.equal(options.get(scoped).expirationTtl, 14 * 86400);
+  values.set('u:backup-user:drive', JSON.stringify({ refresh: 'dref:backup-user' }));
+  globalThis.fetch = mockedFetch;
+  try { assert.equal((await request('/sync', { state }, token)).status, 200); } finally { globalThis.fetch = realFetch; }
+  assert.ok(!values.has(`u:backup-user:${key}`), 'a person\'s snapshots are not kept on the server: their Drive keeps the history');
+  assert.ok(![...values.keys()].some((k) => k === 'u:backup-user:state'));
   assert.equal(values.get(key), first);
 });
 
@@ -947,9 +974,12 @@ await test('tokens: Google users retain their isolated data and cannot administe
   const token = 'google-isolation-fixture';
   const hash = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))).toString('hex');
   kv.set(`sess:${hash}`, JSON.stringify({ sub: 'isolation-fixture', email: 'fixture@example.invalid', owner: false, exp: Date.now() + 60000 }));
+  kv.set('u:isolation-fixture:drive', JSON.stringify({ refresh: 'dref:isolation-fixture' }));
   const response = await call('/me/tokens', { headers: as(token) });
   assert.equal(response.status, 403);
-  const result = await call('/sync', { headers: as(token) });
+  globalThis.fetch = mockedFetch;
+  let result;
+  try { result = await call('/sync', { headers: as(token) }); } finally { globalThis.fetch = realFetch; }
   assert.equal(result.status, 200);
   assert.deepEqual((await result.json()).state.projects, []);
 });
