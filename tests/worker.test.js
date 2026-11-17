@@ -140,7 +140,7 @@ globalThis.fetch = async (url, init = {}) => {
   const ok = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json' } });
   if (url === 'https://oauth2.googleapis.com/token') {
     const p = new URLSearchParams(init.body);
-    if (p.get('grant_type') === 'authorization_code' && p.get('code').startsWith('login:')) { const [, email, sub, aud] = p.get('code').split(':'); return ok({ access_token: 'dacc:' + sub, refresh_token: 'dref:' + sub, expires_in: 3600, id_token: idToken(email, sub, aud || 'cid') }); }
+    if (p.get('grant_type') === 'authorization_code' && p.get('code').startsWith('login:')) { const [, email, sub, aud] = p.get('code').split(':'); return ok({ access_token: 'dacc:' + sub, refresh_token: 'dref:' + sub, expires_in: 3600, id_token: idToken(email, sub, aud || 'cid'), ...(sub === 'sub-me' ? { scope: 'openid email profile' } : {}) }); }   // the owner here unticks Drive on Google's screen
     if (p.get('grant_type') === 'authorization_code') return p.get('code') === 'goodcode' ? ok({ access_token: 'acc1', refresh_token: 'ref1', expires_in: 3600 }) : ok({ error: 'invalid_grant' }, 400);
     if (String(p.get('refresh_token')).startsWith('dref:')) return ok({ access_token: 'dacc2:' + String(p.get('refresh_token')).slice(5), expires_in: 3600 });
     return p.get('refresh_token') === 'ref1' ? ok({ access_token: 'acc2', expires_in: 3600 }) : ok({ error: 'invalid_grant' }, 400);
@@ -389,6 +389,25 @@ await test('drive: data an older version kept on the server moves to Drive and i
   await call('/sync', { method: 'PUT', headers: as(t), body: { state: { projects: [project('lb', 'Another')], decks: [], deleted: {} } } });
   assert.ok(JSON.parse(driveOf('legacy').data).areas.some((x) => x.name === 'Old on server'));
   assert.ok(!kv.has('u:legacy:state'), 'removed from the server once safe in Drive');
+});
+
+await test('owner: once Drive is connected, the owner\'s projects move to Drive and none stay on the server', async () => {
+  const vals = new Map();
+  const disk = { get: async (k, t) => (vals.has(k) ? (t === 'json' ? JSON.parse(vals.get(k)) : vals.get(k)) : null), put: async (k, v) => { vals.set(k, v); }, delete: async (k) => { vals.delete(k); } };
+  const oenv = { APP_TOKEN: 'owner-tok', VESPER: disk, GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'csecret' };
+  const oc = (path, { method = 'GET', body } = {}) => hub.fetch(new Request('https://hub.example' + path, { method, headers: { Authorization: 'Bearer owner-tok', 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }), oenv);
+  // before Drive is connected the owner is still served from the server
+  await oc('/sync', { method: 'PUT', body: { state: { projects: [project('o1', 'Owner first')], decks: [], deleted: {} } } });
+  assert.ok(vals.has('state'));
+  // Google Drive gets connected (a Google sign-in stores the key)
+  vals.set('drive', JSON.stringify({ refresh: 'dref:owner' }));
+  const got = await (await oc('/sync')).json();
+  assert.deepEqual(got.state.projects.map((x) => x.name), ['Owner first']);   // nothing lost on the way
+  await oc('/sync', { method: 'PUT', body: { state: { projects: [project('o1', 'Owner first'), project('o2', 'Owner second')], decks: [], deleted: {} } } });
+  assert.deepEqual(JSON.parse(driveOf('owner').data).areas.map((x) => x.name).sort(), ['Owner first', 'Owner second']);
+  assert.ok(!vals.has('state'), 'the server no longer holds the owner\'s projects');
+  assert.ok(![...vals.values()].some((v) => String(v).includes('Owner first')), 'no project name anywhere on the server');
+  assert.deepEqual((await (await oc('/sync')).json()).state.projects.map((x) => x.name).sort(), ['Owner first', 'Owner second']);
 });
 
 await test('login: sign out ends the session', async () => {

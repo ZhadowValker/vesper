@@ -1122,7 +1122,8 @@ const accessMethods = {
 // Cloudflare KV cannot provide immediate cross-region revocation. A single DO is
 // authoritative for named credentials; Node's single-process store stays local.
 async function accessOperation(env, operation, args = {}) {
-  if (env.VESPER?.dailyBackups) return accessMethods[operation](env.VESPER, args);
+  const store = env.RAW || env.VESPER;   // sign-in keys always live in the server store, never in a person's Drive
+  if (store?.dailyBackups) return accessMethods[operation](store, args);
   if (!env.ACCESS_TOKENS) throw new Error('Named tokens require the ACCESS_TOKENS Durable Object binding. APP_TOKEN and Google sign-in still work.');
   const authority = env.ACCESS_TOKENS.get(env.ACCESS_TOKENS.idFromName('vesper-owner-access'));
   const response = await authority.fetch(new Request(`https://access.internal/${operation}`, {
@@ -1284,7 +1285,7 @@ const gPage = (title, text, env) => new Response(
 
 // ---- Who is asking: the owner (APP_TOKEN) or a person signed in with Google -------------
 // Every person gets their own space: the same code runs on a view of storage that adds a prefix to every key.
-const ownerEnv = (env) => ({ ...env, RAW: env.VESPER, UID: 'owner', OWNER: true });
+const ownerEnv = (env) => ({ ...env, RAW: env.VESPER, VESPER: vaultKV(env, 'owner', env.VESPER, { strict: false }), UID: 'owner', OWNER: true });
 function scopedKV(kv, prefix) {
   return { get: (k, t) => kv.get(prefix + k, t), put: (k, v, options) => kv.put(prefix + k, v, options), delete: (k) => kv.delete(prefix + k) };
 }
@@ -1445,7 +1446,8 @@ async function vaultAccess(kv, env, sub) {
 
 async function vaultLoad(kv, env, sub, { fresh = false } = {}) {
   const hit = vaultCache.get(sub);
-  if (!fresh && hit && Date.now() - hit.at < VAULT_TTL) return hit;
+  const current = (await kv.get('drive', 'json')) || {};
+  if (!fresh && hit && hit.refresh === current.refresh && Date.now() - hit.at < VAULT_TTL) return hit;
   const { e, rec, access } = await vaultAccess(kv, env, sub);
   const id = await driveFileId(e, access, rec);
   let doc = {}, legacy = false;
@@ -1464,7 +1466,7 @@ async function vaultLoad(kv, env, sub, { fresh = false } = {}) {
       if (k === 'state') doc = { ...doc, ...v }; else if (k === 'settings') doc.settings = v; else doc._x = { ...(doc._x || {}), [k]: v };
     }
   }
-  const entry = { doc, id, rec, at: Date.now(), legacy };
+  const entry = { doc, id, rec, refresh: rec.refresh, at: Date.now(), legacy };
   vaultCache.set(sub, entry);
   if (vaultCache.size > 200) { for (const [k, v] of vaultCache) if (Date.now() - v.at > VAULT_TTL) vaultCache.delete(k); }
   return entry;
@@ -1480,32 +1482,42 @@ async function vaultSave(kv, env, sub, entry) {
   if (!res.ok) { vaultCache.delete(sub); throw new DriveError('Could not save to your Google Drive. Nothing was kept on this server.'); }
   entry.id = file.id || entry.id; entry.at = Date.now();
   if (entry.id !== rec.fileId) await kv.put('drive', JSON.stringify({ ...rec, fileId: entry.id }));
-  if (entry.legacy) { entry.legacy = false; for (const k of VAULT_KEYS) await kv.delete(k); }   // now only in Drive
+  if (entry.legacy) {
+    // Now only in Drive: remove what the server kept, including its recent daily snapshots.
+    entry.legacy = false;
+    for (const k of VAULT_KEYS) await kv.delete(k);
+    await kv.delete('migration:v1');
+    for (let d = 0; d <= 15; d++) await kv.delete('backup:' + new Date(Date.now() - d * 86400000).toISOString().slice(0, 10));
+  }
   vaultCache.set(sub, entry);
 }
 
-function vaultKV(env, sub, kv) {
+function vaultKV(env, sub, kv, { strict = true } = {}) {
   const view = (doc, k) => {
     if (k === 'settings') return doc.settings;
     if (k === 'gevents' || k === 'gcal') return doc._x && doc._x[k];
     const { settings, _x, ...state } = doc;
     return Object.keys(state).length ? state : undefined;
   };
+  // The owner keeps working from the server until their Drive is connected (a Google sign-in); after that, Drive only.
+  const on = async () => strict || !!((await kv.get('drive', 'json')) || {}).refresh;
   let tail = Promise.resolve();   // one change at a time per person
   const change = (fn) => { const run = tail.then(fn); tail = run.catch(() => {}); return run; };
-  return {
+  return Object.assign(Object.create(kv), {   // anything else the store offers (transactions, snapshots) passes straight through
+    active: on,
     async get(k, type) {
-      if (!VAULT_KEYS.has(k)) return kv.get(k, type);
+      if (!VAULT_KEYS.has(k) || !(await on())) return kv.get(k, type);
       const v = view((await vaultLoad(kv, env, sub)).doc, k);
       if (v == null) return null;
       return type === 'json' ? JSON.parse(JSON.stringify(v)) : JSON.stringify(v);
     },
     put(k, v, options) {
-      if (!VAULT_KEYS.has(k)) {
-        if (k.startsWith('backup:') || k === 'migration:v1') return Promise.resolve();   // Drive keeps its own history
-        return kv.put(k, v, options);
-      }
       return change(async () => {
+        if (!(await on())) return kv.put(k, v, options);
+        if (!VAULT_KEYS.has(k)) {
+          if (k.startsWith('backup:') || k === 'migration:v1') return undefined;   // Drive keeps its own history
+          return kv.put(k, v, options);
+        }
         const entry = await vaultLoad(kv, env, sub, { fresh: true });
         const val = typeof v === 'string' ? JSON.parse(v) : v;
         if (k === 'state') { const { settings, _x } = entry.doc; entry.doc = { ...val, ...(settings ? { settings } : {}), ...(_x ? { _x } : {}) }; }
@@ -1515,8 +1527,8 @@ function vaultKV(env, sub, kv) {
       });
     },
     delete(k) {
-      if (!VAULT_KEYS.has(k)) return kv.delete(k);
       return change(async () => {
+        if (!VAULT_KEYS.has(k) || !(await on())) return kv.delete(k);
         const entry = await vaultLoad(kv, env, sub, { fresh: true });
         const doc = { ...entry.doc };
         if (k === 'settings') delete doc.settings;
@@ -1526,12 +1538,12 @@ function vaultKV(env, sub, kv) {
         await vaultSave(kv, env, sub, entry);
       });
     },
-  };
+  });
 }
 
 // Saves a copy at most every five minutes. Never stops a sync if Google is slow or says no.
 async function driveBackup(env, state, { force = false } = {}) {
-  if (!env.OWNER) return true;   // everyone else's projects already live in their Drive: nothing separate to back up
+  if (env.VESPER.active && await env.VESPER.active()) return true;   // projects already live in Drive: nothing separate to back up
   try {
     const rec = await env.VESPER.get('drive', 'json');
     if (!rec || !rec.refresh) return false;
