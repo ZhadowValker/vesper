@@ -263,6 +263,29 @@ await test('google: Claude can schedule a task, Selah is only an event', async (
   assert.equal((await tool('vesper_schedule', { task: 'nope', when: '2026-10-30T07:00' })).isError, true);
 });
 
+await test('google: rescheduling without a title keeps a custom event title (bug 5)', async () => {
+  const r1 = txt(await tool('vesper_schedule', { task: 'Build bed', when: '2026-11-20T07:00', title: 'Bed build with Sam' }));
+  assert.equal(r1.scheduled, 'Bed build with Sam');
+  const before = gcalls.length;
+  const r2 = txt(await tool('vesper_schedule', { task: 'Build bed', when: '2026-11-21T08:00' }));
+  assert.equal(r2.moved, true);
+  const patch = gcalls.slice(before).find((c) => c.method === 'PATCH');
+  assert.ok(patch, 'the existing event is moved');
+  const body = JSON.parse(patch.body);
+  assert.equal(Object.hasOwn(body, 'summary'), false, 'no summary sent, so Google keeps the custom title');
+  assert.equal(body.start.dateTime, '2026-11-21T08:00:00');
+  assert.notEqual(r2.scheduled, 'Build bed: Vision, slide 1 of 27');
+  // A new title still renames it.
+  const before2 = gcalls.length;
+  txt(await tool('vesper_schedule', { task: 'Build bed', when: '2026-11-22T08:00', title: 'Renamed block' }));
+  assert.equal(JSON.parse(gcalls.slice(before2).find((c) => c.method === 'PATCH').body).summary, 'Renamed block');
+  // The first schedule of a kind still gets the default title.
+  const before3 = gcalls.length;
+  await tool('vesper_create_task', { project: 'Garden', title: 'Water herbs' });
+  txt(await tool('vesper_schedule', { task: 'Water herbs', when: '2026-11-23T08:00' }));
+  assert.match(JSON.parse(gcalls.slice(before3).find((c) => c.method === 'POST' && c.url.endsWith('/events')).body).summary, /^Water herbs: /);
+});
+
 await test('google: disconnect forgets the sign-in', async () => {
   const r = await (await call('/google/disconnect', { method: 'POST', headers: app })).json();
   assert.equal(r.connected, false);
@@ -1496,6 +1519,113 @@ await test('v2 connector: canonical tools, locations, promotion, aliases, mixed 
   await run('vesper_delete_area', { area: second, confirm: true });
   const framework = await run('vesper_framework', {});
   assert.match(framework.model, /Area.*Project.*Task/); assert.equal(framework.stages.length, 5);
+});
+
+await test('fixes 2026-11-17: set_note can clear, which unblocks demoting a promoted Project (bug 1)', async () => {
+  const run = async (name, args) => { const r = await toolV2(name, args); assert.ok(!r.isError, r.content?.[0]?.text); return txt(r); };
+  const area = (await run('vesper_create_area', { name: 'Clear area' })).ids[0];
+  const t = (await run('vesper_create_task', { title: 'Clear me', area, note: 'Promoted note' })).ids[0];
+  const p = (await run('vesper_promote_task', { task: t })).ids[0];
+  assert.match((await toolV2('vesper_demote_project', { project: p })).content[0].text, /no notes, ticks/);
+  // Empty text without clearing still explains how to clear.
+  const empty = await run('vesper_set_note', { project: p, slide: 'vision.why', step: 0, text: '' });
+  assert.equal(empty.changed.length, 0); assert.match(empty.notApplied[0], /clear: true/);
+  // Empty text with mode replace clears.
+  const cleared = await run('vesper_set_note', { project: p, slide: 'vision.why', step: 0, text: '', mode: 'replace' });
+  assert.deepEqual(cleared.notApplied, []); assert.match(cleared.changed[0], /^Cleared/);
+  assert.equal((await run('vesper_get_project', { project: p })).steps[0].note, '');
+  const demoted = await run('vesper_demote_project', { project: p });
+  assert.deepEqual(demoted.notApplied, []); assert.equal(demoted.changed.length, 1);
+  // clear: true with no text; clearing a filled step also unticks it, unless tick: true.
+  const q = (await run('vesper_create_project', { area, title: 'Clear flag' })).ids[0];
+  await run('vesper_set_note', { project: q, slide: 'vision.goal', step: 0, text: 'A finished bed' });
+  await run('vesper_set_note', { project: q, slide: 'vision.goal', step: 1, text: 'Two lines' });
+  await run('vesper_set_note', { project: q, slide: 'vision.goal', step: 0, clear: true });
+  await run('vesper_set_note', { project: q, slide: 'vision.goal', step: 1, clear: true, tick: true });
+  const steps = (await run('vesper_get_project', { project: q })).steps;
+  assert.deepEqual([steps[2].note, steps[2].ticked, steps[3].note, steps[3].ticked], ['', false, '', true]);
+  const both = await run('vesper_set_note', { project: q, slide: 'vision.goal', step: 0, text: 'x', clear: true });
+  assert.equal(both.changed.length, 0); assert.match(both.notApplied[0], /not both/);
+  const schema = (await rpc('tools/list')).result.tools.find((x) => x.name === 'vesper_set_note').inputSchema;
+  assert.equal(schema.properties.clear.type, 'boolean'); assert.ok(!schema.required.includes('text'));
+});
+
+await test('fixes 2026-11-17: next_questions starts at the current stage, skips ticked steps and finished projects (bug 2)', async () => {
+  const run = async (name, args) => { const r = await toolV2(name, args); assert.ok(!r.isError, r.content?.[0]?.text); return txt(r); };
+  const area = (await run('vesper_create_area', { name: 'Questions area' })).ids[0];
+  const p = (await run('vesper_create_project', { area, title: 'Questions flow' })).ids[0];
+  // A ticked step without a note is not asked.
+  await run('vesper_tick', { project: p, slide: 'vision.why', step: 0, done: true });
+  let nq = await run('vesper_next_questions', { project: p, limit: 1 });
+  assert.equal(nq.currentStage, 'Vision');
+  assert.deepEqual([nq.next[0].slide, nq.next[0].step], ['vision.why', 1]);
+  // After Vision and Research Selahs, questions start in Plan.
+  await run('vesper_pass_selah', { project: p, answer: 'Yes, in two sentences.' });
+  await run('vesper_pass_selah', { project: p, answer: 'Enough to choose.' });
+  nq = await run('vesper_next_questions', { project: p, limit: 20 });
+  assert.equal(nq.currentStage, 'Plan');
+  assert.ok(nq.next.length > 0 && nq.next.every((x) => /^(plan|execute|review)\./.test(x.slide)), JSON.stringify(nq.next.map((x) => x.slide)));
+  assert.equal(nq.next[0].slide, 'plan.map');
+  // A finished project gets no questions.
+  await run('vesper_finish', { project: p, force: true, reason: 'Test early finish.' });
+  nq = await run('vesper_next_questions', { project: p });
+  assert.deepEqual(nq.next, []); assert.match(nq.reminder, /finished/);
+});
+
+await test('fixes 2026-11-17: loop_back archives the un-passed Selah answers (bug 3)', async () => {
+  const run = async (name, args) => { const r = await toolV2(name, args); assert.ok(!r.isError, r.content?.[0]?.text); return txt(r); };
+  const area = (await run('vesper_create_area', { name: 'Loop area' })).ids[0];
+  const p = (await run('vesper_create_project', { area, title: 'Loop flow' })).ids[0];
+  await run('vesper_pass_selah', { project: p, answer: 'Vision answer one.' });
+  await run('vesper_pass_selah', { project: p, answer: 'Research answer one.' });
+  await run('vesper_loop_back', { project: p, stage: 'Research' });
+  let d = await run('vesper_get_project', { project: p });
+  assert.equal(d.slideNotes['vision.selah'], 'Vision answer one.', 'still-passed Selah keeps its answer');
+  assert.equal(d.slideNotes['research.selah'], undefined);
+  assert.deepEqual(d.selahPassed, ['Vision']);
+  assert.equal(d.selahArchive['research.selah#pass1'], 'Research answer one.');
+  await run('vesper_pass_selah', { project: p, answer: 'Research answer two.' });
+  d = await run('vesper_get_project', { project: p });
+  assert.equal(d.slideNotes['research.selah'], 'Research answer two.');
+  assert.equal(d.steps.length, 34);
+});
+
+await test('fixes 2026-11-17: overview stage filter is case-insensitive (bug 4)', async () => {
+  const run = async (name, args) => { const r = await toolV2(name, args); assert.ok(!r.isError, r.content?.[0]?.text); return txt(r); };
+  const area = (await run('vesper_create_area', { name: 'Stage case area' })).ids[0];
+  const p = (await run('vesper_create_project', { area, title: 'Stage case flow' })).ids[0];
+  await run('vesper_set_note', { project: p, slide: 'vision.why', step: 0, text: 'Moves it onto Vision' });
+  for (const stage of ['vision', 'Vision', 'VISION', ' vision ']) {
+    const rows = await run('vesper_overview', { area, stage });
+    assert.deepEqual(rows.map((r) => r.title), ['Stage case flow'], stage);
+  }
+  assert.deepEqual(await run('vesper_overview', { area, stage: 'Plan' }), []);
+  assert.equal((await toolV2('vesper_overview', { stage: 'Nope' })).content[0].text, 'Unknown stage.');
+});
+
+await test('fixes 2026-11-17: get_project tasks hide internal sync fields (bug 6)', async () => {
+  const run = async (name, args) => { const r = await toolV2(name, args); assert.ok(!r.isError, r.content?.[0]?.text); return txt(r); };
+  const area = (await run('vesper_create_area', { name: 'Leak area' })).ids[0];
+  const p = (await run('vesper_create_project', { area, title: 'Leak flow' })).ids[0];
+  const t = (await run('vesper_create_task', { title: 'Leak child', project: p })).ids[0];
+  await run('vesper_update_task', { task: t, note: 'changed so _changed exists' });
+  const d = await run('vesper_get_project', { project: p });
+  assert.equal(d.tasks[0].id, t); assert.equal(d.tasks[0].note, 'changed so _changed exists');
+  assert.ok(d.tasks.every((x) => Object.keys(x).every((k) => !k.startsWith('_'))), JSON.stringify(d.tasks));
+});
+
+await test('fixes 2026-11-17: reorder ids and set_project wording (bug 7)', async () => {
+  const run = async (name, args) => { const r = await toolV2(name, args); assert.ok(!r.isError, r.content?.[0]?.text); return txt(r); };
+  const area = (await run('vesper_create_area', { name: 'Wording area' })).ids[0];
+  const a = (await run('vesper_create_project', { area, title: 'Wording A' })).ids[0];
+  const b = (await run('vesper_create_project', { area, title: 'Wording B' })).ids[0];
+  const r = await run('vesper_reorder', { kind: 'projects', area, order: [b, a] });
+  assert.deepEqual(r.ids, [b, a]);
+  assert.ok(!r.ids.includes(null));
+  const set = await run('vesper_set_project', { project: a, priority: 'P2' });
+  assert.match(set.changed[0], /^Updated project details for "Wording A"/);
+  const missing = await run('vesper_set_project', { project: 'No such project', priority: 'P2' });
+  assert.match(missing.notApplied[0], /^Could not find the project "No such project"/);
 });
 
 console.log(failed ? `${failed} failed` : `${n} worker tests passed`);
