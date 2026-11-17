@@ -3,6 +3,7 @@
 import { store } from './store.js';
 import { getAI, saveAI, aiReady } from './ai/settings.js';
 import { mergeStates, sameState } from './merge.js';
+import { accountId, claimDevice, getDataOwner, setDataOwner, mayUpload } from './data-owner.js';
 
 const KEY = 'vesper.sync';
 let timer = null, running = false, listeners = [];
@@ -29,6 +30,10 @@ const typing = () => { const a = document.activeElement; return !!a && /^(TEXTAR
 export async function syncNow({ force = false } = {}) {
   if (!syncReady() || running) return status;
   const cfg = getSync();
+  // Never send the projects on this device to an account they do not belong to.
+  if (cfg.email && !mayUpload(accountId(cfg.email))) {
+    status = { state: 'error', at: status.at, error: 'The projects on this device belong to another account. Sign in again to continue.' }; emit(); return status;
+  }
   running = true; status = { ...status, state: 'syncing', error: '' }; emit();
   try {
     const local = store.snapshot();
@@ -77,6 +82,8 @@ async function pullSettings() {
 
 export function startSync() {
   document.addEventListener('vesper:ai-saved', pushSettings);
+  // A device that was already signed in before this check existed: it belongs to that account.
+  if (syncReady() && !getDataOwner() && getSync().email) setDataOwner(accountId(getSync().email));
   if (syncReady()) syncNow();
   store.onChange(() => { if (syncReady()) later(8000); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow(); });
@@ -112,8 +119,12 @@ export async function completeSignIn(code) {
   let data = {};
   try { data = await res.json(); } catch (e) { /* no body */ }
   if (!res.ok || !data.token) throw new Error(data.error || 'The sign-in did not finish.');
-  saveSync({ url: location.origin, token: data.token, email: data.email || (data.owner ? 'owner' : '') });
-  return data;
+  const email = data.email || (data.owner ? 'owner' : '');
+  const id = accountId(email);
+  // Decide who the projects on this device belong to before anything can be synced.
+  const claim = claimDevice(store, id);
+  saveSync({ url: location.origin, token: data.token, email });
+  return { ...data, claim, id };
 }
 
 export async function signOut() {
