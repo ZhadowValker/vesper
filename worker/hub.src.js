@@ -403,7 +403,8 @@ async function vaultSave(kv, env, sub, entry) {
   const body = `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(entry.doc)}\r\n--${boundary}--`;
   const res = await fetch(entry.id ? `${DRIVE_UP}/files/${entry.id}?uploadType=multipart` : `${DRIVE_UP}/files?uploadType=multipart`, { method: entry.id ? 'PATCH' : 'POST', headers: { Authorization: 'Bearer ' + access, 'Content-Type': `multipart/related; boundary=${boundary}` }, body });
   const file = await res.json().catch(() => ({}));
-  if (!res.ok) { vaultCache.delete(sub); throw new DriveError('Could not save to your Google Drive. Nothing was kept on this server.'); }
+  // Only an answer that names the saved file counts as saved: the server copy is removed on the strength of it.
+  if (!res.ok || !file.id) { vaultCache.delete(sub); throw new DriveError('Could not save to your Google Drive. Nothing was kept on this server.'); }
   entry.id = file.id || entry.id; entry.at = Date.now();
   if (entry.id !== rec.fileId) await kv.put('drive', JSON.stringify({ ...rec, fileId: entry.id }));
   if (entry.legacy) {

@@ -511,6 +511,21 @@ await test('owner: once Drive is connected, the owner\'s projects move to Drive 
   assert.deepEqual((await (await oc('/sync')).json()).state.projects.map((x) => x.name).sort(), ['Owner first', 'Owner second']);
 });
 
+await test('drive: if Drive does not confirm the save, the server copy is kept and an error is shown', async () => {
+  const t = 'unsure-token';
+  const h = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t))).toString('hex');
+  kv.set(`sess:${h}`, JSON.stringify({ sub: 'unsure', email: 'un@x.com', owner: false, exp: Date.now() + 60000 }));
+  kv.set('u:unsure:drive', JSON.stringify({ refresh: 'dref:unsure' }));
+  kv.set('u:unsure:state', JSON.stringify({ version: 2, areas: [{ id: 'ua', name: 'Keep me', created: 1, updated: 1 }], projects: [], tasks: [], deleted: {} }));
+  const before = globalThis.fetch;
+  globalThis.fetch = async (url, init) => (String(url).includes('/upload/drive/') ? new Response('{}', { status: 200 }) : before(url, init));   // "OK" but no file named
+  try {
+    const r = await call('/sync', { method: 'PUT', headers: as(t), body: { state: { projects: [project('ub', 'New one')], decks: [], deleted: {} } } });
+    assert.equal(r.status, 409);
+  } finally { globalThis.fetch = before; }
+  assert.ok(kv.has('u:unsure:state'), 'the data the server held is still there');
+});
+
 await test('login: sign out ends the session', async () => {
   const x = await finish((await signIn('cy@x.com', 'sub-cy')).back);
   assert.equal((await call('/sync', { headers: as(x.token) })).status, 200);
