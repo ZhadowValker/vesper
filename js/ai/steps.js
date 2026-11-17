@@ -1,6 +1,6 @@
 // The 34 steps in framework order, which are empty, and how far along a task is.
 // Plain functions with no screen code, shared by the interview and the online connector.
-import { SLIDES, isQuick, QUICK_SLIDES } from '../framework.js';
+import { SLIDES, STAGES, isQuick, QUICK_SLIDES, tickKey } from '../framework.js';
 import { QUESTIONS } from './questions.js';
 
 export const stepKey = (slide, i) => `${slide.key}#${i}`;
@@ -23,6 +23,15 @@ export function allSteps(deck) {
 // Steps still to ask, in order. `skipped` is a list of step keys the person passed on.
 export function emptySteps(deck, skipped = []) {
   return allSteps(deck).filter((s) => !filled(deck, s.key) && !skipped.includes(s.key));
+}
+
+// What the connector should ask next: nothing on a finished project, nothing from a stage whose
+// Selah is already passed (so it starts at the current stage), and no step that is already ticked.
+export function nextQuestionSteps(deck) {
+  if (deck.finished) return [];
+  const open = new Set(STAGES.filter((st) => !deck.selah?.[st.id]).map((st) => st.id));
+  return emptySteps(deck).filter((s) => open.has(s.slide.stage.id) &&
+    (s.step === null || !deck.ticks?.[tickKey(s.slide.stage, s.slide.sub, s.step)]));
 }
 
 export function progress(deck) {

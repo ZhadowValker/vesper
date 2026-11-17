@@ -1,5 +1,5 @@
 import { applyActions } from './ai/apply.js';
-import { reorderItems, appendOrder } from './organize.js';
+import { reorderItems, appendOrder, orderedItems } from './organize.js';
 import { setTaskMeta } from './task-meta.js';
 
 export function resolveRecord(list, ref, field = 'title') {
@@ -61,7 +61,7 @@ export function applyModelActions(actions, { db, focusId = null, by = 'ai' } = {
           a.kind === 'tasks' ? (() => { const place = location(a); return db.tasksAt(place.kind, place.id); })() : null;
         if (!list) throw new Error('kind must be areas, projects or tasks.');
         const error = reorderItems(list, a); if (error) throw new Error(error);
-        db.saveItems(list, a.kind); changes.push({ text: `Reordered ${a.kind}` }); continue;
+        db.saveItems(list, a.kind); changes.push({ text: `Reordered ${a.kind}`, ids: orderedItems(list).map((x) => x.id) }); continue;
       } else if (a.type === 'delete_task' || a.type === 'delete_area' || a.type === 'delete_project') {
         if (a.confirm !== true) throw new Error('Deletion needs confirm:true.');
         item = a.type === 'delete_task' ? required(task(a.task), 'Task') : a.type === 'delete_area' ? required(area(a.area), 'Area') : required(project(a.project || a.task), 'Project');

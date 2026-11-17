@@ -1,4 +1,4 @@
-import { finishTask } from '../task-status.js';
+import { finishTask, unpassSelahsFrom } from '../task-status.js';
 import { setTaskMeta, setProjectMeta } from '../task-meta.js';
 import { reorderItems, appendOrder } from '../organize.js';
 // Applies the assistant's actions to task data. It works on any "db" with the same small
@@ -25,6 +25,7 @@ function slideLabel(slide, step) {
 export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
   const changes = [];
   const skipped = [];
+  const warnings = [];
   const touched = new Map();   // deck id -> highest slide index touched
   const made = { projects: {}, decks: {} };
   let focus = focusId;
@@ -101,9 +102,23 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
         continue;
       }
       const text = String(a.text || '').trim().slice(0, MAX_TEXT);
-      if (!text) { skipped.push(`Empty text for ${slide.sub.name}.`); continue; }
       const nk = step === null ? slide.key : `${slide.key}#${step}`;
       const old = (deck.notes[nk] || '').trim();
+      // Clearing: clear: true, or empty text with mode "replace". Clearing a step note also
+      // unticks the step (the mirror of filling it), unless tick: true is passed.
+      if (a.clear === true || (a.mode === 'replace' && !text)) {
+        if (a.clear === true && text) { skipped.push(`Give text or clear: true for ${slide.sub.name}, not both.`); continue; }
+        const tk = step === null ? null : tickKey(slide.stage, slide.sub, step);
+        const untick = tk !== null && a.tick !== true && !!deck.ticks[tk];
+        if (!Object.hasOwn(deck.notes, nk) && !untick) continue;
+        delete deck.notes[nk];
+        if (untick) deck.ticks[tk] = false;
+        db.save(deck);
+        focus = deck.id;
+        changes.push({ text: `Cleared ${slideLabel(slide, step)}`, href: `#/d/${deck.id}/s/${idx}` });
+        continue;
+      }
+      if (!text) { skipped.push(`Empty text for ${slide.sub.name}. To clear a note, pass clear: true (or empty text with mode "replace").`); continue; }
       let next = text;
       if (old) {
         if (a.mode === 'replace') next = text;
@@ -124,6 +139,13 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       if (stage.id !== next.id) { skipped.push(`Pass ${next.name} first, then ${stage.name}.`); continue; }
       const answer = String(a.answer || '').trim().slice(0, MAX_TEXT);
       if (answer.length < 3) { skipped.push(`Passing the ${stage.name} Selah needs the answer to: ${stage.selah}`); continue; }
+      // Selah gating: warn by default about steps with neither a note nor a tick; strict refuses.
+      const open = [];
+      for (const sub of stage.subs) sub.steps.forEach((step, i) => {
+        if (!String(deck.notes?.[`${stage.id}.${sub.id}#${i}`] || '').trim() && !deck.ticks?.[tickKey(stage, sub, i)]) open.push(`${sub.name} › ${step}`);
+      });
+      if (open.length && a.strict === true) { skipped.push(`Not passing the ${stage.name} Selah (strict): ${open.length} step${open.length === 1 ? '' : 's'} empty and unticked: ${open.join('; ')}.`); continue; }
+      if (open.length) warnings.push(`${stage.name} Selah passed with ${open.length} step${open.length === 1 ? '' : 's'} empty and unticked: ${open.join('; ')}.`);
       const key = `${stage.id}.selah`;
       deck.notes[key] = `${answer}${(deck.notes[key] || '').trim() ? '\n' + deck.notes[key].trim() : ''}`;
       deck.selah[stage.id] = true;
@@ -140,7 +162,7 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       const stage = STAGES.find((st) => st.id === norm(a.stage) || norm(st.name) === norm(a.stage));
       if (!stage) { skipped.push(`There is no stage "${a.stage}" to go back to.`); continue; }
       const from = STAGES.indexOf(stage);
-      for (let i = from; i < STAGES.length; i++) { delete deck.selah[STAGES[i].id]; if (deck.selahBy) delete deck.selahBy[STAGES[i].id]; }
+      unpassSelahsFrom(deck, from);
       deck.loops += 1; deck.passes += 1; deck.finished = null;
       deck.slide = firstSlideOf(stage.id);
       db.save(deck);
@@ -173,13 +195,13 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
       changes.push({ text: `Reordered ${a.kind}`, href: project ? `#/p/${project.id}` : '#/' });
     } else if (type === 'set_task') {
       const deck = findTask(a.task);
-      if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
+      if (!deck) { skipped.push(`Could not find the project "${a.task || ''}".`); continue; }
       if (a.mode !== undefined && a.mode !== 'full') { skipped.push('Quick mode was removed.'); continue; }
       const error = Object.hasOwn(a, 'priority') || Object.hasOwn(a, 'due') || Object.hasOwn(a, 'parked') || a.mode === undefined ? setProjectMeta(deck, a) : null;
       if (error) { skipped.push(error); continue; }
       if (a.mode !== undefined) setTaskMode(deck, a.mode);
       db.save(deck);
-      changes.push({ text: `Updated task details for "${deck.title}"`, href: `#/d/${deck.id}` });
+      changes.push({ text: `Updated project details for "${deck.title}"`, href: `#/d/${deck.id}` });
     } else if (type === 'finish' || type === 'reopen') {
       const deck = findTask(a.task);
       if (!deck) { skipped.push(`Could not find the task "${a.task || ''}".`); continue; }
@@ -217,5 +239,5 @@ export function applyActions(actions, { focusId = null, db, by = 'ai' } = {}) {
     deck.reached = Math.max(deck.reached, deck.slide);
     db.save(deck);
   }
-  return { changes, skipped, focus };
+  return { changes, skipped, focus, warnings };
 }

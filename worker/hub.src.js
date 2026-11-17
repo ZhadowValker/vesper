@@ -355,7 +355,7 @@ async function driveFileId(env, access, rec) {
 // file in their hidden Drive app folder; this server keeps only the sign-in session and the key it
 // needs to reach that folder. The server's per-person store is wrapped so the rest of the code does not change.
 class DriveError extends Error {}
-const VAULT_KEYS = new Set(['state', 'settings', 'gevents', 'gcal']);
+const VAULT_KEYS = new Set(['state', 'settings', 'gevents', 'gcal', 'audit']);
 const VAULT_TTL = 15000;      // a few seconds of memory so one sync is not five Drive calls
 const vaultCache = new Map();
 
@@ -421,7 +421,7 @@ async function vaultSave(kv, env, sub, entry) {
 function vaultKV(env, sub, kv, { strict = true } = {}) {
   const view = (doc, k) => {
     if (k === 'settings') return doc.settings;
-    if (k === 'gevents' || k === 'gcal') return doc._x && doc._x[k];
+    if (k === 'gevents' || k === 'gcal' || k === 'audit') return doc._x && doc._x[k];
     const { settings, _x, ...state } = doc;
     return Object.keys(state).length ? state : undefined;
   };
@@ -458,7 +458,7 @@ function vaultKV(env, sub, kv, { strict = true } = {}) {
         const entry = await vaultLoad(kv, env, sub, { fresh: true });
         const doc = { ...entry.doc };
         if (k === 'settings') delete doc.settings;
-        else if (k === 'gevents' || k === 'gcal') { const x = { ...(doc._x || {}) }; if (!(k in x)) return; delete x[k]; doc._x = x; }
+        else if (k === 'gevents' || k === 'gcal' || k === 'audit') { const x = { ...(doc._x || {}) }; if (!(k in x)) return; delete x[k]; doc._x = x; }
         else for (const f of Object.keys(doc)) if (f !== 'settings' && f !== '_x') delete doc[f];
         entry.doc = doc;
         await vaultSave(kv, env, sub, entry);
@@ -544,12 +544,16 @@ function gAddMinutes(local, minutes) {
 }
 
 // Creates the event, or updates it when the same key (task + kind) was scheduled before, so nothing doubles up.
-async function gEvent(env, { key, title, details, start, minutes }) {
+// With no title, a moved event keeps its current title and a new one gets fallbackTitle.
+async function gEvent(env, { key, title, fallbackTitle = 'Vesper', details, start, minutes }) {
   if (!G_LOCAL.test(String(start || ''))) throw new Error('start must look like 2026-10-28T18:00 (local time).');
   const mins = Math.max(5, Math.min(1440, parseInt(minutes, 10) || 30));
   const startAt = start.length === 16 ? start + ':00' : start;
   const tz = gTz(env);
-  const body = JSON.stringify({ summary: String(title || 'Vesper').slice(0, 200), description: String(details || '').slice(0, 4000), start: { dateTime: startAt, timeZone: tz }, end: { dateTime: gAddMinutes(startAt, mins), timeZone: tz } });
+  const given = title ? String(title).slice(0, 200) : '';
+  const fields = { description: String(details || '').slice(0, 4000), start: { dateTime: startAt, timeZone: tz }, end: { dateTime: gAddMinutes(startAt, mins), timeZone: tz } };
+  const newBody = JSON.stringify({ summary: given || String(fallbackTitle || 'Vesper').slice(0, 200), ...fields });
+  const moveBody = given ? newBody : JSON.stringify(fields);
   const access = await gAccessToken(env);
   const head = { Authorization: 'Bearer ' + access, 'Content-Type': 'application/json' };
   const cal = await gCal(env);
@@ -558,15 +562,15 @@ async function gEvent(env, { key, title, details, start, minutes }) {
   let res = null;
   let moved = false;
   if (map[key]) {
-    res = await fetch(`${gApi(cal.id)}/${encodeURIComponent(map[key])}`, { method: 'PATCH', headers: head, body });
+    res = await fetch(`${gApi(cal.id)}/${encodeURIComponent(map[key])}`, { method: 'PATCH', headers: head, body: moveBody });
     if (res.status === 404 || res.status === 410) res = null; else moved = true;
   }
-  if (!res) res = await fetch(gApi(cal.id), { method: 'POST', headers: head, body });
+  if (!res) res = await fetch(gApi(cal.id), { method: 'POST', headers: head, body: newBody });
   const ev = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? 'Google refused the calendar change. Connect Google Calendar again.' : 'Google Calendar could not save the event.');
   map[key] = ev.id;
   await env.VESPER.put('gevents', JSON.stringify(map));
-  return { id: ev.id, link: ev.htmlLink || '', moved };
+  return { id: ev.id, link: ev.htmlLink || '', moved, title: ev.summary || (moved ? given : JSON.parse(newBody).summary) };
 }
 
 async function googleRoutes(request, env, origin, path) {
@@ -639,8 +643,12 @@ function whereIs(d) {
 function taskSummary(state, d) {
   const pr = progress(d);
   const p = state.areas.find((x) => x.id === d.areaId);
-  return { id: d.id, title: d.title, mode: isQuick(d) ? 'quick' : 'full', priority: d.priority || null, due: d.due || null, parked: d.parked === true, project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
+  const sc = stepCounts(d);
+  return { id: d.id, title: d.title, mode: isQuick(d) ? 'quick' : 'full', priority: d.priority || null, due: d.due || null, parked: d.parked === true, workStatus: workStatus(d), project: p ? p.name : '', where: whereIs(d), stepsFilled: `${pr.filled}/${pr.total}`, stepsTicked: `${sc.ticked}/${sc.total}`, stepsAnswered: `${sc.answered}/${sc.total}`, selahPassed: STAGES.filter((s) => d.selah?.[s.id]).map((s) => s.name), finishedEarly: d.finishedEarly || null, ...(taskCheck(d) ? { check: taskCheck(d) } : {}) };
 }
+
+// Tool output never carries internal sync metadata such as _changed.
+const publicItem = (item) => Object.fromEntries(Object.entries(item).filter(([k]) => !k.startsWith('_')));
 
 const obj = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -657,10 +665,10 @@ const LEGACY_TOOLS = [
   { name: 'vesper_rename', description: 'Rename exactly one task or project.', inputSchema: obj({ task: str('Task id or exact title'), project: str('Project id or exact name'), name: str('New name, 1–80 characters') }, ['name']) },
   { name: 'vesper_move_task', description: 'Move a task into another project.', inputSchema: obj({ task: str('Task id or exact title'), project: str('Destination project id or exact name') }, ['task', 'project']) },
   { name: 'vesper_reorder', description: 'Reorder projects or tasks in one project. Provide every id in order, or one item id and a 1-based position.', inputSchema: obj({ kind: { type: 'string', enum: ['projects', 'tasks'] }, project: str('Required for tasks'), order: { type: 'array', items: { type: 'string' } }, item: str('Item id to move'), position: { type: 'integer', minimum: 1 } }, ['kind']) },
-  { name: 'vesper_set_note', description: 'Write a step or slide note. For Quick stages use <stage>.quick and omit step (or use null). Filling a Full step also ticks it. Existing text is kept unless mode is "replace".', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why or vision.quick'), step: { type: ['integer', 'null'], description: 'Full step number. Omit or use null for slide/Quick notes.' }, text: str('The note, in the person\'s words, short'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked' } }, ['task', 'slide', 'text']) },
+  { name: 'vesper_set_note', description: 'Write a step or slide note. For Quick stages use <stage>.quick and omit step (or use null). Filling a Full step also ticks it. Existing text is kept unless mode is "replace".', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why or vision.quick'), step: { type: ['integer', 'null'], description: 'Full step number. Omit or use null for slide/Quick notes.' }, text: str('The note, in the person\'s words, short. Omit (or empty with mode "replace") together with clear to remove the note.'), mode: { type: 'string', enum: ['append', 'replace'] }, tick: { type: 'boolean', description: 'Set false to leave the step unticked. When clearing, a step is unticked unless tick is true.' }, clear: { type: 'boolean', description: 'true to remove the note (and untick the step)' } }, ['task', 'slide']) },
   { name: 'vesper_schedule', description: 'Put a task on the person\'s Google Calendar (once they have connected it in Vesper). Use kind "work" for a work block and "selah" for the pause at the end of a stage. Scheduling the same task and kind again moves the existing event. Scheduling a Selah does not pass it; use vesper_pass_selah for that.', inputSchema: obj({ task: str('Task id or exact title'), when: str('Local start time like 2026-10-28T18:00'), minutes: { type: 'integer', description: 'Length, default 30' }, kind: { type: 'string', enum: ['work', 'selah'] }, title: str('Optional event title') }, ['task', 'when']) },
   { name: 'vesper_tick', description: 'Tick or untick one step.', inputSchema: obj({ task: str('Task id or exact title'), slide: str('Slide key such as vision.why'), step: { type: 'integer' }, done: { type: 'boolean' } }, ['task', 'slide', 'step']) },
-  { name: 'vesper_pass_selah', description: 'Pass the next Selah of a task (stages go in order) and move the task on. Selah is the pause that ends each stage, with one question per stage (see vesper_framework). Give the answer to that question in the person\'s words; it is saved on the Selah slide and the stage is marked "passed by Claude". Only do this when the person has asked you to drive the task forward or you have asked and they agreed.', inputSchema: obj({ task: str('Task id or exact title'), answer: str('The answer to the stage pause question'), stage: str('Optional stage id; must be the next unpassed one') }, ['task', 'answer']) },
+  { name: 'vesper_pass_selah', description: 'Pass the next Selah of a task (stages go in order) and move the task on. Selah is the pause that ends each stage, with one question per stage (see vesper_framework). Give the answer to that question in the person\'s words; it is saved on the Selah slide and the stage is marked "passed by Claude". Only do this when the person has asked you to drive the task forward or you have asked and they agreed.', inputSchema: obj({ task: str('Task id or exact title'), answer: str('The answer to the stage pause question'), stage: str('Optional stage id; must be the next unpassed one'), strict: { type: 'boolean', description: 'true to refuse when the stage has steps with neither a note nor a tick. Default: pass and return warnings listing them.' } }, ['task', 'answer']) },
   { name: 'vesper_loop_back', description: 'Go back to an earlier stage on purpose (the loop in the framework). Clears the Selah passes from that stage on and starts another pass.', inputSchema: obj({ task: str('Task id or exact title'), stage: str('Stage id or name: vision, research, plan, execute or review') }, ['task', 'stage']) },
   { name: 'vesper_finish', description: 'Finish after all five Selahs, or reopen. Early finish requires force true and a short reason.', inputSchema: obj({ task: str('Task id or exact title'), reopen: { type: 'boolean', description: 'true to reopen a finished task' }, force: { type: 'boolean' }, reason: { type: 'string', minLength: 1, maxLength: 240 } }, ['task']) },
   { name: 'vesper_delete', description: 'Delete a task or a whole project with its tasks. Cannot be undone. Ask the person first and only pass confirm true after they say yes.', inputSchema: obj({ task: str('Task id or exact title (to delete one task)'), project: str('Project id or name (to delete a whole project)'), confirm: { type: 'boolean', description: 'Must be true' } }, ['confirm']) },
@@ -675,14 +683,14 @@ const TOOLS = [
     const props = { ...t.inputSchema.properties };
     if (props.task) { props.project = str('Full Vesper Project id or unique title'); props.task = str('Deprecated alias for project'); }
     if (t.name === 'vesper_set_task') { delete props.mode; props.parked = { type: 'boolean', description: 'Mark or unmark this Project as parked' }; }
-    return { ...t, description: t.name === 'vesper_set_note' ? 'Write a Full Project step/slide note. Retained Quick notes are read-only. Filling a step also ticks it; text appends unless mode=replace.' :
-      t.name === 'vesper_next_questions' ? 'Next empty Full Project step questions. Never interviews simple Tasks.' :
+    return { ...t, description: t.name === 'vesper_set_note' ? 'Write or clear a Full Project step/slide note. Retained Quick notes are read-only. Filling a step also ticks it; text appends unless mode=replace. To clear, pass clear:true (or empty text with mode=replace); clearing a step also unticks it unless tick:true.' :
+      t.name === 'vesper_next_questions' ? 'Next empty, unticked Full Project step questions, starting at the current stage (stages whose Selah is passed are skipped). Returns nothing for finished Projects. Never interviews simple Tasks.' :
       `Full Vesper Projects (27 slides, 34 steps). ${t.description.replaceAll('task', 'project')}`,
       inputSchema: obj(props, t.inputSchema.required.filter((k) => k !== 'task' && k !== 'project')) };
   }),
   modelTool('vesper_create_area', 'Create a named Area, a group for Projects and loose Tasks.', { name: str('Area name') }, ['name']),
-  modelTool('vesper_create_project', 'Create a Full Vesper Project in exactly one Area. Projects never nest.', { area: str('Area id/name'), title: str('Project title'), priority: modelPriority, due: modelDue }, ['area', 'title']),
-  modelTool('vesper_create_task', 'Create a SIMPLE Task: title, tick, note and optional metadata. No slides/Selah. No location means Inbox.', { title: str('Task title'), ...modelPlace, priority: modelPriority, due: modelDue, note: str('Short note') }, ['title']),
+  modelTool('vesper_create_project', 'Create a Full Vesper Project in exactly one Area. Projects never nest. Titles hold the name only: never put priority, status, due or \"Done · \" style prefixes in a title; use the priority/due fields and vesper_set_status.', { area: str('Area id/name'), title: str('Project title'), priority: modelPriority, due: modelDue }, ['area', 'title']),
+  modelTool('vesper_create_task', 'Create a SIMPLE Task: title, tick, note and optional metadata. No slides/Selah. No location means Inbox. Titles hold the name only: never put priority, status, due or \"Done · \" style prefixes in a title; use the priority/due fields and vesper_set_status.', { title: str('Task title'), ...modelPlace, priority: modelPriority, due: modelDue, note: str('Short note') }, ['title']),
   modelTool('vesper_update_task', 'Update a simple Task; omitted fields stay unchanged. null clears priority/due.', { task: str('Simple Task id/title'), title: str('Title'), done: { type: 'boolean' }, priority: modelPriority, due: modelDue, note: str('Short note') }, ['task']),
   modelTool('vesper_move_task', 'Move a SIMPLE Task to Inbox (inbox:true), an Area or a Project. Give exactly one destination.', { task: str('Simple Task id/title'), ...modelPlace }, ['task']),
   modelTool('vesper_move_project', 'Move a Full Project into an Area, never another Project.', { project: str('Project id/title'), area: str('Area id/name') }, ['project', 'area']),
@@ -692,11 +700,20 @@ const TOOLS = [
   modelTool('vesper_list_projects', 'DEPRECATED: alias of vesper_list_areas (not a list of Full Projects). Use overview kind=project for Projects.', {}),
   modelTool('vesper_get_project', 'Read all Full Project steps/notes and contained simple Tasks.', { project: str('Project id/title'), task: str('Deprecated project alias') }),
   modelTool('vesper_set_project', 'Set Full Project priority/due or parked flag; null clears priority/due, omitted values stay unchanged.', { project: str('Project id/title'), task: str('Deprecated project alias'), priority: modelPriority, due: modelDue, parked: { type: 'boolean' } }),
-  modelTool('vesper_rename', 'Rename one Area or Full Project. task is a deprecated alias for a Full Project. Use update_task for simple Tasks.', { area: str('Area'), project: str('Project'), task: str('Deprecated Project alias'), name: str('New name') }, ['name']),
+  modelTool('vesper_rename', 'Rename one Area or Full Project. task is a deprecated alias for a Full Project. Use update_task for simple Tasks. Titles hold the name only: never put priority, status, due or \"Done · \" style prefixes in a title; use the priority/due fields and vesper_set_status.', { area: str('Area'), project: str('Project'), task: str('Deprecated Project alias'), name: str('New name') }, ['name']),
   modelTool('vesper_reorder', 'Reorder Areas, Projects in one Area, or simple Tasks in one location. Full order or item plus 1-based position.', { kind: { type: 'string', enum: ['areas', 'projects', 'tasks'] }, ...modelPlace, order: { type: 'array', items: { type: 'string' } }, item: str('Item id'), position: { type: 'integer', minimum: 1 } }, ['kind']),
   modelTool('vesper_delete_area', 'Delete an Area and its Project flows. Simple Tasks move to Inbox. Requires explicit confirmation.', { area: str('Area id/name'), confirm: { type: 'boolean' } }, ['area', 'confirm']),
   modelTool('vesper_delete_simple_task', 'Delete a simple Task after explicit confirmation.', { task: str('Simple Task id/title'), confirm: { type: 'boolean' } }, ['task', 'confirm']),
-  modelTool('vesper_overview', 'One compact JSON line per Full Project or simple Task, including kind. Default limit 25.', { ...modelPlace, kind: { type: 'string', enum: ['project', 'task'] }, query: str('Matches titles and Area names'), stage: str('vision/research/plan/execute/review'), status: { type: 'string', enum: ['active', 'finished', 'not started'] }, priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4', 'none'] }, dueBefore: { type: 'string', format: 'date' }, limit: { type: 'integer', minimum: 1, maximum: 1000, default: 25 } }),
+  modelTool('vesper_overview', 'One compact JSON line per Full Project or simple Task, with kind, stage, priority, due, status (progress: active/finished/not started), workStatus (active/parked/discuss/recurring/finished), parked, overdue and updated. Filters combine. Default limit 25, manual order.', { ...modelPlace, kind: { type: 'string', enum: ['project', 'task'] }, query: str('Matches titles and Area names'), stage: str('vision/research/plan/execute/review (any case)'), status: { type: 'string', enum: ['active', 'finished', 'not started'] }, workStatus: { type: 'string', enum: WORK_STATUSES }, priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4', 'none'] }, dueBefore: { type: 'string', format: 'date' }, overdue: { type: 'boolean', description: 'true: only unfinished items past due; false: exclude them' }, dueSoon: { type: 'integer', minimum: 0, maximum: 365, description: 'Only unfinished items due from today through this many days ahead' }, sort: { type: 'string', enum: ['order', 'priority', 'due', 'updated'] }, limit: { type: 'integer', minimum: 1, maximum: 1000, default: 25 } }),
+  modelTool('vesper_set_stage', 'Move a Full Project\'s current slide WITHOUT passing or clearing any Selah, e.g. to fix a Project whose slide disagrees with its Selahs. With no stage/slide it moves to the first slide of the first stage whose Selah is open. Moving onto a stage whose Selah is passed, or past an open Selah, needs force:true and a reason. To redo a stage use vesper_loop_back instead.', { project: str('Project id/title'), stage: str('vision/research/plan/execute/review or recap (any case)'), slide: str('Exact slide key such as plan.time or plan.selah'), force: { type: 'boolean' }, reason: { type: 'string', minLength: 1, maxLength: 240 } }, ['project']),
+  modelTool('vesper_set_status', 'Set the work status of a Full Project or simple Task: active, parked (Projects only), discuss, recurring or finished (simple Tasks only: marks done; finish Projects with vesper_finish). Use this instead of putting status words in titles.', { project: str('Project id/title'), task: str('Simple Task id/title'), status: { type: 'string', enum: WORK_STATUSES } }, ['status']),
+  modelTool('vesper_migrate_title_prefixes', 'One-time cleanup: find titles starting with Done/Discuss/Recurring/Parked/P1–P4 followed by ·, : or - and turn them into fields (status, done/finished, parked, priority), leaving the plain name. DRY RUN by default: show the plan to the person and only pass apply:true after they agree. A Done Project with open Selahs is reported, not finished.', { apply: { type: 'boolean', description: 'true to save; default false (dry run)' } }),
+  modelTool('vesper_summary', 'Counts only: Projects and Tasks by stage, priority and workStatus, plus overdue and due within 7 days. Optional Area.', { area: str('Area id/name') }),
+  modelTool('vesper_agenda', 'What needs attention today: overdue items, items due within days, open P1 items, and the next step (or Selah question) of each active Project at its current stage.', { days: { type: 'integer', minimum: 0, maximum: 365, default: 7 }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 10 } }),
+  modelTool('vesper_bulk', 'Apply the same change to many Projects/Tasks by id: set priority/due/status and/or move. DRY RUN by default; pass dryRun:false to save. Returns changed and notApplied per item. Projects move only to an Area.', { ids: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 100 }, set: obj({ priority: modelPriority, due: modelDue, status: { type: 'string', enum: WORK_STATUSES } }), move: obj(modelPlace), dryRun: { type: 'boolean', default: true } }, ['ids']),
+  modelTool('vesper_search', 'Full-text search across titles, Project step and slide notes, archived Selah answers and Task notes. Every word must appear. Returns id, kind, where and a snippet.', { query: str('Words to find'), area: str('Area id/name'), limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 } }, ['query']),
+  modelTool('vesper_history', 'Recent changes made through this connector, newest first (time, tool, what changed, whether undo is possible).', { limit: { type: 'integer', minimum: 1, maximum: 30, default: 10 } }),
+  modelTool('vesper_undo', 'Undo the most recent connector change shown by vesper_history (restores the records it touched). Changes that deleted something cannot be undone. Ask the person first; pass confirm:true only after they agree.', { confirm: { type: 'boolean' } }, ['confirm']),
 ];
 
 async function callTool(env, name, a) {
@@ -710,10 +727,13 @@ async function callTool(env, name, a) {
   if (name === 'vesper_list_areas' || name === 'vesper_list_projects') return text(orderedItems(state.areas).map((area) => ({
     id: area.id, name: area.name, projects: db.projectsIn(area.id).length, tasks: db.tasksAt('area', area.id).length,
   })));
+  const today = todayIn(gTz(env));
   if (name === 'vesper_overview') {
-    try { return text('[\n' + modelOverview(state, a).map((row) => JSON.stringify(row)).join(',\n') + '\n]'); }
+    try { return text('[\n' + modelOverview(state, a, { today }).map((row) => JSON.stringify(row)).join(',\n') + '\n]'); }
     catch (e) { return fail(e.message); }
   }
+  const extra = await callExtraTool(env, name, a, { state, db, today, text, fail });
+  if (extra) return extra;
   const actions = {
     vesper_create_area: 'create_area', vesper_create_project: 'create_project', vesper_create_task: 'create_task',
     vesper_update_task: 'update_task', vesper_move_task: 'move_task', vesper_move_project: 'move_project',
@@ -725,7 +745,7 @@ async function callTool(env, name, a) {
     if (name === 'vesper_rename' && a.task && !a.project) { action.project = a.task; delete action.task; }
     const out = applyModelActions([action], { db, by: 'claude' });
     if (out.changes.length) await saveState(env, state);
-    return text({ changed: out.changes.map((c) => c.text), ids: out.changes.map((c) => c.id), notApplied: out.skipped });
+    return text({ changed: out.changes.map((c) => c.text), ids: out.changes.flatMap((c) => c.ids || (c.id ? [c.id] : [])), notApplied: out.skipped });
   }
   const aliases = { vesper_get_project: 'vesper_get_task', vesper_set_project: 'vesper_set_task' };
   const flowName = aliases[name] || name;
@@ -734,10 +754,155 @@ async function callTool(env, name, a) {
   if (!result.isError && p && ['vesper_get_task', 'vesper_finish'].includes(flowName)) {
     const value = JSON.parse(result.content[0].text);
     value.openTasks = db.tasksAt('project', p.id).filter((t) => !t.done).length;
-    if (flowName === 'vesper_get_task') { value.area = db.area(p.areaId)?.name; value.tasks = db.tasksAt('project', p.id); }
+    if (flowName === 'vesper_get_task') { value.area = db.area(p.areaId)?.name; value.tasks = db.tasksAt('project', p.id).map(publicItem); }
     return text(value);
   }
   return result;
+}
+
+// ---- Planning tools: stage moves, status, migration, summary, agenda, bulk, search, history, undo ----
+const READ_ONLY_TOOLS = new Set(['vesper_framework', 'vesper_overview', 'vesper_list_projects', 'vesper_list_areas', 'vesper_get_task', 'vesper_get_project',
+  'vesper_next_questions', 'vesper_summary', 'vesper_agenda', 'vesper_search', 'vesper_history', 'vesper_undo']);
+const AUDIT_MAX = 30;
+const recordKinds = [['area', 'areas'], ['project', 'projects'], ['task', 'tasks']];
+// Compared without key order or sync clocks: a save re-stamps _changed on untouched records.
+const canonical = (v) => v && typeof v === 'object'
+  ? Array.isArray(v) ? `[${v.map(canonical).join(',')}]` : `{${Object.keys(v).filter((k) => k !== '_changed').sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`
+  : JSON.stringify(v ?? null);
+function recordSnapshot(state) {
+  const out = new Map();
+  for (const [kind, list] of recordKinds) for (const x of state[list] || []) out.set(`${kind}:${x.id}`, { c: canonical(x), raw: JSON.stringify(x) });
+  return out;
+}
+async function readAudit(env) { const log = await env.VESPER.get('audit', 'json'); return Array.isArray(log) ? log : []; }
+function auditWrite(env, change) {
+  return stateWrite(env, async () => { const log = change(await readAudit(env)); await env.VESPER.put('audit', JSON.stringify(log.slice(-AUDIT_MAX))); });
+}
+async function recordAudit(env, tool, args, before, result) {
+  const after = recordSnapshot(await loadState(env));
+  const touched = [], deleted = [];
+  for (const key of new Set([...before.keys(), ...after.keys()])) {
+    if (before.get(key)?.c === after.get(key)?.c) continue;
+    const [kind, ...rest] = key.split(':');
+    const id = rest.join(':');
+    if (!after.has(key)) deleted.push({ kind, id });
+    touched.push({ kind, id, record: before.has(key) ? JSON.parse(before.get(key).raw) : null });
+  }
+  if (!touched.length) return;
+  let changed = [];
+  try { changed = (JSON.parse(result.content[0].text).changed || []).slice(0, 20); } catch (e) { /* plain text result */ }
+  const entry = { id: uid(), at: new Date().toISOString(), tool, args: JSON.stringify(args || {}).slice(0, 500), changed, before: touched, deleted };
+  await auditWrite(env, (log) => [...log, entry]);
+}
+
+async function callExtraTool(env, name, a, { state, db, today, text, fail }) {
+  const result = (changed, notApplied = [], more = {}) => text({ changed, notApplied, ...more });
+  const save = async () => { await saveState(env, state); };
+  if (name === 'vesper_summary') return text(summaryCounts(state, { area: a.area, today }));
+  if (name === 'vesper_agenda') return text(agenda(state, { days: a.days, limit: a.limit, today }));
+  if (name === 'vesper_search') { try { return text(searchNotes(state, a)); } catch (e) { return fail(e.message); } }
+  if (name === 'vesper_set_stage') {
+    const p = findTask(state, a.project || a.task);
+    if (!p) return fail(`No Project found for "${a.project || a.task || ''}".`);
+    const r = setStage(p, a);
+    if (r.error) return result([], [r.error]);
+    db.save(p); await save();
+    return result([`Moved "${p.title}" from ${r.from} to ${r.to}${r.forced ? ` (forced: ${String(a.reason).trim()})` : ''}`], [], { taskCheck: taskCheck(p) || null });
+  }
+  if (name === 'vesper_set_status') {
+    if (!!a.project === !!a.task) return fail('Give exactly one project or task.');
+    const item = a.project ? findTask(state, a.project) : resolveRecord(db.tasks(), a.task);
+    if (!item) return fail(`No ${a.project ? 'Project' : 'Task'} found for "${a.project || a.task}".`);
+    const error = setWorkStatus(item, a.project ? 'project' : 'task', a.status);
+    if (error) return result([], [error]);
+    db.save(item); await save();
+    return result([`Set ${a.project ? 'Project' : 'Task'} "${item.title}" to ${workStatus(item)}`]);
+  }
+  if (name === 'vesper_migrate_title_prefixes') {
+    const apply = a.apply === true;
+    const target = apply ? state : normalizeV2(state);
+    const out = migrateTitlePrefixes(apply ? db : makeDb(target));
+    if (apply && out.changed.length) await save();
+    return text({ dryRun: !apply, ...out, ...(apply ? {} : { next: out.changed.length ? 'Show this plan to the person; run again with apply: true only after they agree.' : 'No title prefixes found.' }) });
+  }
+  if (name === 'vesper_bulk') {
+    const dry = a.dryRun !== false;
+    if (!Array.isArray(a.ids) || !a.ids.length || a.ids.length > 100) return fail('ids must list 1–100 Project or Task ids.');
+    const set = a.set && typeof a.set === 'object' ? a.set : {};
+    const meta = Object.fromEntries(['priority', 'due'].filter((k) => Object.hasOwn(set, k)).map((k) => [k, set[k]]));
+    if (!Object.keys(meta).length && set.status === undefined && !a.move) return fail('Give set (priority, due, status) and/or move.');
+    const target = dry ? normalizeV2(state) : state;
+    const bdb = dry ? makeDb(target) : db;
+    const changed = [], notApplied = [];
+    for (const ref of a.ids) {
+      const p = resolveRecord(target.projects, ref);
+      const t = p ? null : resolveRecord(bdb.tasks(), ref);
+      const item = p || t;
+      if (!item) { notApplied.push(`${ref}: not found or ambiguous.`); continue; }
+      const kind = p ? 'project' : 'task';
+      try {
+        // Validate everything first so a refused item is left untouched.
+        if (Object.keys(meta).length) { const e = setTaskMeta({}, meta); if (e) throw new Error(e); }
+        if (set.status !== undefined) { const e = setWorkStatus(JSON.parse(JSON.stringify(item)), kind, set.status); if (e) throw new Error(e); }
+        let dest = null;
+        if (a.move) {
+          if (p) {
+            if (!a.move.area || a.move.project || a.move.inbox) throw new Error('A Project moves only to an Area.');
+            dest = resolveRecord(target.areas, a.move.area, 'name'); if (!dest) throw new Error('Area not found or name is ambiguous.');
+          } else {
+            const n = [!!a.move.inbox, !!a.move.area, !!a.move.project].filter(Boolean).length;
+            if (n !== 1) throw new Error('Choose exactly one of inbox, area or project.');
+            if (a.move.inbox) dest = { kind: 'inbox' };
+            else if (a.move.area) { const x = resolveRecord(target.areas, a.move.area, 'name'); if (!x) throw new Error('Area not found or name is ambiguous.'); dest = { kind: 'area', id: x.id }; }
+            else { const x = resolveRecord(target.projects, a.move.project); if (!x) throw new Error('Project not found or name is ambiguous.'); dest = { kind: 'project', id: x.id }; }
+          }
+        }
+        const did = [];
+        if (Object.keys(meta).length) { setTaskMeta(item, meta); did.push(Object.entries(meta).map(([k, v]) => `${k} ${v ?? 'cleared'}`).join(', ')); }
+        if (set.status !== undefined) { setWorkStatus(item, kind, set.status); did.push(`status ${set.status}`); }
+        if (p && dest) { p.areaId = dest.id; p.order = appendOrder(bdb.projectsIn(dest.id).filter((x) => x.id !== p.id)); did.push(`moved to Area "${dest.name}"`); }
+        bdb.save(item);
+        if (t && dest) { bdb.moveTask(t.id, dest); did.push(`moved to ${dest.kind}`); }
+        changed.push(`${kind} "${item.title}" (${item.id}): ${did.join('; ')}`);
+      } catch (e) { notApplied.push(`${kind} "${item.title}" (${item.id}): ${e.message}`); }
+    }
+    if (!dry && changed.length) await save();
+    return result(changed, notApplied, { dryRun: dry, ...(dry && changed.length ? { next: 'Nothing saved. Run again with dryRun: false to apply.' } : {}) });
+  }
+  if (name === 'vesper_history') {
+    const n = Math.max(1, Math.min(AUDIT_MAX, parseInt(a.limit, 10) || 10));
+    const log = await readAudit(env);
+    return text(log.slice(-n).reverse().map((e, i) => ({ at: e.at, tool: e.tool, args: e.args, changed: e.changed, records: e.before.length,
+      undoable: i === 0 && !e.deleted?.length })));
+  }
+  if (name === 'vesper_undo') {
+    if (a.confirm !== true) return fail('Undo needs confirm: true, after the person has said yes.');
+    const log = await readAudit(env);
+    const entry = log[log.length - 1];
+    if (!entry) return result([], ['Nothing to undo.']);
+    if (entry.deleted?.length) return result([], [`The last change (${entry.tool}) deleted ${entry.deleted.length} record(s) and cannot be undone here. Daily snapshots keep older copies.`]);
+    const lists = { area: state.areas, project: state.projects, task: state.tasks };
+    const changed = [], notApplied = [];
+    const order = { task: 0, project: 1, area: 2 };
+    for (const { kind, id, record } of [...entry.before].sort((x, y) => (x.record === null) - (y.record === null) || order[x.kind] - order[y.kind])) {
+      const cur = lists[kind].find((x) => x.id === id);
+      if (record === null) {
+        if (!cur) continue;
+        if (kind === 'task') db.removeTask(id); else if (kind === 'project') db.removeFlowProject(id); else db.removeArea(id);
+        changed.push(`Removed ${kind} "${cur.title || cur.name}" created by ${entry.tool}`);
+        continue;
+      }
+      if (!cur) { notApplied.push(`${kind} ${id} no longer exists.`); continue; }
+      for (const k of Object.keys(cur)) if (!['_changed', 'updated', 'created', 'id'].includes(k) && !Object.hasOwn(record, k)) delete cur[k];
+      for (const [k, v] of Object.entries(record)) if (!['_changed', 'updated', 'created', 'id'].includes(k)) cur[k] = v;
+      db.save(cur);
+      changed.push(`Restored ${kind} "${cur.title || cur.name}"`);
+    }
+    if (changed.length) await save();
+    await auditWrite(env, (l) => l.filter((e) => e.id !== entry.id));
+    return result(changed, notApplied, { undone: { at: entry.at, tool: entry.tool } });
+  }
+  return null;
 }
 
 async function callLegacyTool(env, name, a) {
@@ -748,7 +913,7 @@ async function callLegacyTool(env, name, a) {
   const run = async (actions) => {
     const out = applyActions(actions, { db, by: 'claude' });
     if (out.changes.length) await saveState(env, state);
-    return text({ changed: out.changes.map((c) => c.text), notApplied: out.skipped });
+    return text({ changed: out.changes.map((c) => c.text), notApplied: out.skipped, ...(out.warnings?.length ? { warnings: out.warnings } : {}) });
   };
 
   if (name === 'vesper_framework') {
@@ -767,12 +932,19 @@ async function callLegacyTool(env, name, a) {
     if (!d) return fail(`No task found for "${a.task}". Use vesper_overview to see the ids.`);
     if (name === 'vesper_next_questions') {
       const n = Math.max(1, Math.min(20, parseInt(a.limit, 10) || 5));
-      return text({ ...taskSummary(state, d), next: emptySteps(d).slice(0, n).map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, question: s.question })), reminder: 'When a stage is filled, ask the person the stage Selah question (or, if they asked you to drive the task, answer it with them and call vesper_pass_selah).' });
+      const summary = taskSummary(state, d);
+      if (d.finished) return text({ ...summary, next: [], reminder: 'This is finished; there is nothing to ask. Reopen it with vesper_finish (reopen: true) or loop back with vesper_loop_back first.' });
+      const open = STAGES.find((st) => !d.selah?.[st.id]);
+      const next = nextQuestionSteps(d).slice(0, n).map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, question: s.question }));
+      return text({ ...summary, currentStage: open ? open.name : null, next, reminder: !open ? 'Every Selah is passed. Finish it with vesper_finish, or loop back with vesper_loop_back.' :
+        next.length ? 'When a stage is filled, ask the person the stage Selah question (or, if they asked you to drive the task, answer it with them and call vesper_pass_selah).' :
+        `${open.name} has no empty unticked steps left. Ask the ${open.name} Selah question: ${open.selah}` });
     }
     return text({
       ...taskSummary(state, d),
       steps: allSteps(d).map((s) => ({ slide: s.slide.key, step: s.step, stepText: s.text, note: d.notes[s.key] || '', ticked: isQuick(d) ? filled(d, s.key) : !!d.ticks[tickKey(s.slide.stage, s.slide.sub, s.step)] })),
       slideNotes: Object.fromEntries(Object.entries(d.notes).filter(([k, v]) => !k.includes('#') && String(v).trim())),
+      ...(() => { const old = Object.entries(d.notes).filter(([k, v]) => /\.selah#pass\d+$/.test(k) && String(v).trim()); return old.length ? { selahArchive: Object.fromEntries(old) } : {}; })(),
     });
   }
   if (name === 'vesper_create_project') return run([{ type: 'create_project', name: a.name }]);
@@ -784,14 +956,14 @@ async function callLegacyTool(env, name, a) {
   if (name === 'vesper_set_note') {
     const d = findTask(state, a.task);
     if (!d) return fail(`No task found for "${a.task}".`);
-    return run([{ type: 'set_note', task: d.id, slide: a.slide, step: a.step, text: a.text, mode: a.mode, tick: a.tick }]);
+    return run([{ type: 'set_note', task: d.id, slide: a.slide, step: a.step, text: a.text, mode: a.mode, tick: a.tick, clear: a.clear }]);
   }
   if (name === 'vesper_tick') {
     const d = findTask(state, a.task);
     if (!d) return fail(`No task found for "${a.task}".`);
     return run([{ type: 'tick', task: d.id, slide: a.slide, step: a.step, done: a.done }]);
   }
-  if (name === 'vesper_pass_selah') return run([{ type: 'pass_selah', task: a.task, answer: a.answer, stage: a.stage }]);
+  if (name === 'vesper_pass_selah') return run([{ type: 'pass_selah', task: a.task, answer: a.answer, stage: a.stage, strict: a.strict }]);
   if (name === 'vesper_loop_back') return run([{ type: 'loop_back', task: a.task, stage: a.stage }]);
   if (name === 'vesper_finish') return run([{ type: a.reopen ? 'reopen' : 'finish', task: a.task, force: a.force, reason: a.reason }]);
   if (name === 'vesper_delete') {
@@ -806,11 +978,13 @@ async function callLegacyTool(env, name, a) {
     const kind = a.kind === 'selah' ? 'selah' : 'work';
     const stage = slideFor(d)?.stage || STAGES[0];
     const base = gBase(env);
-    const title = a.title || (kind === 'selah' ? `Selah: ${d.title} (${stage.name})` : `${d.title}: ${whereIs(d)}`);
+    // No title given: a new event gets the default title, a moved event keeps its current one.
+    const title = typeof a.title === 'string' && a.title.trim() ? a.title.trim() : undefined;
+    const fallbackTitle = kind === 'selah' ? `Selah: ${d.title} (${stage.name})` : `${d.title}: ${whereIs(d)}`;
     const details = `Vesper task "${d.title}".${kind === 'selah' ? ` Pause and ask: ${stage.selah}` : ''}\n${base}/#/d/${d.id}`;
     try {
-      const out = await gEvent(env, { key: `${d.id}:${kind}`, title, details, start: a.when, minutes: a.minutes });
-      return text({ scheduled: title, when: a.when, link: out.link });
+      const out = await gEvent(env, { key: `${d.id}:${kind}`, title, fallbackTitle, details, start: a.when, minutes: a.minutes });
+      return text({ scheduled: out.title || '(existing title kept)', when: a.when, link: out.link, moved: out.moved });
     } catch (e) { return fail(e.message); }
   }
   return fail(`Unknown tool "${name}".`);
@@ -833,7 +1007,14 @@ async function handleRpc(env, msg) {
   if (msg.method === 'tools/call') {
     const p = msg.params || {};
     if (!TOOLS.some((t) => t.name === p.name)) return err(-32602, `Unknown tool ${p.name}`);
-    try { return ok(await callTool(env, p.name, p.arguments || {})); } catch (e) { return ok({ isError: true, content: [{ type: 'text', text: 'Something went wrong in Vesper.' }] }); }
+    try {
+      const args = p.arguments || {};
+      const logged = !READ_ONLY_TOOLS.has(p.name);
+      const before = logged ? recordSnapshot(await loadState(env)) : null;
+      const out = await callTool(env, p.name, args);
+      if (logged && !out.isError) { try { await recordAudit(env, p.name, args, before, out); } catch (e) { /* the change itself succeeded */ } }
+      return ok(out);
+    } catch (e) { return ok({ isError: true, content: [{ type: 'text', text: 'Something went wrong in Vesper.' }] }); }
   }
   if (typeof msg.method === 'string' && msg.method.startsWith('notifications/')) return null;
   return err(-32601, 'Method not found');

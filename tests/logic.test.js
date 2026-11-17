@@ -1378,4 +1378,29 @@ await testAsync('v2 AI actions and exports: create/move/update/promote/demote, f
   run({ type: 'demote_project', project: empty.id }); assert.ok(!store.flowProject(empty.id));
 });
 
+await testAsync('connector helpers: Selah archive on loop back (app path), work status and title prefixes', async () => {
+  const { unpassSelahsFrom } = await import('../js/task-status.js');
+  const { workStatus } = await import('../js/task-meta.js');
+  const { parseTitlePrefixes, setWorkStatus, setStage } = await import('../js/connector-tools.js');
+  const deck = { notes: { 'vision.selah': 'V1', 'research.selah': 'R1', 'plan.selah': 'typed, not passed' }, ticks: {}, selah: { vision: true, research: true }, selahBy: { research: 'claude' }, passes: 2, slide: 12, reached: 12 };
+  unpassSelahsFrom(deck, 1);
+  assert.deepEqual(deck.selah, { vision: true }); assert.deepEqual(deck.selahBy, {});
+  assert.equal(deck.notes['vision.selah'], 'V1'); assert.equal(deck.notes['research.selah'], undefined);
+  assert.equal(deck.notes['research.selah#pass2'], 'R1'); assert.equal(deck.notes['plan.selah'], 'typed, not passed');
+  // The Review slide's loop back uses the same helper.
+  const src = (await import('node:fs')).readFileSync(new URL('../js/views/slide.js', import.meta.url), 'utf8');
+  assert.match(src, /function onLoop[\s\S]*unpassSelahsFrom\(deck, from\)/);
+  assert.equal(workStatus({ finished: 5, parked: true }), 'finished');
+  assert.equal(workStatus({ parked: true, status: 'discuss' }), 'parked');
+  assert.equal(workStatus({ status: 'recurring' }), 'recurring');
+  assert.equal(workStatus({ status: 'bogus' }), 'active');
+  assert.deepEqual(parseTitlePrefixes('P2 · Discuss: Roof - plan'), { title: 'Roof - plan', prefixes: ['p2', 'discuss'] });
+  assert.deepEqual(parseTitlePrefixes('Donegal trip'), { title: 'Donegal trip', prefixes: [] });
+  const item = { parked: true, status: 'discuss' };
+  assert.equal(setWorkStatus(item, 'project', 'active'), null); assert.deepEqual(item, { parked: false });
+  const d2 = { selah: { vision: true }, slide: 1, reached: 1, notes: {}, ticks: {} };
+  assert.match(setStage(d2, { stage: 'vision' }).error, /already passed/);
+  assert.deepEqual(setStage(d2, {}), { from: 'vision.why', to: 'research.questions', forced: false });
+});
+
 console.log(`\n${passed} tests passed`);
