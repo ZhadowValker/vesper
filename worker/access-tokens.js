@@ -80,7 +80,8 @@ const accessMethods = {
 // Cloudflare KV cannot provide immediate cross-region revocation. A single DO is
 // authoritative for named credentials; Node uses the file store's process lock.
 export async function accessOperation(env, operation, args = {}) {
-  if (env.VESPER?.dailyBackups) return accessMethods[operation](env.VESPER, args);
+  const store = env.RAW || env.VESPER;   // sign-in keys always live in the server store, never in a person's Drive
+  if (store?.dailyBackups) return accessMethods[operation](store, args);
   if (!env.ACCESS_TOKENS) throw new Error('Named tokens require the ACCESS_TOKENS Durable Object binding. APP_TOKEN and Google sign-in still work.');
   const authority = env.ACCESS_TOKENS.get(env.ACCESS_TOKENS.idFromName('vesper-owner-access'));
   const response = await authority.fetch(new Request(`https://access.internal/${operation}`, {
